@@ -14,36 +14,47 @@ type EndpointResult = {
   json: string;
 };
 
+type Category = {
+  id: number;
+  name: string;
+};
+
 function App() {
-  
+
   const [results, setResults] = useState<EndpointResult[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
   useEffect(() => {
-    let ignore = false;
+    Promise.all(
+      ENDPOINTS.map((path) =>
+        fetch(`${API_BASE_URL}${path}`)
+          .then(async (res) => ({
+            path,
+            status: res.status,
+            json: await res.text(),
+          }))
+          .catch(
+            (): EndpointResult => ({
+              path,
+              status: "error",
+              json: "Unable to connect to TokTickIT API",
+            })
+          )
+      )
+    ).then(setResults);
+  }, []);
 
-    setResults([]);
-    ENDPOINTS.forEach((path) => {
-      fetch(`${API_BASE_URL}${path}`)
-        .then(async (res) => {
-          const text = await res.text();
-          if (ignore) return;
-          setResults((prev) => [
-            ...prev,
-            { path, status: res.status, json: text },
-          ]);
-        })
-        .catch(() => {
-          if (ignore) return;
-          setResults((prev) => [
-            ...prev,
-            { path, status: "error", json: "Unable to connect to TokTickIT API" },
-          ]);
-        });
-    });
-
-    return () => {
-      ignore = true;
-    };
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/categories`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+        const data: Category[] = await res.json();
+        setCategories(data);
+      })
+      .catch(() => {
+        setCategoriesError("Unable to load categories from TokTickIT API");
+      });
   }, []);
 
   return (
@@ -73,6 +84,34 @@ function App() {
             ))}
           </tbody>
         </table>
+      </section>
+      <section style={{ margin: "1rem" }}>
+        <div className="align-start" style={{ textAlign: "left" }}>
+          <h1>Categories API</h1>
+          <p>
+            The table below shows the current status of the categories endpoint.
+          </p>
+        </div>
+        {categoriesError ? (
+          <p role="alert">{categoriesError}</p>
+        ) : (
+          <table className="table" style={{ textAlign: "left" }}>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((category) => (
+                <tr key={category.id}>
+                  <td>{category.id}</td>
+                  <td>{category.name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
     </>
   );
