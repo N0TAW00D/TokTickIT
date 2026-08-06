@@ -32,11 +32,11 @@ function App() {
             { path, status: res.status, json: text },
           ]);
         })
-        .catch((err: Error) => {
+        .catch(() => {
           if (ignore) return;
           setResults((prev) => [
             ...prev,
-            { path, status: "error", json: err.message },
+            { path, status: "error", json: "Unable to connect to server" },
           ]);
         });
     });
