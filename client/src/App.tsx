@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 
 const ENDPOINTS = [
-    "/", 
-    "/api/health"
+  "/",
+  "/api/health"
 ];
 
 type EndpointResult = {
@@ -20,12 +21,18 @@ type Category = {
 };
 
 function App() {
-
   const [results, setResults] = useState<EndpointResult[]>([]);
+  const [isLoadingResults, setIsLoadingResults] = useState(true);
+  const [resultsError, setResultsError] = useState<string | null>(null);
+
   const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
   useEffect(() => {
+    setIsLoadingResults(true);
+    setResultsError(null);
+
     Promise.all(
       ENDPOINTS.map((path) =>
         fetch(`${API_BASE_URL}${path}`)
@@ -39,21 +46,35 @@ function App() {
               path,
               status: "error",
               json: "Unable to connect to TokTickIT API",
-            })
-          )
-      )
-    ).then(setResults);
+            }),
+          ),
+      ),
+    )
+      .then(setResults)
+      .catch(() => {
+        setResultsError("Unable to load endpoint statuses");
+      })
+      .finally(() => {
+        setIsLoadingResults(false);
+      });
   }, []);
 
   useEffect(() => {
+    setIsLoadingCategories(true);
+    setCategoriesError(null);
+
     fetch(`${API_BASE_URL}/api/categories`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+        if (!res.ok)
+          throw new Error(`Request failed with status ${res.status}`);
         const data: Category[] = await res.json();
         setCategories(data);
       })
       .catch(() => {
         setCategoriesError("Unable to load categories from TokTickIT API");
+      })
+      .finally(() => {
+        setIsLoadingCategories(false);
       });
   }, []);
 
@@ -62,28 +83,32 @@ function App() {
       <section style={{ margin: "1rem" }}>
         <div className="align-start" style={{ textAlign: "left" }}>
           <h1>Backend Status</h1>
-          <p>
-            The table below shows the current status of each endpoint.
-          </p>
+          <p>The table below shows the current status of each endpoint.</p>
         </div>
-        <table className="table" style={{ textAlign: "left" }}>
-          <thead>
-            <tr>
-              <th scope="col">Endpoint</th>
-              <th scope="col">Status</th>
-              <th scope="col">Message</th>
-            </tr>
-          </thead>
-          <tbody>
-            {results.map((result) => (
-              <tr key={result.path}>
-                <td>{result.path}</td>
-                <td>{result.status}</td>
-                <td>{result.json}</td>
+        {isLoadingResults ? (
+          <p role="status">Loading endpoint statuses…</p>
+        ) : resultsError ? (
+          <p role="alert">{resultsError}</p>
+        ) : (
+          <table className="table" style={{ textAlign: "left" }}>
+            <thead>
+              <tr>
+                <th scope="col">Endpoint</th>
+                <th scope="col">Status</th>
+                <th scope="col">Message</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {results.map((result) => (
+                <tr key={result.path}>
+                  <td>{result.path}</td>
+                  <td>{result.status}</td>
+                  <td>{result.json}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
       <section style={{ margin: "1rem" }}>
         <div className="align-start" style={{ textAlign: "left" }}>
@@ -92,7 +117,9 @@ function App() {
             The table below shows the current status of the categories endpoint.
           </p>
         </div>
-        {categoriesError ? (
+        {isLoadingCategories ? (
+          <p role="status">Loading categories…</p>
+        ) : categoriesError ? (
           <p role="alert">{categoriesError}</p>
         ) : (
           <table className="table" style={{ textAlign: "left" }}>
