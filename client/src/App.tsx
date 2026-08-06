@@ -1,122 +1,81 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react";
+import "./App.css";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+
+const ENDPOINTS = [
+    "/", 
+    "/api/health"
+];
+
+type EndpointResult = {
+  path: string;
+  status: number | "error";
+  json: string;
+};
 
 function App() {
-  const [count, setCount] = useState(0)
+  
+  const [results, setResults] = useState<EndpointResult[]>([]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    setResults([]);
+    ENDPOINTS.forEach((path) => {
+      fetch(`${API_BASE_URL}${path}`)
+        .then(async (res) => {
+          const text = await res.text();
+          if (ignore) return;
+          setResults((prev) => [
+            ...prev,
+            { path, status: res.status, json: text },
+          ]);
+        })
+        .catch((err: Error) => {
+          if (ignore) return;
+          setResults((prev) => [
+            ...prev,
+            { path, status: "error", json: err.message },
+          ]);
+        });
+    });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
+      <section style={{ margin: "1rem" }}>
+        <div className="align-start" style={{ textAlign: "left" }}>
+          <h1>Backend Status</h1>
           <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
+            The table below shows the current status of each endpoint.
           </p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
+        <table className="table" style={{ textAlign: "left" }}>
+          <thead>
+            <tr>
+              <th scope="col">Endpoint</th>
+              <th scope="col">Status</th>
+              <th scope="col">Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((result) => (
+              <tr key={result.path}>
+                <td>{result.path}</td>
+                <td>{result.status}</td>
+                <td>{result.json}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
     </>
-  )
+  );
 }
 
-export default App
+export default App;
