@@ -36,7 +36,7 @@ function App() {
           if (ignore) return;
           setResults((prev) => [
             ...prev,
-            { path, status: "error", json: "Unable to connect to server" },
+            { path, status: "error", json: "Unable to connect to TokTickIT API" },
           ]);
         });
     });
