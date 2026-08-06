@@ -10,3 +10,12 @@ describe('GET /', () => {
     expect(res.text).toBe('Hello World!');
   });
 });
+
+describe('GET /api/health', () => {
+  it('responds with status ok and service name', async () => {
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'ok', service: 'TokTickIT API' });
+  });
+});
