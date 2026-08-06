@@ -7,7 +7,7 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 app.get('/api/health', (req: Request, res: Response) => {
-  res.status(200).json({ message: 'Express Server is running!' });
+  res.status(200).json({ status: 'ok', service: 'TokTickIT API' });
 });
 
 export default app;
