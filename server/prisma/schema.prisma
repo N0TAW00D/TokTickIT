@@ -15,5 +15,5 @@ datasource db {
 model Category {
   id    Int    @id @default(autoincrement())
   name  String @unique
-  createAt DateTime @default(now())
+  createdAt DateTime @default(now())
 }
