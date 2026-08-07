@@ -71,7 +71,7 @@ function App() {
         setCategories(data);
       })
       .catch(() => {
-        setCategoriesError("Unable to load categories from TokTickIT API");
+        setCategoriesError("Unable to connect to TokTickIT API");
       })
       .finally(() => {
         setIsLoadingCategories(false);
