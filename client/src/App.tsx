@@ -1,146 +1,73 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./App.css";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-
-const ENDPOINTS = [
-  "/",
-  "/api/health"
-];
-
-type EndpointResult = {
-  path: string;
-  status: number | "error";
-  json: string;
-};
 
 type Category = {
   id: number;
   name: string;
 };
 
+type CheckState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "online"; categories: Category[] }
+  | { phase: "offline" };
+
 function App() {
-  const [results, setResults] = useState<EndpointResult[]>([]);
-  const [isLoadingResults, setIsLoadingResults] = useState(true);
-  const [resultsError, setResultsError] = useState<string | null>(null);
+  const [state, setState] = useState<CheckState>({ phase: "idle" });
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
-  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  async function checkSystem() {
+    setState({ phase: "loading" });
 
-  useEffect(() => {
-    setIsLoadingResults(true);
-    setResultsError(null);
+    try {
+      const healthRes = await fetch(`${API_BASE_URL}/api/health`);
+      if (!healthRes.ok) throw new Error("health check failed");
 
-    Promise.all(
-      ENDPOINTS.map((path) =>
-        fetch(`${API_BASE_URL}${path}`)
-          .then(async (res) => ({
-            path,
-            status: res.status,
-            json: await res.text(),
-          }))
-          .catch(
-            (): EndpointResult => ({
-              path,
-              status: "error",
-              json: "Unable to connect to TokTickIT API",
-            }),
-          ),
-      ),
-    )
-      .then(setResults)
-      .catch(() => {
-        setResultsError("Unable to load endpoint statuses");
-      })
-      .finally(() => {
-        setIsLoadingResults(false);
-      });
-  }, []);
+      const categoriesRes = await fetch(`${API_BASE_URL}/api/categories`);
+      if (!categoriesRes.ok) throw new Error("categories request failed");
+      const categories: Category[] = await categoriesRes.json();
 
-  useEffect(() => {
-    setIsLoadingCategories(true);
-    setCategoriesError(null);
-
-    fetch(`${API_BASE_URL}/api/categories`)
-      .then(async (res) => {
-        if (!res.ok)
-          throw new Error(`Request failed with status ${res.status}`);
-        const data: Category[] = await res.json();
-        setCategories(data);
-      })
-      .catch(() => {
-        setCategoriesError("Unable to connect to TokTickIT API");
-      })
-      .finally(() => {
-        setIsLoadingCategories(false);
-      });
-  }, []);
+      setState({ phase: "online", categories });
+    } catch {
+      setState({ phase: "offline" });
+    }
+  }
 
   return (
-    <>
-      <section style={{ margin: "1rem" }}>
-        <div className="align-start" style={{ textAlign: "left" }}>
-          <h1>Backend Status</h1>
-          <p>The table below shows the current status of each endpoint.</p>
-        </div>
-        {isLoadingResults ? (
-          <p role="status">Loading endpoint statuses…</p>
-        ) : resultsError ? (
-          <p role="alert">{resultsError}</p>
-        ) : (
-          <table className="table" style={{ textAlign: "left" }}>
-            <thead>
-              <tr>
-                <th scope="col">Endpoint</th>
-                <th scope="col">Status</th>
-                <th scope="col">Message</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((result) => (
-                <tr key={result.path}>
-                  <td>{result.path}</td>
-                  <td>{result.status}</td>
-                  <td>{result.json}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-      <section style={{ margin: "1rem" }}>
-        <div className="align-start" style={{ textAlign: "left" }}>
-          <h1>Categories API</h1>
+    <div className="container py-4" style={{ textAlign: "left" }}>
+      <h1>TokTickIT IT Service Desk</h1>
+
+      <button className="btn btn-primary my-3" onClick={checkSystem}>
+        Check System
+      </button>
+
+      {state.phase === "loading" && <p role="status">⏳ Loading…</p>}
+
+      {state.phase === "online" && (
+        <div>
           <p>
-            The table below shows the current status of the categories endpoint.
+            System Status: <strong>Online</strong>
           </p>
+          <p className="mb-1">Supported Request Categories:</p>
+          <ul>
+            {state.categories.map((category) => (
+              <li key={category.id}>{category.name}</li>
+            ))}
+          </ul>
         </div>
-        {isLoadingCategories ? (
-          <p role="status">Loading categories…</p>
-        ) : categoriesError ? (
-          <p role="alert">{categoriesError}</p>
-        ) : (
-          <table className="table" style={{ textAlign: "left" }}>
-            <thead>
-              <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((category) => (
-                <tr key={category.id}>
-                  <td>{category.id}</td>
-                  <td>{category.name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </>
+      )}
+
+      {state.phase === "offline" && (
+        <div role="alert">
+          <p>
+            System Status: <strong>Offline</strong>
+          </p>
+          <p>Unable to connect to TokTickIT API</p>
+        </div>
+      )}
+    </div>
   );
 }
 

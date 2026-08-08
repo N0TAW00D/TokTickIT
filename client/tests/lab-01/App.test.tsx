@@ -1,35 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import App from '../src/App.tsx';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import App from '../../src/App.tsx';
 
 const API_BASE_URL = 'http://localhost:3000';
+const HEALTH_URL = `${API_BASE_URL}/api/health`;
 const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
 
 function jsonResponse(status: number, body: unknown) {
   return Promise.resolve({
     ok: status >= 200 && status < 300,
     status,
-    text: () => Promise.resolve(JSON.stringify(body)),
     json: () => Promise.resolve(body),
   } as Response);
 }
 
-function mockCategories(respond: () => Promise<Response>) {
-  const fetchMock = vi.fn((input: string) =>
-    input === CATEGORIES_URL ? respond() : jsonResponse(200, {}),
-  );
+const SEEDED_CATEGORIES = [
+  { id: 1, name: 'Account and Access' },
+  { id: 2, name: 'Hardware' },
+  { id: 3, name: 'Software' },
+  { id: 4, name: 'Network' },
+];
+
+function mockFetch({
+  health = () => jsonResponse(200, { status: 'ok', service: 'TokTickIT API' }),
+  categories = () => jsonResponse(200, SEEDED_CATEGORIES),
+}: {
+  health?: () => Promise<Response>;
+  categories?: () => Promise<Response>;
+} = {}) {
+  const fetchMock = vi.fn((input: string) => {
+    if (input === HEALTH_URL) return health();
+    if (input === CATEGORIES_URL) return categories();
+    return jsonResponse(404, {});
+  });
 
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
-}
-
-/** Data rows (header row excluded) of the categories table. */
-function categoryRows() {
-  const section = screen
-    .getByRole('heading', { name: 'Categories API' })
-    .closest('section');
-  if (!section) throw new Error('No section for the categories heading');
-  return within(section).getAllByRole('row').slice(1);
 }
 
 afterEach(() => {
@@ -38,76 +44,46 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Category list', () => {
-  it('requests the categories endpoint on mount', async () => {
-    const fetchMock = mockCategories(() => jsonResponse(200, []));
+describe('TokTickIT heading', () => {
+  it('UI-01: TokTickIT heading renders', () => {
+    mockFetch();
 
     render(<App />);
+
+    expect(
+      screen.getByRole('heading', { name: 'TokTickIT IT Service Desk' }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('Check System button', () => {
+  it('UI-02: shows a loading state, then Online status and the four categories', async () => {
+    mockFetch();
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check System' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent(/Loading/i);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(CATEGORIES_URL);
-    });
-  });
-
-  it('shows a loading message until the request settles', () => {
-    mockCategories(() => new Promise<Response>(() => {}));
-
-    render(<App />);
-
-    expect(screen.getByText('Loading categories…')).toBeInTheDocument();
-  });
-
-  it('renders one row per category, with its id and name', async () => {
-    mockCategories(() =>
-      jsonResponse(200, [
-        { id: 1, name: 'Account and Access' },
-        { id: 2, name: 'Hardware' },
-      ]),
-    );
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Loading categories…')).not.toBeInTheDocument();
+      expect(screen.getByText('Online')).toBeInTheDocument();
     });
 
-    const rows = categoryRows();
-    expect(rows).toHaveLength(2);
-    expect(within(rows[0]).getByText('1')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Account and Access')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('2')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Hardware')).toBeInTheDocument();
+    for (const category of SEEDED_CATEGORIES) {
+      expect(screen.getByText(category.name)).toBeInTheDocument();
+    }
   });
 
-  it('renders the table with no rows when the API returns no categories', async () => {
-    mockCategories(() => jsonResponse(200, []));
+  it('UI-03: shows an Offline status and a useful error message when the API is unavailable', async () => {
+    mockFetch({ health: () => Promise.reject(new Error('network down')) });
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.queryByText('Loading categories…')).not.toBeInTheDocument();
-    });
-
-    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
-    expect(categoryRows()).toHaveLength(0);
-  });
-
-  it('shows an alert instead of the table when the request fails', async () => {
-    mockCategories(() => jsonResponse(500, { error: 'boom' }));
-
-    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Check System' }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Unable to load categories from TokTickIT API');
-    expect(screen.queryByRole('columnheader', { name: 'Name' })).not.toBeInTheDocument();
-  });
-
-  it('shows an alert when the request rejects', async () => {
-    mockCategories(() => Promise.reject(new Error('network down')));
-
-    render(<App />);
-
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Unable to load categories from TokTickIT API');
+    expect(alert).toHaveTextContent('Offline');
+    expect(alert).toHaveTextContent('Unable to connect to TokTickIT API');
   });
 });
