@@ -89,7 +89,7 @@ missing/other content type, or a body that is not a JSON object, → `400 MALFOR
 | `410 Gone` | Download of a soft-removed attachment. |
 | `413 Payload Too Large` | Attachment file exceeds 5 MB. |
 | `415 Unsupported Media Type` | Attachment type not in {JPEG, PNG, WEBP, PDF}. |
-| `500 Internal Server Error` | Unexpected failure; generic body only. |
+| `500 Internal Server Error` | Unexpected failure; generic `{ "error": "INTERNAL", "message": … }` body only (§1.3, BR-41). |
 
 `422` is intentionally not used — validation failures are `400`.
 
@@ -417,7 +417,7 @@ Upload one file to an owned ticket.
 | `409` | `ATTACHMENT_LIMIT` | Ticket already has 5 active attachments (BR-23, AC-20). |
 | `413` | `FILE_TOO_LARGE` | > 5 MB (BR-22, AC-19). |
 | `415` | `UNSUPPORTED_TYPE` | Type not allowed / extension–content mismatch (BR-21, AC-18). |
-| `500` | `INTERNAL` | Disk write or unexpected failure; no row written. |
+| `500` | `INTERNAL` | Disk write or unexpected failure. On a post-write failure (e.g. the metadata insert throws) the just-written file is deleted before responding, so no row **and** no file survive (BR-27). |
 
 - **Traceability:** FR-15..FR-19, BR-21..BR-23, BR-27, BR-29, BR-30; AC-18..AC-21.
 

@@ -147,8 +147,10 @@ Every FR is covered by at least one acceptance criterion in §9 and at least one
   page, unknown filter value) produce a `400` with a field-specific message; parameters are not
   silently coerced.
 - **FR-30** The list shows enough information per row/card to identify and open a ticket: Ticket
-  Number, Summary, Category, Related System, Requested Priority, Status, Last Updated, and active
-  attachment count. Each row/card opens Ticket Detail.
+  Number, Ticket Date (created), Summary, Category, Related System, Requested Priority, Status, and
+  Last Updated. The mobile card additionally shows the active attachment count (a paperclip with the
+  number when `> 0`); the desktop table omits it — see `ui-spec.md` §9 for the justification. Each
+  row/card opens Ticket Detail.
 - **FR-31** The screen renders distinct **loading**, **empty** (Requester owns zero tickets),
   **no-results** (filters/search exclude everything), and **failure** (with retry) states, plus a
   **Clear Filters** action and a **Create Ticket** action.
@@ -235,7 +237,9 @@ handout.
   currently active Requester, the client clears the value and routes to the selection screen; a
   short notice explains a previously selected Requester is no longer available when applicable.
 - **BR-11** Changing the Requester discards all Requester-scoped client state (My Tickets results,
-  filters, any open Ticket Detail) and reloads data for the new Requester.
+  filters, sort, pagination) and reloads data for the new Requester. If a Ticket Detail screen is
+  open when the Requester changes, the client navigates away to My Tickets for the new Requester
+  rather than re-fetching the now-foreign ticket (which would return `404`).
 
 ### Ownership
 
@@ -282,10 +286,14 @@ handout.
 - **BR-27** Ticket creation and its attachment uploads are **not** a single atomic transaction. The
   ticket is created first (its own transaction, including atomic Ticket Number allocation); each
   attachment is uploaded in a separate request. Compensation strategy: a partially-attached ticket
-  is valid; the UI surfaces failed uploads and offers retry. No orphaned files: an attachment row is
-  written only after its file is safely stored, and a failed file write writes no row and returns
-  `500`. An upload that fails from Ticket Detail (existing ticket) leaves the ticket and its other
-  attachments untouched, surfaces the error, and allows retry.
+  is valid; the UI surfaces failed uploads and offers retry. Per-upload atomicity: the file is
+  written to disk first, then the metadata row is inserted; **if the row insert fails the just-written
+  file is deleted (best-effort) before returning `500`**, so a failed upload leaves neither a row nor
+  a file. A file-write failure inserts no row and returns `500`. Any file that still leaks despite the
+  cleanup is unreferenced and unreachable (not served, not in any row) and is acceptable in Lab 2;
+  periodic sweep of unreferenced files is a Lab 3+ concern. An upload that fails from Ticket Detail
+  (existing ticket) leaves the ticket and its other attachments untouched, surfaces the error, and
+  allows retry.
 - **BR-28** Ticket Number allocation uses a per-year counter row incremented atomically inside the
   ticket-creation transaction; the `ticketNumber` unique constraint is the backstop and creation is
   retried up to 3 times on a unique-violation.
@@ -318,9 +326,10 @@ handout.
 
 ### Safe errors
 
-- **BR-41** An unexpected server error returns `500` with a generic body
-  (`{ "error": "Internal Server Error" }`) — never a stack trace, SQL text, file path, or raw
-  exception message. Details are logged server-side only.
+- **BR-41** An unexpected server error returns `500` with the standard error body
+  (`api-spec.md` §1.3): `{ "error": "INTERNAL", "message": "An unexpected error occurred." }` — a
+  stable machine code plus safe generic text, never a stack trace, SQL text, file path, or raw
+  exception message. `fields` is omitted. Details are logged server-side only.
 - **BR-42** No endpoint discloses whether a resource exists to a Requester who does not own it
   (reinforces BR-14): the not-owned and not-found responses are byte-identical.
 
@@ -509,7 +518,7 @@ retry protects against the rare concurrent-allocation race.
 |---|---|---|
 | My Tickets default list | `WHERE requesterId=? ORDER BY createdAt DESC, id DESC` | `@@index([requesterId, createdAt])` |
 | My Tickets sorted by last-updated | `WHERE requesterId=? ORDER BY updatedAt DESC` | `@@index([requesterId, updatedAt])` |
-| My Tickets sorted by / searched on Ticket Number | `WHERE requesterId=? AND ticketNumber ILIKE ? ORDER BY ticketNumber` | `@@index([requesterId, ticketNumber])` |
+| My Tickets sorted by Ticket Number | `WHERE requesterId=? ORDER BY ticketNumber` | `@@index([requesterId, ticketNumber])` |
 | Category filter | `WHERE requesterId=? AND categoryId=?` | leading col of `@@index([requesterId, createdAt])` + `@@index([categoryId])` (FK) |
 | Ticket Detail / attachment ops | `WHERE ticketId=? AND isRemoved=?` | `@@index([ticketId, isRemoved])` |
 | Ticket Number uniqueness | insert-time collision check | `@unique` on `ticketNumber` |
@@ -522,9 +531,13 @@ retry protects against the rare concurrent-allocation race.
   `Attachment.ticketId` (`Cascade`).
 - **Optional (nullable)**: `Attachment.removedAt`, `Attachment.removedReason`,
   `Attachment.removedById` only.
-- **Accepted limitation**: `summary` substring search runs as an unindexed sequential scan within
-  one Requester's (small) ticket set. At lab data volumes this is fine; a trigram / full-text index
-  is the documented Lab 3+ upgrade path if the corpus grows.
+- **Search is not indexed.** The `search` param does a case-insensitive substring (`ILIKE '%term%'`)
+  match on **both** `ticketNumber` and `summary`. A B-tree index — including the composite indexes
+  above — cannot serve a leading-wildcard `ILIKE`, so search always runs as a sequential scan within
+  the current Requester's (small) ticket set. The composite indexes accelerate the `requesterId`
+  equality filter and the `ORDER BY` that run alongside the scan, not the pattern match itself. At
+  lab data volumes this is fine; a trigram (`pg_trgm` GIN) or full-text index is the documented
+  Lab 3+ upgrade path if the corpus grows.
 
 ### 7.6 Required Seed Data (idempotent — `upsert` by unique key, safe to re-run)
 

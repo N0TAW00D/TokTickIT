@@ -338,12 +338,12 @@ View and track all of your support requests.
 └──────────────────────────────────────────────────────────────────────────────┘
 
 Desktop (≥ 768px) — table
-┌────────────────┬──────────────────────┬──────────┬────────────────┬──────────┬────────┬───────────────┐
-│ Ticket No.  ⇅  │ Summary              │ Category │ Related System │ Priority │ Status │ Last Updated ⇅│
-├────────────────┼──────────────────────┼──────────┼────────────────┼──────────┼────────┼───────────────┤
-│ TKT-2026-000012│ Cannot connect to VPN│ Network  │ VPN            │ [High]   │ [New]  │ 1 Sep, 09:45  │
-│ TKT-2026-000011│ Laptop battery drains│ Hardware │ Corporate Lap… │ [Medium] │ [New]  │ 1 Sep, 09:14  │
-└────────────────┴──────────────────────┴──────────┴────────────────┴──────────┴────────┴───────────────┘
+┌────────────────┬─────────────┬──────────────────────┬──────────┬────────────────┬──────────┬────────┬───────────────┐
+│ Ticket No.  ⇅  │ Created  ⇅  │ Summary              │ Category │ Related System │ Priority │ Status │ Last Updated ⇅│
+├────────────────┼─────────────┼──────────────────────┼──────────┼────────────────┼──────────┼────────┼───────────────┤
+│ TKT-2026-000012│ 1 Sep 09:45 │ Cannot connect to VPN│ Network  │ VPN            │ [High]   │ [New]  │ 1 Sep, 09:45  │
+│ TKT-2026-000011│ 1 Sep 09:14 │ Laptop battery drains│ Hardware │ Corporate Lap… │ [Medium] │ [New]  │ 1 Sep, 09:14  │
+└────────────────┴─────────────┴──────────────────────┴──────────┴────────────────┴──────────┴────────┴───────────────┘
 Showing 1–10 of 12               [ ‹ Prev ]  1  2  [ Next › ]     Rows: [10 ▾]
 
 Mobile (< 768px) — cards
@@ -351,6 +351,7 @@ Mobile (< 768px) — cards
 │ TKT-2026-000012            [High] [New]   │
 │ Cannot connect to VPN                     │
 │ Network · VPN                             │
+│ Created 1 Sep, 09:14                      │
 │ Updated 1 Sep, 09:45          📎 1        │
 └──────────────────────────────────────────┘
 ```
@@ -363,7 +364,8 @@ Mobile (< 768px) — cards
   ("All", "New"). Each is a native `<select>` with an "All …" first option. Combined AND (AC-24).
 - **Sort:** one `<select>` with "Created (newest)", "Created (oldest)", "Last updated (newest)",
   "Last updated (oldest)", "Ticket number (A→Z)", "Ticket number (Z→A)", mapping to `sort` + `order`.
-  Column headers for Ticket No. and Last Updated also toggle sort and show a ⇅ / ▲ / ▼ affordance.
+  Column headers for Ticket No., **Created**, and Last Updated also toggle sort and show a
+  ⇅ / ▲ / ▼ affordance. Default is "Created (newest)" (`sort=createdAt`, `order=desc`).
 - **Clear filters:** tertiary button; resets search + all filters + sort to defaults; visible
   whenever any is non-default.
 - **Create Ticket:** primary button, top right, → `/tickets/new`.
@@ -371,12 +373,20 @@ Mobile (< 768px) — cards
   pages, and a Rows-per-page select (`10/20/50`). Values come from `meta` (AC-26).
 
 **Columns / card fields decision** (labsheet §8.4 requires justification):
-Ticket No. (identity, links to detail), Summary (what it is), Category + Related System
-(classification context to disambiguate similar summaries), Requested Priority (the requester's own
-urgency), Status (lifecycle position — "New" for all in Lab 2 but shown for consistency and Lab 3
-readiness), Last Updated (recency for scanning), and (mobile card only) an attachment paperclip with
-`activeAttachmentCount` when > 0. **IT Priority, Ticket Owner, and Resolution Summary are omitted** —
-they are IT-Staff / post-creation scope (`specification.md` A-14).
+Ticket No. (identity, links to detail), Created (ticket date — matches the labsheet My Tickets
+illustration and gives every "Created" sort option a visible column to confirm), Summary (what it
+is), Category + Related System (classification context to disambiguate similar summaries), Requested
+Priority (the requester's own urgency), Status (lifecycle position — "New" for all in Lab 2 but shown
+for consistency and Lab 3 readiness), Last Updated (recency for scanning). **IT Priority, Ticket
+Owner, and Resolution Summary are omitted** — they are IT-Staff / post-creation scope
+(`specification.md` A-14).
+
+**Attachment count is mobile-only.** The API returns `activeAttachmentCount` on every list item, but
+the desktop table does not render it — the row already carries enough to identify a ticket and
+attachment presence is confirmed on the Ticket Detail screen; adding an eighth column would crowd the
+table at the tablet breakpoint. The mobile card, which drops the Category/Related System/Last-Updated
+columns, shows a 📎 paperclip with the count when `> 0` so attachment presence is not lost on small
+screens. (The labsheet My Tickets illustration shows no attachment column on desktop.)
 
 **States**
 
@@ -462,6 +472,7 @@ My Tickets  ›  Ticket Details                                   [ ← Back to 
 | Loaded | as above. |
 | `404` (unknown or not owned) | `EmptyState`-style "Ticket not found", body "This ticket doesn't exist or isn't associated with the current development requester.", `[ ← Back to My Tickets ]` (AC-37, AC-38, BR-14). |
 | Failure (`500`/network) | `ErrorState` with `Retry`. |
+| Requester changed while open | the screen does **not** re-fetch this (now-foreign) ticket; the client immediately navigates to `/tickets` (My Tickets) for the new Requester (BR-11, AC-09). |
 
 **Responsive:** header field grid is 3-up `≥ 992px`, 2-up `768–991px`, 1-up `< 768px`; attachment
 rows stack their action buttons below the filename on mobile and remain full-width touch targets;

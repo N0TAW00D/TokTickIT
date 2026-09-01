@@ -112,7 +112,7 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | C-19 | C | AC-35 | remove dialog reason required | empty / 2-char reason → dialog shows field error, stays open, no `DELETE` fired | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
 | C-20 | C | AC-36, BR-33 | removed attachment presentation | removed row shows name/size/type/removed-date/reason and **no** Download/Preview/Remove control | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
 | C-21 | C | AC-33, BR-34 | attachment actions | active image → Preview + Download; active PDF → Download only; both → Remove | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-22 | C | AC-22 | My Tickets list render | rows show Ticket No., Summary, Category, Related System, Priority badge, Status badge, Last Updated; row links to `/tickets/:id` | `client/tests/lab-02/MyTickets.test.tsx` | Pending |
+| C-22 | C | AC-22 | My Tickets list render | desktop rows show Ticket No., Created, Summary, Category, Related System, Priority badge, Status badge, Last Updated (no attachment-count column); mobile card shows the same fields plus a 📎 count when `> 0`; row links to `/tickets/:id` | `client/tests/lab-02/MyTickets.test.tsx` | Pending |
 | C-23 | C | AC-23, AC-24, AC-25 | My Tickets controls fire correct query | typing search (debounced), choosing filters, changing sort → request carries the right params | `client/tests/lab-02/MyTickets.test.tsx` | Pending |
 | C-24 | C | AC-26 | My Tickets pagination | Next → `page=2` request; "Showing 11–20 of 22" from `meta`; Prev disabled on page 1 | `client/tests/lab-02/MyTickets.test.tsx` | Pending |
 | C-25 | C | AC-29, BR-37 | My Tickets empty state | `meta.totalItems=0` and no active query → empty-state + "Create your first ticket" CTA (not no-results) | `client/tests/lab-02/MyTickets.test.tsx` | Pending |
@@ -122,6 +122,7 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | C-29 | C | AC-32 | Ticket Detail read-only render | all header fields present as static text (no inputs), values match mocked response | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pending |
 | C-30 | C | AC-38, BR-14 | Ticket Detail not found | `404` → "Ticket not found" state + Back to My Tickets link | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pending |
 | C-31 | C | FR-32 | Ticket Detail failure | `500`/network → `role="alert"` + Retry | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pending |
+| C-32 | C | AC-09, BR-11 | Ticket Detail on requester switch | with Ticket Detail open, changing the Requester navigates to `/tickets` (My Tickets) for the new id and does **not** re-fetch the foreign ticket | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pending |
 | S-01 | S | AC-41, ui-spec §2 | color tokens applied | header element computed background = `--zen-primary`; primary button uses it; page bg = `--zen-page-bg` | `client/tests/lab-02/ui-style.test.tsx` | Pending |
 | S-02 | S | AC-41, ui-spec §5.3 | read-only vs editable | read-only fields carry the read-only class/`readonly`/static markup; editable inputs do not | `client/tests/lab-02/ui-style.test.tsx` | Pending |
 | S-03 | S | ui-spec §5.2 | required asterisk + message coexist | required fields render `*`; on error the message **also** appears below the field | `client/tests/lab-02/ui-style.test.tsx` | Pending |
@@ -157,7 +158,7 @@ Every AC has ≥ 1 planned test. (`✓` via that test.)
 | AC-06 | API-04, C-04 |
 | AC-07 | C-07 |
 | AC-08 | C-06 |
-| AC-09 | C-08, E2E-03 |
+| AC-09 | C-08, C-32, E2E-03 |
 | AC-10 | API-01, API-02, C-09 |
 | AC-11 | API-06, C-10 |
 | AC-12 | API-06, C-11 |
@@ -212,7 +213,7 @@ and the approved illustrations (not memory). Record the result and attach screen
 | V-05 | One input height; Description textarea taller, resizes without breaking layout | §5.3 | ☐ |
 | V-06 | Buttons show text; disabled distinct + inert; Submit busy during request | §5.1 | ☐ |
 | V-07 | Priority + Status badges consistent everywhere and carry a text label | §7 | ☐ |
-| V-08 | Ticket list = table at ≥ 768px, cards at < 768px, same fields | §9 | ☐ |
+| V-08 | Ticket list = table at ≥ 768px, cards at < 768px; card carries the same identifying fields plus the mobile-only 📎 attachment count | §9 | ☐ |
 | V-09 | Filters, sort, Clear Filters, pagination usable + unclipped at all viewports | §9, §11 | ☐ |
 | V-10 | Attachment controls + removed-metadata usable at all viewports; names readable (wrap not clip) | §10, §11 | ☐ |
 | V-11 | Empty state vs no-results state visibly different | §9 | ☐ |
@@ -230,6 +231,8 @@ and the approved illustrations (not memory). Record the result and attach screen
 > #20 (E2E). Until then, only `cd server && npm test` (existing Lab 1 tests) and `cd client && npm
 > test` run.
 
+Run from the repository root.
+
 ```bash
 # --- one-time: test database (created in #14) ---
 cd server
@@ -237,20 +240,20 @@ cp .env.test.example .env.test           # points DATABASE_URL at the toktickit_
 npm run db:test:reset                     # migrate + seed the test DB
 
 # --- server: unit + API/integration ---
-cd server
 npm test                                  # vitest run (uses .env.test, truncates Ticket/Attachment per test)
 
 # --- client: UI component + UI style ---
-cd client
+cd ../client
 npm test                                  # vitest run (jsdom, fetch mocked)
 
 # --- E2E + responsive + screenshots ---
-cd e2e
+cd ../e2e
 npm install
 npx playwright install --with-deps
 npm run test:e2e                          # boots client + server against the test DB, runs Playwright
 
 # --- everything, from repo root ---
+cd ..
 npm run test:all                          # server + client + e2e
 ```
 
