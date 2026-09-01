@@ -381,12 +381,16 @@ for consistency and Lab 3 readiness), Last Updated (recency for scanning). **IT 
 Owner, and Resolution Summary are omitted** — they are IT-Staff / post-creation scope
 (`specification.md` A-14).
 
-**Attachment count is mobile-only.** The API returns `activeAttachmentCount` on every list item, but
-the desktop table does not render it — the row already carries enough to identify a ticket and
-attachment presence is confirmed on the Ticket Detail screen; adding an eighth column would crowd the
-table at the tablet breakpoint. The mobile card, which drops the Category/Related System/Last-Updated
-columns, shows a 📎 paperclip with the count when `> 0` so attachment presence is not lost on small
-screens. (The labsheet My Tickets illustration shows no attachment column on desktop.)
+**The mobile card shows the same fields as a desktop row** — Ticket No., Created, Summary, Category,
+Related System, Requested Priority, Status, Last Updated (see the card example above; Category and
+Related System render as `Category · Related System`, the two timestamps on their own lines). No
+FR-30 field is dropped at any viewport.
+
+**The attachment count (📎) is the one field that is mobile-only.** The API returns
+`activeAttachmentCount` on every list item; the mobile card renders it as a 📎 paperclip with the
+count when `> 0`. The desktop table does **not** add a column for it — the table already carries
+eight columns, and on a wide screen the requester confirms attachment presence by opening the ticket.
+(The labsheet My Tickets illustration also shows no attachment column on desktop.)
 
 **States**
 
