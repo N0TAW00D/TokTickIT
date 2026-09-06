@@ -78,7 +78,20 @@ export function RequesterSelectionScreen() {
     }
   }, [state.phase]);
 
-  const canCancel = requesterId !== null && requesterName !== null;
+  // ui-spec.md §6: "Cancel: if a valid Requester is already selected,
+  // returns to /tickets; otherwise disabled." `requesterName` is only
+  // populated by `selectRequester(...)` (a Continue click, or the route
+  // guard confirming a stored id) — but `/select-requester` is unguarded,
+  // so a fresh page load landing here directly restores `requesterId` from
+  // localStorage without ever running that confirmation. Once the list has
+  // loaded, treat a stored id that appears in it as "a valid Requester is
+  // already selected" too — it's the same list this screen already
+  // fetched, so this costs no extra request.
+  const canCancel =
+    requesterId !== null &&
+    (requesterName !== null ||
+      (state.phase === "loaded" &&
+        state.requesters.some((requester) => requester.id === requesterId)));
 
   function handleCancel() {
     if (!canCancel) return;

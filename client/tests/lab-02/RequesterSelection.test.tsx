@@ -172,3 +172,52 @@ describe("C-05 selection success", () => {
     ).toBeInTheDocument();
   });
 });
+
+// ui-spec.md §6: "Cancel: if a valid Requester is already selected, returns
+// to /tickets; otherwise disabled." This is a spec-conformance gap, not a
+// numbered C-row in tests.md, so these are named descriptively rather than
+// given a new C-xx id.
+describe("Cancel on a reload landing directly on /select-requester", () => {
+  it("enables Cancel and returns to /tickets when the stored id is a valid Requester in the loaded list", async () => {
+    // Mirrors a real reload: `/select-requester` is unguarded, so this
+    // renders the screen directly (no RequireRequester pass) with only
+    // `requesterId` restored from localStorage — `requesterName` stays
+    // null until Continue or the guard confirms it, which never happens
+    // here.
+    window.localStorage.setItem(REQUESTER_STORAGE_KEY, "2");
+    mockRequestersFetch(() => jsonResponse(200, ACTIVE_REQUESTERS));
+
+    renderScreen();
+
+    await screen.findByLabelText(/development requester/i);
+
+    const cancelButton = screen.getByRole("button", { name: /cancel/i });
+    expect(cancelButton).toBeEnabled();
+
+    fireEvent.click(cancelButton);
+
+    expect(
+      await screen.findByRole("heading", { name: "My Tickets" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Cancel disabled when the stored id is not in the active Requester list", async () => {
+    window.localStorage.setItem(REQUESTER_STORAGE_KEY, "999");
+    mockRequestersFetch(() => jsonResponse(200, ACTIVE_REQUESTERS));
+
+    renderScreen();
+
+    await screen.findByLabelText(/development requester/i);
+
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
+  });
+
+  it("keeps Cancel disabled while requesters are still loading, even with a stored id", () => {
+    window.localStorage.setItem(REQUESTER_STORAGE_KEY, "2");
+    mockRequestersFetch(() => new Promise(() => {})); // never resolves
+
+    renderScreen();
+
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
+  });
+});
