@@ -85,3 +85,75 @@
   outline: 2px solid var(--zen-focus-ring);
   outline-offset: 2px;
 }
+
+/* ---------------------------------------------------------------------------
+   Base layer — applies the tokens above to the page itself.
+
+   Without this the tokens are inert: the Vite scaffold in index.css still owns
+   `:root`'s color/background/font and ships a `prefers-color-scheme: dark`
+   block that repaints the page #16171d, so the app would render dark on a
+   dark-mode machine instead of the --zen-page-bg the spec requires. theme.css
+   is imported last, so these rules win.
+
+   index.css itself is left in place for now because the Lab 1 demo page in
+   App.tsx still depends on it; it is removed in the slice that replaces that
+   page with AppShell.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* The Zen Green theme is a single light visual system (ui-spec.md §2) —
+     opt out of the scaffold's automatic dark inversion. */
+  color-scheme: light;
+  background: var(--zen-page-bg);
+  color: var(--zen-text);
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-body);
+  font-weight: var(--zen-font-weight-body);
+  line-height: var(--zen-line-height-body);
+  letter-spacing: normal;
+}
+
+body {
+  margin: 0;
+  background: var(--zen-page-bg);
+  color: var(--zen-text);
+}
+
+/* Container (ui-spec.md §3): centered, max-width 1120px, 24px desktop gutters
+   / 16px mobile. Overrides the scaffold's fixed 1126px bordered, centered-text
+   column, which would otherwise centre every form label and table cell. */
+#root {
+  width: 100%;
+  max-width: var(--zen-container-max-width);
+  margin: 0 auto;
+  padding-inline: var(--zen-container-gutter-desktop);
+  border-inline: 0;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  #root {
+    padding-inline: var(--zen-container-gutter-mobile);
+  }
+}
+
+/* The scaffold sizes h1 at 56px / h2 at 24px; the spec's scale is page title
+   1.5rem/700 and section heading 1.125rem/600 (ui-spec.md §3). */
+h1 {
+  font-size: var(--zen-font-size-page-title);
+  font-weight: var(--zen-font-weight-page-title);
+  line-height: var(--zen-line-height-heading);
+  letter-spacing: normal;
+  color: var(--zen-text);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+h2 {
+  font-size: var(--zen-font-size-section-heading);
+  font-weight: var(--zen-font-weight-section-heading);
+  line-height: var(--zen-line-height-heading);
+  letter-spacing: normal;
+  color: var(--zen-text);
+  margin: 0 0 var(--zen-space-unit);
+}
