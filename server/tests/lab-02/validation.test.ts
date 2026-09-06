@@ -5,11 +5,12 @@ import {
   validateSummary,
   validateTicketFields,
 } from '../../src/validation/ticketFields.js';
+import { parseTicketListQuery } from '../../src/validation/ticketListQuery.js';
 
-// Covers docs/lab-02/specification.md §4-fields, A-03 and tests.md UNIT-04.
+// Covers docs/lab-02/specification.md §4-fields, A-03 and tests.md UNIT-04,
+// plus (below) UNIT-05, the GET /api/tickets query-param parser (#18).
 //
-// Out of scope here (per the slice 8b brief): UNIT-05 (list query-param
-// parser, #18) and UNIT-06 (attachment type guard + safe filename, #17).
+// Out of scope here: UNIT-06 (attachment type guard + safe filename, #17).
 
 describe('validateSummary (UNIT-04)', () => {
   it('rejects a trimmed length of 4 (below the 5 minimum)', () => {
@@ -143,5 +144,117 @@ describe('validateTicketFields (aggregate, for the 400 VALIDATION_FAILED body sh
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors).toEqual([{ field: 'description', message: expect.any(String) }]);
+  });
+});
+
+describe('parseTicketListQuery (UNIT-05)', () => {
+  it('missing params fall back to defaults: createdAt, desc, page 1, pageSize 10', () => {
+    const result = parseTicketListQuery({});
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        search: undefined,
+        categoryId: undefined,
+        priority: undefined,
+        status: undefined,
+        sort: 'createdAt',
+        order: 'desc',
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
+  it('pageSize=7 is rejected (not one of 10, 20, 50) — not silently coerced to a default', () => {
+    const result = parseTicketListQuery({ pageSize: '7' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([{ field: 'pageSize', message: expect.any(String) }]);
+  });
+
+  it('sort=bogus is rejected (not one of createdAt, updatedAt, ticketNumber)', () => {
+    const result = parseTicketListQuery({ sort: 'bogus' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([{ field: 'sort', message: expect.any(String) }]);
+  });
+
+  it('blank/whitespace-only search is ignored, not an error (BR-16)', () => {
+    expect(parseTicketListQuery({ search: '' })).toEqual(
+      expect.objectContaining({ ok: true, value: expect.objectContaining({ search: undefined }) })
+    );
+    expect(parseTicketListQuery({ search: '   ' })).toEqual(
+      expect.objectContaining({ ok: true, value: expect.objectContaining({ search: undefined }) })
+    );
+  });
+
+  it('trims a non-blank search value', () => {
+    const result = parseTicketListQuery({ search: '  vpn  ' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.search).toBe('vpn');
+  });
+
+  it('accepts every valid pageSize (10, 20, 50)', () => {
+    for (const pageSize of [10, 20, 50]) {
+      const result = parseTicketListQuery({ pageSize: String(pageSize) });
+      expect(result.ok, String(pageSize)).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.pageSize).toBe(pageSize);
+    }
+  });
+
+  it('page must be a positive integer: 0, -1, and "1.5" are all rejected', () => {
+    for (const page of ['0', '-1', '1.5']) {
+      const result = parseTicketListQuery({ page });
+      expect(result.ok, page).toBe(false);
+      if (result.ok) return;
+      expect(result.errors).toEqual([{ field: 'page', message: expect.any(String) }]);
+    }
+  });
+
+  it('categoryId must be digits-only and within int4 range', () => {
+    expect(parseTicketListQuery({ categoryId: 'abc' }).ok).toBe(false);
+    expect(parseTicketListQuery({ categoryId: '-1' }).ok).toBe(false);
+
+    const tooLarge = parseTicketListQuery({ categoryId: '99999999999' });
+    expect(tooLarge.ok).toBe(false);
+    if (tooLarge.ok) return;
+    expect(tooLarge.errors).toEqual([{ field: 'categoryId', message: expect.any(String) }]);
+  });
+
+  it('priority and status are validated against their enums', () => {
+    expect(parseTicketListQuery({ priority: 'SUPER' }).ok).toBe(false);
+    expect(parseTicketListQuery({ priority: 'low' }).ok).toBe(false); // case-sensitive
+    expect(parseTicketListQuery({ priority: 'HIGH' })).toEqual(
+      expect.objectContaining({ ok: true, value: expect.objectContaining({ priority: 'HIGH' }) })
+    );
+
+    expect(parseTicketListQuery({ status: 'CLOSED' }).ok).toBe(false);
+    expect(parseTicketListQuery({ status: 'NEW' })).toEqual(
+      expect.objectContaining({ ok: true, value: expect.objectContaining({ status: 'NEW' }) })
+    );
+  });
+
+  it('order is validated against asc/desc', () => {
+    expect(parseTicketListQuery({ order: 'sideways' }).ok).toBe(false);
+    expect(parseTicketListQuery({ order: 'asc' })).toEqual(
+      expect.objectContaining({ ok: true, value: expect.objectContaining({ order: 'asc' }) })
+    );
+  });
+
+  it('a repeated param (parsed as an array) is rejected rather than silently collapsed to one value', () => {
+    const result = parseTicketListQuery({ sort: ['createdAt', 'updatedAt'] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([{ field: 'sort', message: expect.any(String) }]);
+  });
+
+  it('collects every rejected param at once, not just the first', () => {
+    const result = parseTicketListQuery({ pageSize: '7', sort: 'bogus', page: '0' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const fields = result.errors.map((e) => e.field).sort();
+    expect(fields).toEqual(['page', 'pageSize', 'sort']);
   });
 });
