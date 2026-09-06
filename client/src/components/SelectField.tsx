@@ -19,6 +19,8 @@ export interface SelectFieldProps {
   disabled?: boolean;
   /** Rendered as the first, empty-valued option (e.g. "Select…"). */
   placeholder?: string;
+  /** Fired on blur, for the "validate on blur" rule (specification.md §4-fields). */
+  onBlur?: () => void;
 }
 
 /**
@@ -37,6 +39,7 @@ export function SelectField({
   helperText,
   disabled = false,
   placeholder,
+  onBlur,
 }: SelectFieldProps) {
   function handleChange(event: ChangeEvent<HTMLSelectElement>) {
     onChange(event.target.value);
@@ -55,6 +58,7 @@ export function SelectField({
         value={value}
         disabled={disabled}
         onChange={handleChange}
+        onBlur={onBlur}
       >
         {placeholder && <option value="">{placeholder}</option>}
         {options.map((option) => (
