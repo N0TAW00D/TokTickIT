@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
@@ -68,5 +68,46 @@ describe('GET /api/related-systems', () => {
 
     const names = (res.body as Array<{ name: string }>).map((s) => s.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+  });
+});
+
+// Covers docs/lab-02/api-spec.md §1.3 / §5 (BR-41): the standard error body
+// on the 500 path — stable `error` code, safe generic `message` that never
+// leaks the underlying exception, and `fields` omitted entirely (not just
+// falsy) since neither route ever returns VALIDATION_FAILED/INVALID_QUERY.
+// c0283c7 fixed /api/categories's 500 body to this shape and
+// /api/related-systems was written with the same shape from the start, but
+// neither had a test forcing the failure path — these two do.
+describe('GET /api/categories and /api/related-systems — 500 path', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('categories: returns the standard INTERNAL error body without leaking the thrown error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(prisma.category, 'findMany').mockRejectedValue(new Error('boom'));
+
+    const res = await request(app).get('/api/categories');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('INTERNAL');
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
+    expect(res.body.message).not.toContain('boom');
+    expect('fields' in res.body).toBe(false);
+  });
+
+  it('related-systems: returns the standard INTERNAL error body without leaking the thrown error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(prisma.relatedSystem, 'findMany').mockRejectedValue(new Error('boom'));
+
+    const res = await request(app).get('/api/related-systems');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('INTERNAL');
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
+    expect(res.body.message).not.toContain('boom');
+    expect('fields' in res.body).toBe(false);
   });
 });
