@@ -184,6 +184,27 @@ describe("C-15 attachment client validation", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("rejects an allowed extension carrying a disallowed MIME type — MIME is checked independently of extension (ui-spec.md §8)", () => {
+    render(<Harness />);
+
+    // Mirror of the .exe-with-allowed-MIME case above: here the
+    // extension alone is one of the allowed five; only the MIME type
+    // makes this file invalid. A file's declared MIME type isn't
+    // trustworthy either, so validateFile must reject this even though
+    // the extension gate alone would let it through — this is the one
+    // case that can only be caught by the ALLOWED_MIME_TYPES check.
+    const disguised = makeFile("photo.png", 1024, "application/x-msdownload");
+    fireEvent.change(getFileInput(), { target: { files: [disguised] } });
+
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unsupported file type",
+    );
+    expect(
+      screen.queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("accepts an uppercase extension — the extension check is case-insensitive", () => {
     render(<Harness />);
 
