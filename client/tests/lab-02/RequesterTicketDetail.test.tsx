@@ -14,10 +14,10 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md row C-29 (read-only header render) plus the
-// loading/failure/not-found states and the X-Requester-Id header ui-spec.md
-// §10 requires. The attachment section (C-15..C-21) and the requester-switch
-// behavior (C-32) belong elsewhere and are not covered here.
+// Covers docs/lab-02/tests.md rows C-29..C-32 (read-only header render, the
+// not-found/failure states, the X-Requester-Id header ui-spec.md §10
+// requires, and the BR-11/AC-09 requester-switch guard). The attachment
+// section (C-15..C-21) belongs elsewhere and is not covered here.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKET_URL = `${API_BASE_URL}/api/tickets/1`;
@@ -94,6 +94,25 @@ function Bootstrap({
   if (requesterName === null) return null;
 
   return <>{children}</>;
+}
+
+/**
+ * Test-only stand-in for whatever could change the current Requester while
+ * this screen stays mounted (C-32/BR-11/AC-09): calls `selectRequester`
+ * directly against the same context TicketDetailScreen reads, instead of
+ * going through the real "Change Requester" UI. That real flow (see
+ * RequesterBadge, exercised in AppShell.test.tsx and MyTickets.test.tsx)
+ * always navigates to /select-requester first, which would unmount this
+ * screen before the Requester actually changed — never reaching the guard
+ * this test targets.
+ */
+function SwitchRequesterTrigger({ id, name }: { id: number; name: string }) {
+  const { selectRequester } = useRequester();
+  return (
+    <button type="button" onClick={() => selectRequester({ id, name })}>
+      switch requester
+    </button>
+  );
 }
 
 function renderScreen({
@@ -283,5 +302,47 @@ describe("Ticket Detail not-found state", () => {
         "This ticket doesn't exist or isn't associated with the current development requester.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("C-32 Ticket Detail on requester switch", () => {
+  it("navigates to /tickets instead of continuing to show the ticket or re-fetching it under the new Requester id (BR-11/AC-09)", async () => {
+    const fetchMock = mockFetch();
+
+    render(
+      <RequesterProvider>
+        <Bootstrap id={1} name="Jennifer Anderson">
+          <MemoryRouter initialEntries={["/tickets/1"]}>
+            {/* Mounted alongside <Routes>, not inside it, so it survives the
+                navigation this test triggers below and can still drive the
+                switch afterward if needed. */}
+            <SwitchRequesterTrigger id={2} name="Michael Brown" />
+            <Routes>
+              <Route path="/tickets/:id" element={<TicketDetailScreen />} />
+              <Route path="/tickets" element={<h1>My Tickets</h1>} />
+            </Routes>
+          </MemoryRouter>
+        </Bootstrap>
+      </RequesterProvider>,
+    );
+
+    // Falsifiable pre-state: the ticket for Requester 1 is actually on
+    // screen before the switch, not merely "rendered without crashing" —
+    // an assertion on the post-state only means something if this differed.
+    await screen.findByText(TICKET.ticketNumber);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /switch requester/i }),
+    );
+
+    // The ticket is foreign to Requester 2, so the screen leaves for My
+    // Tickets rather than continuing to show it or fetching it again under
+    // the new id.
+    expect(
+      await screen.findByRole("heading", { name: /my tickets/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(TICKET.ticketNumber)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
