@@ -14,15 +14,20 @@ export const serverRoot = path.resolve(here, "..");
 
 const PG_DUPLICATE_DATABASE = "42P04";
 
-// On Windows, npm installs shims as `npx.cmd` (not `npx`), and
-// `execFileSync` looks up the exact filename it is given without going
-// through the shell's PATHEXT resolution. Passing plain "npx" therefore
-// fails there with `spawnSync npx ENOENT`, even though `npx` works fine
-// interactively. Resolving the binary name once, here, keeps every caller
-// (resetTestDatabase() below, and the idempotency test) cross-platform
-// without repeating the platform check or resorting to `shell: true`
-// (which would reintroduce shell-quoting concerns for no benefit).
-const NPX_BIN = process.platform === "win32" ? "npx.cmd" : "npx";
+// Windows needs care here. npm installs its shims as `npx.cmd`, and
+// `execFileSync` looks up the exact filename it is given without PATHEXT
+// resolution, so plain "npx" fails with `spawnSync npx ENOENT`. Naming
+// `npx.cmd` explicitly is not enough either: since the fix for
+// CVE-2024-27980 (Node 18.20.2 / 20.12.2 / 21.7.3 and later), spawning a
+// `.cmd` or `.bat` file *without* `shell: true` is refused outright with
+// EINVAL. The combination that actually works on a current Node is to let
+// the shell do the resolution on Windows only.
+//
+// `shell: true` normally invites quoting/injection problems, but every
+// argument passed through here is a hard-coded literal with no spaces or
+// metacharacters — no caller-supplied data reaches it — so there is nothing
+// to quote wrongly. POSIX keeps the direct, shell-free exec.
+const IS_WINDOWS = process.platform === "win32";
 
 /**
  * Runs an `npx <args>` command the same way on every platform. Use this
@@ -32,10 +37,11 @@ export function runNpx(
   args: string[],
   options: { cwd: string; env?: NodeJS.ProcessEnv; stdio?: "inherit" | "pipe" }
 ): void {
-  execFileSync(NPX_BIN, args, {
+  execFileSync("npx", args, {
     cwd: options.cwd,
     env: options.env,
     stdio: options.stdio ?? "inherit",
+    shell: IS_WINDOWS,
   });
 }
 
