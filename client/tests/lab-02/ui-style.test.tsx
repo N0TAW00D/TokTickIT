@@ -67,6 +67,33 @@ describe("Button busy state", () => {
   });
 });
 
+describe("Button computed attribute precedence", () => {
+  it("does not let a caller-supplied aria-disabled/aria-busy contradict the real button state", () => {
+    render(
+      <Button aria-disabled={true} aria-busy={true}>
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Save" });
+    expect(button).not.toBeDisabled();
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).not.toHaveAttribute("aria-busy");
+  });
+
+  it("keeps the computed aria-disabled true even if the caller passes aria-disabled={false} while disabled", () => {
+    render(
+      <Button disabled aria-disabled={false}>
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Save" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
 describe("FormField required + error", () => {
   it("renders a required asterisk and associates the error message via aria-describedby", () => {
     render(

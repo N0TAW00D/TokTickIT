@@ -47,6 +47,11 @@ export function Button({
     onClick?.(event);
   }
 
+  // `{...rest}` is spread first so it can never override the computed
+  // `type`/`className`/`disabled`/`aria-disabled`/`aria-busy`/`onClick`
+  // attributes below — a caller-supplied `aria-disabled`/`aria-busy` (the
+  // only two of these that survive destructuring into `rest`) must not be
+  // able to contradict the button's real disabled/busy state.
   const classNames = [
     "zen-btn",
     `zen-btn--${variant}`,
@@ -58,13 +63,13 @@ export function Button({
 
   return (
     <button
+      {...rest}
       type={type}
       className={classNames}
       disabled={isDisabled}
       aria-disabled={isDisabled || undefined}
       aria-busy={busy || undefined}
       onClick={handleClick}
-      {...rest}
     >
       {busy && <span className="zen-btn__spinner" aria-hidden="true" />}
       <span className="zen-btn__label">{children}</span>
