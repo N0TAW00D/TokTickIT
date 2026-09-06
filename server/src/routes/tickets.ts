@@ -1,10 +1,16 @@
 import { Router, type Request, type Response } from 'express';
 import { requesterContext } from '../middleware/requesterContext.ts';
 import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
+import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError } from '../services/createTicket.ts';
+import { prisma } from '../lib/prisma.ts';
+import type { Prisma } from '../generated/prisma/client.ts';
 
 // POST /api/tickets — api-spec.md §3.1 (BR-01, BR-02, BR-04, BR-12, BR-24,
 // BR-25, BR-26, BR-28, BR-36; AC-01, AC-11..AC-14, AC-16, AC-43).
+//
+// GET /api/tickets — api-spec.md §3.2 (BR-15..BR-20, FR-24..FR-31; AC-03,
+// AC-09, AC-22..AC-31).
 export const ticketsRouter: Router = Router();
 
 /** Largest value Postgres `int4` (and therefore Prisma `Int`) can hold. */
@@ -149,6 +155,131 @@ ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) =>
       return;
     }
     console.error('Error creating ticket:', error);
+    internalError(res);
+  }
+});
+
+function invalidQuery(res: Response, fields: FieldError[]): void {
+  res.status(400).json({
+    error: 'INVALID_QUERY',
+    message: 'One or more query parameters are invalid.',
+    fields,
+  });
+}
+
+ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => {
+  // req.query values are always string | string[] | ParsedQs | ParsedQs[] |
+  // undefined; parseTicketListQuery treats anything other than a single
+  // plain string as a shape failure for that param (no silent coercion —
+  // BR-19, FR-29).
+  const parsed = parseTicketListQuery(req.query as Record<string, unknown>);
+  if (!parsed.ok) {
+    invalidQuery(res, parsed.errors);
+    return;
+  }
+
+  const { search, categoryId, priority, status, sort, order, page, pageSize } = parsed.value;
+
+  try {
+    // Ambiguity resolution (api-spec.md §3.2 vs §3.1): a categoryId that is
+    // shape-valid (parseTicketListQuery already rejects anything that could
+    // never be a real Category id) but names no active Category is a bad
+    // *query* — a filter that can never match any ticket — not a missing
+    // *resource*. That is deliberately different from POST /api/tickets,
+    // where the same situation is 404 NOT_FOUND (the request is trying to
+    // create something against a resource that isn't there). So this is
+    // 400 INVALID_QUERY, not 404, per §3.2's rule table.
+    if (categoryId !== undefined) {
+      const category = await prisma.category.findUnique({
+        where: { id: categoryId },
+        select: { isActive: true },
+      });
+      if (!category || !category.isActive) {
+        invalidQuery(res, [
+          { field: 'categoryId', message: 'categoryId does not reference a known active category.' },
+        ]);
+        return;
+      }
+    }
+
+    const where: Prisma.TicketWhereInput = {
+      // BR-15: always server-side scoped to the caller, unconditionally and
+      // first — no filter below can widen the scope past this Requester,
+      // regardless of what the query string asks for.
+      requesterId: req.requester!.id,
+      // BR-16: case-insensitive substring match on ticketNumber OR summary.
+      // Blank/whitespace-only search was already normalized to `undefined`
+      // by the parser, so its presence here always means a real search.
+      ...(search !== undefined
+        ? {
+            OR: [
+              { ticketNumber: { contains: search, mode: 'insensitive' as const } },
+              { summary: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+      // BR-17: categoryId/priority/status combine with the search clause
+      // (and each other) with AND — they're just more top-level keys on the
+      // same `where` object.
+      ...(categoryId !== undefined ? { categoryId } : {}),
+      ...(priority !== undefined ? { requestedPriority: priority } : {}),
+      ...(status !== undefined ? { status } : {}),
+    };
+
+    // BR-18: secondary sort is always `id desc`, appended after whichever
+    // field the caller chose, so rows that tie on the primary key (e.g.
+    // several tickets created in the same millisecond) still come back in a
+    // stable, deterministic order across requests and pages.
+    const orderBy: Prisma.TicketOrderByWithRelationInput[] = [
+      { [sort]: order } as Prisma.TicketOrderByWithRelationInput,
+      { id: 'desc' },
+    ];
+
+    // BR-19: page past the last page is a normal 200 with items: [] — Prisma's
+    // findMany simply returns no rows for a skip beyond the result set, so
+    // no special-casing is needed here; it falls out of the query itself.
+    const [totalItems, tickets] = await Promise.all([
+      prisma.ticket.count({ where }),
+      prisma.ticket.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          category: { select: { id: true, name: true } },
+          relatedSystem: { select: { id: true, name: true } },
+          // Counts only non-removed attachments (a filtered relation
+          // count) — #17 will start populating Attachment rows, but the
+          // count must already be correct today: a ticket with none is 0.
+          _count: { select: { attachments: { where: { isRemoved: false } } } },
+        },
+      }),
+    ]);
+
+    res.status(200).json({
+      items: tickets.map((ticket) => ({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        summary: ticket.summary,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        status: ticket.status,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        activeAttachmentCount: ticket._count.attachments,
+      })),
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+        sort,
+        order,
+      },
+    });
+  } catch (error) {
+    console.error('Error listing tickets:', error);
     internalError(res);
   }
 });
