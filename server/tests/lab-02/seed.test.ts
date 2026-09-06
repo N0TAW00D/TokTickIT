@@ -1,8 +1,7 @@
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { prisma } from "../../src/lib/prisma.js";
-import { serverRoot } from "../../scripts/test-db.lib.js";
+import { runNpx, serverRoot } from "../../scripts/test-db.lib.js";
 
 // Covers the Issue #14 acceptance criteria that are specific to the schema
 // and seed data (docs/lab-02/specification.md §7.1, §7.6):
@@ -74,7 +73,7 @@ describe("seed data (specification.md §7.6)", () => {
     });
 
     const runSeed = () =>
-      execFileSync("npx", ["tsx", path.join(serverRoot, "prisma/seed.ts")], {
+      runNpx(["tsx", path.join(serverRoot, "prisma/seed.ts")], {
         cwd: serverRoot,
         env: process.env,
         stdio: "pipe",

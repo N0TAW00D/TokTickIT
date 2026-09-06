@@ -14,6 +14,31 @@ export const serverRoot = path.resolve(here, "..");
 
 const PG_DUPLICATE_DATABASE = "42P04";
 
+// On Windows, npm installs shims as `npx.cmd` (not `npx`), and
+// `execFileSync` looks up the exact filename it is given without going
+// through the shell's PATHEXT resolution. Passing plain "npx" therefore
+// fails there with `spawnSync npx ENOENT`, even though `npx` works fine
+// interactively. Resolving the binary name once, here, keeps every caller
+// (resetTestDatabase() below, and the idempotency test) cross-platform
+// without repeating the platform check or resorting to `shell: true`
+// (which would reintroduce shell-quoting concerns for no benefit).
+const NPX_BIN = process.platform === "win32" ? "npx.cmd" : "npx";
+
+/**
+ * Runs an `npx <args>` command the same way on every platform. Use this
+ * instead of calling `execFileSync("npx", ...)` directly.
+ */
+export function runNpx(
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv; stdio?: "inherit" | "pipe" }
+): void {
+  execFileSync(NPX_BIN, args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: options.stdio ?? "inherit",
+  });
+}
+
 function readDatabaseUrl(envFileName: string): string | undefined {
   const result = dotenv.config({
     path: path.join(serverRoot, envFileName),
@@ -92,17 +117,9 @@ export async function resetTestDatabase(): Promise<string> {
 
   const childEnv = { ...process.env, DATABASE_URL: testDatabaseUrl };
 
-  execFileSync("npx", ["prisma", "migrate", "deploy"], {
-    cwd: serverRoot,
-    env: childEnv,
-    stdio: "inherit",
-  });
+  runNpx(["prisma", "migrate", "deploy"], { cwd: serverRoot, env: childEnv });
 
-  execFileSync("npx", ["tsx", "prisma/seed.ts"], {
-    cwd: serverRoot,
-    env: childEnv,
-    stdio: "inherit",
-  });
+  runNpx(["tsx", "prisma/seed.ts"], { cwd: serverRoot, env: childEnv });
 
   process.env.DATABASE_URL = testDatabaseUrl;
 
