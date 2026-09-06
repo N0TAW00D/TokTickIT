@@ -441,8 +441,13 @@ describe("C-16 partial attachment failure (AC-21, BR-27)", () => {
     ).not.toBeInTheDocument();
 
     const warning = await screen.findByRole("note");
-    expect(warning).toHaveTextContent("screenshot.png");
-    expect(warning).toHaveTextContent("could not be uploaded");
+    // Exact copy from ui-spec.md §8 ("Success with a failed attachment"):
+    // "1 attachment could not be uploaded: screenshot.png. You can retry
+    // it from the ticket." — a substring match would also pass against
+    // near-miss wording, so assert the full literal.
+    expect(warning).toHaveTextContent(
+      "1 attachment could not be uploaded: screenshot.png. You can retry it from the ticket.",
+    );
 
     expect(
       fetchMock.mock.calls.filter(
@@ -488,14 +493,61 @@ describe("C-16 partial attachment failure (AC-21, BR-27)", () => {
     fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
 
     const warning = await screen.findByRole("note");
-    expect(warning).toHaveTextContent("bad.png");
-    expect(warning).not.toHaveTextContent("good.pdf");
+    // Same exact ui-spec.md §8 wording as above, singular — only one of
+    // the two queued files failed, so "good.pdf" must not appear.
+    expect(warning).toHaveTextContent(
+      "1 attachment could not be uploaded: bad.png. You can retry it from the ticket.",
+    );
 
     const attachmentCalls = fetchMock.mock.calls.filter(
       ([url, init]: [string, RequestInit?]) =>
         url === ATTACHMENTS_URL && init?.method === "POST",
     );
     expect(attachmentCalls).toHaveLength(2);
+  });
+
+  it("names every failed attachment, plural, when more than one upload fails", async () => {
+    const fetchMock = mockFetch((fileName) =>
+      fileName === "good.pdf"
+        ? jsonResponse(201, {
+            id: 9,
+            ticketId: SUCCESS_TICKET.id,
+            originalFilename: fileName,
+            mimeType: "application/pdf",
+            fileSize: 1024,
+            isRemoved: false,
+            removedAt: null,
+            removedReason: null,
+            createdAt: "2026-09-01T08:15:10.000Z",
+          })
+        : jsonResponse(500, { error: "INTERNAL", message: "Disk error." }),
+    );
+
+    renderScreen();
+    await fillValidFormAndQueue([
+      makeFile("bad-one.png", 1024, "image/png"),
+      makeFile("good.pdf", 1024, "application/pdf"),
+      makeFile("bad-two.png", 1024, "image/png"),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const warning = await screen.findByRole("note");
+    // ui-spec.md §8 gives the exact singular wording only; it does not
+    // spell out the plural sentence verbatim anywhere in the frozen
+    // docs. This literal is the singular pattern's natural pluralization
+    // ("attachment"→"attachments", "it"→"them") and is hardcoded here
+    // rather than derived by calling describeFailedAttachments — if that
+    // is ever worth freezing exactly, it belongs in ui-spec.md.
+    expect(warning).toHaveTextContent(
+      "2 attachments could not be uploaded: bad-one.png, bad-two.png. You can retry them from the ticket.",
+    );
+
+    const attachmentCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === ATTACHMENTS_URL && init?.method === "POST",
+    );
+    expect(attachmentCalls).toHaveLength(3);
   });
 
   it("shows no warning callout when every queued attachment uploads successfully", async () => {
