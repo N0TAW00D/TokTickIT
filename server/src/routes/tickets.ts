@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import { requesterContext } from '../middleware/requesterContext.ts';
 import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
-import { createTicket, ReferenceNotFoundError } from '../services/createTicket.ts';
+import { createTicket, ReferenceNotFoundError, TICKET_INCLUDE } from '../services/createTicket.ts';
 import { validateAttachmentType, safeOriginalFilename, sniffMimeType } from '../validation/attachmentFile.ts';
 import {
   AttachmentLimitError,
@@ -19,6 +19,9 @@ import type { Prisma } from '../generated/prisma/client.ts';
 //
 // GET /api/tickets — api-spec.md §3.2 (BR-15..BR-20, FR-24..FR-31; AC-03,
 // AC-09, AC-22..AC-31).
+//
+// GET /api/tickets/:id — api-spec.md §3.3 (BR-14, BR-33, BR-38, BR-39,
+// BR-42; FR-32..FR-34; AC-32, AC-37, AC-38).
 //
 // POST /api/tickets/:id/attachments — api-spec.md §4.1 (BR-14, BR-21..23,
 // BR-27, BR-29, BR-30; AC-18..21).
@@ -291,6 +294,89 @@ ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => 
     });
   } catch (error) {
     console.error('Error listing tickets:', error);
+    internalError(res);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/:id (api-spec.md §3.3)
+// ---------------------------------------------------------------------------
+
+// Explicit field list, not `select: { ... every scalar ... }` or a bare
+// `include: { attachments: true }` — the Attachment model (schema.prisma)
+// also carries `storedFilename` (the server-generated `<uuidv4>.<ext>` disk
+// name) and `removedById`, neither of which api-spec.md §3.3's example
+// response includes. `storedFilename` in particular is an internal detail
+// BR-41 forbids leaking, so it must never even reach this `select` — not be
+// filtered out after the fact.
+const TICKET_DETAIL_ATTACHMENT_SELECT = {
+  id: true,
+  originalFilename: true,
+  mimeType: true,
+  fileSize: true,
+  isRemoved: true,
+  removedAt: true,
+  removedReason: true,
+  createdAt: true,
+} as const;
+
+ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+  // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
+  // treated as a resource that does not exist, never a 400 — same helper
+  // the attachments route below already uses for its own `:id`.
+  const ticketId = parseTicketIdParam(String(req.params.id));
+  if (ticketId === null) {
+    ticketNotFound(res);
+    return;
+  }
+
+  try {
+    // Ownership folded straight into the `where` clause (BR-15's pattern,
+    // reused here) rather than fetched-then-compared: an unknown id and one
+    // owned by another Requester both simply fail to match this single
+    // query and fall into the one `if (!ticket)` branch below, which calls
+    // the one shared `ticketNotFound` helper. There is deliberately no
+    // second branch that decides "not owned" separately from "not found" —
+    // BR-14/BR-42's byte-identical requirement can't drift apart if there is
+    // only one code path that ever produces the 404.
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, requesterId: req.requester!.id },
+      include: {
+        ...TICKET_INCLUDE,
+        attachments: {
+          // BR-33: both active and soft-removed attachments are listed here
+          // (unlike GET /api/tickets's activeAttachmentCount, which counts
+          // only non-removed rows) — no `where` filter on `isRemoved` at
+          // all. Ordered by id asc (creation order, with the same tie-break
+          // convention as BR-18) purely for a stable, deterministic
+          // response; the spec does not mandate a particular order.
+          orderBy: { id: 'asc' },
+          select: TICKET_DETAIL_ATTACHMENT_SELECT,
+        },
+      },
+    });
+
+    if (!ticket) {
+      ticketNotFound(res);
+      return;
+    }
+
+    res.status(200).json({
+      id: ticket.id,
+      ticketNumber: ticket.ticketNumber,
+      requester: ticket.requester,
+      category: ticket.category,
+      relatedSystem: ticket.relatedSystem,
+      requestedPriority: ticket.requestedPriority,
+      status: ticket.status,
+      summary: ticket.summary,
+      description: ticket.description,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      attachments: ticket.attachments,
+    });
+  } catch (error) {
+    console.error('Error fetching ticket:', error);
     internalError(res);
   }
 });

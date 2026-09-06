@@ -59,7 +59,11 @@ export interface CreateTicketInput {
 
 const MAX_ATTEMPTS = 3;
 
-const TICKET_INCLUDE = {
+// Exported so `GET /api/tickets/:id` (api-spec.md §3.3) can build the exact
+// same header shape as this endpoint's `201` body, plus its own `attachments`
+// — rather than re-declaring an equivalent-but-separate `include` that could
+// silently drift from this one.
+export const TICKET_INCLUDE = {
   requester: { select: { id: true, name: true, email: true } },
   category: { select: { id: true, name: true } },
   relatedSystem: { select: { id: true, name: true } },
