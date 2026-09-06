@@ -813,6 +813,62 @@ describe('DELETE /api/attachments/:id', () => {
       const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
       expect(row.removedReason).toBe('First removal');
     });
+
+    it('holds BR-32 under genuinely concurrent DELETEs on one active attachment: exactly one 200, the rest 409 ALREADY_REMOVED (never 500), and the stored reason is the winner\'s, not overwritten by a loser', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'contested.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      // Fire genuinely concurrent requests (Promise.all of in-flight
+      // requests, not sequential awaits) at the same active attachment.
+      // Without an atomic conditional update, more than one of these could
+      // observe `isRemoved === false` and both write, which would silently
+      // overwrite the first remover's reason/removedById and never raise a
+      // 409 — the regression this test exists to catch.
+      const raceSize = 3;
+      const reasons = Array.from({ length: raceSize }, (_, i) => `Concurrent removal attempt ${i}`);
+      const responses = await Promise.all(
+        reasons.map((reason) =>
+          request(app)
+            .delete(`/api/attachments/${attachmentId}`)
+            .set('X-Requester-Id', String(requesterAId))
+            .set('Content-Type', 'application/json')
+            .send({ reason })
+        )
+      );
+
+      // Never a 500: every response is either the one winner (200) or a
+      // clean rejection (409 ALREADY_REMOVED).
+      for (const res of responses) {
+        expect([200, 409]).toContain(res.status);
+        if (res.status === 409) {
+          expect(res.body.error).toBe('ALREADY_REMOVED');
+        }
+      }
+      const winners = responses.filter((res) => res.status === 200);
+      const losers = responses.filter((res) => res.status === 409);
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(raceSize - 1);
+
+      // The persisted reason is exactly the winning request's reason — not
+      // blank, not a mix, and not silently replaced by a losing request
+      // that ran after the winning write (removedById is necessarily
+      // requesterAId in every branch here since only the owner may call
+      // this endpoint at all — BR-32 — so the reason is the fact this test
+      // can actually distinguish winner from loser on).
+      const winningReason = winners[0].body.removedReason as string;
+      expect(reasons).toContain(winningReason);
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(true);
+      expect(row.removedReason).toBe(winningReason);
+      expect(row.removedById).toBe(requesterAId);
+
+      const activeCount = await prisma.attachment.count({ where: { id: attachmentId, isRemoved: false } });
+      expect(activeCount).toBe(0);
+    });
   });
 
   describe('a non-integer attachment id and missing/invalid header (api-spec.md §1.4, §1.2) — no tests.md API-xx row', () => {
