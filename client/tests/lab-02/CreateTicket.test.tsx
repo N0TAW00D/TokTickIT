@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
@@ -8,11 +14,9 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-09 through C-14. This slice adds C-10
-// and C-11 (client validation); submit handling (C-12, C-13, C-14) lands in
-// the next slice. Attachments (C-15, C-16, C-17) belong to the
-// AttachmentUploader built in Issue #17 — this screen only renders the
-// placeholder section from ui-spec.md §8.
+// Covers docs/lab-02/tests.md rows C-09 through C-14. Attachments (C-15,
+// C-16, C-17) belong to the AttachmentUploader built in Issue #17 — this
+// screen only renders the placeholder section from ui-spec.md §8.
 
 const API_BASE_URL = "http://localhost:3000";
 const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
@@ -29,8 +33,28 @@ const RELATED_SYSTEMS = [
   { id: 20, name: "Campus Wi-Fi" },
 ];
 
+const SUMMARY_TEXT = "Laptop battery drains quickly at odd times";
 const DESCRIPTION_TEXT =
   "The laptop battery drains far faster than it used to, even when idle.";
+
+const SUCCESS_TICKET = {
+  id: 42,
+  ticketNumber: "TKT-2026-000001",
+  requester: {
+    id: 1,
+    name: "Jennifer Anderson",
+    email: "jennifer.anderson@example.edu",
+  },
+  category: { id: 1, name: "Hardware" },
+  relatedSystem: { id: 10, name: "Email" },
+  requestedPriority: "MEDIUM",
+  status: "NEW",
+  summary: SUMMARY_TEXT,
+  description: DESCRIPTION_TEXT,
+  createdAt: "2026-09-01T08:14:00.000Z",
+  updatedAt: "2026-09-01T08:14:00.000Z",
+  attachments: [],
+};
 
 function jsonResponse(status: number, body: unknown): Promise<Response> {
   return Promise.resolve({
@@ -43,20 +67,35 @@ function jsonResponse(status: number, body: unknown): Promise<Response> {
 interface MockFetchOptions {
   categories?: () => Promise<Response>;
   relatedSystems?: () => Promise<Response>;
+  createTicket?: () => Promise<Response>;
 }
 
-function mockFetch({ categories, relatedSystems }: MockFetchOptions = {}) {
-  const fetchMock = vi.fn((input: string) => {
+function mockFetch({
+  categories,
+  relatedSystems,
+  createTicket,
+}: MockFetchOptions = {}) {
+  const fetchMock = vi.fn((input: string, init?: RequestInit) => {
     if (input === CATEGORIES_URL) {
       return (categories ?? (() => jsonResponse(200, CATEGORIES)))();
     }
     if (input === RELATED_SYSTEMS_URL) {
       return (relatedSystems ?? (() => jsonResponse(200, RELATED_SYSTEMS)))();
     }
+    if (input === TICKETS_URL && init?.method === "POST") {
+      return (createTicket ?? (() => jsonResponse(201, SUCCESS_TICKET)))();
+    }
     return jsonResponse(404, {});
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function postCallCount(fetchMock: ReturnType<typeof mockFetch>) {
+  return fetchMock.mock.calls.filter(
+    ([url, init]: [string, RequestInit?]) =>
+      url === TICKETS_URL && init?.method === "POST",
+  ).length;
 }
 
 /**
@@ -94,6 +133,22 @@ function renderScreen() {
       </Bootstrap>
     </RequesterProvider>,
   );
+}
+
+async function fillValidForm() {
+  await screen.findByLabelText(/category/i);
+  fireEvent.change(screen.getByLabelText(/category/i), {
+    target: { value: "1" },
+  });
+  fireEvent.change(screen.getByLabelText(/related system/i), {
+    target: { value: "10" },
+  });
+  fireEvent.change(screen.getByLabelText(/ticket summary/i), {
+    target: { value: SUMMARY_TEXT },
+  });
+  fireEvent.change(screen.getByLabelText(/^description/i), {
+    target: { value: DESCRIPTION_TEXT },
+  });
 }
 
 beforeEach(() => {
@@ -191,9 +246,7 @@ describe("C-10 create validation — empty summary", () => {
       screen.getByLabelText(/ticket summary/i),
     );
 
-    expect(
-      fetchMock.mock.calls.filter(([url]) => url === TICKETS_URL),
-    ).toHaveLength(0);
+    expect(postCallCount(fetchMock)).toBe(0);
   });
 });
 
@@ -235,8 +288,141 @@ describe("C-11 create validation — lengths", () => {
       await screen.findByText("Summary must be between 5 and 140 characters."),
     ).toBeInTheDocument();
 
+    expect(postCallCount(fetchMock)).toBe(0);
+  });
+});
+
+describe("C-12 create busy state", () => {
+  it("shows Submit as busy and disabled while the request is pending", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    mockFetch({ createTicket: () => pending });
+
+    renderScreen();
+    await fillValidForm();
+
+    const submitButton = screen.getByRole("button", { name: /submit ticket/i });
+    fireEvent.click(submitButton);
+
+    expect(submitButton).toBeDisabled();
+    expect(submitButton).toHaveAttribute("aria-busy", "true");
+
+    resolveCreate({
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve(SUCCESS_TICKET),
+    } as Response);
+
+    await screen.findByRole("status");
+  });
+
+  it("fires only one POST /api/tickets when two submits land in the same tick (BR-24)", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const fetchMock = mockFetch({ createTicket: () => pending });
+
+    const { container } = renderScreen();
+    await fillValidForm();
+
+    const form = container.querySelector("form") as HTMLFormElement;
+
+    // Both submits are dispatched inside one `act` so React does not get a
+    // chance to re-render (and disable the button) between them — this is
+    // the actual race BR-24 guards against, not just a slow double-click.
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+
+    expect(postCallCount(fetchMock)).toBe(1);
+
+    resolveCreate({
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve(SUCCESS_TICKET),
+    } as Response);
+
+    await screen.findByRole("status");
+  });
+});
+
+describe("C-13 create success", () => {
+  it("shows the returned ticket number with View ticket / Create another actions", async () => {
+    mockFetch({ createTicket: () => jsonResponse(201, SUCCESS_TICKET) });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const panel = await screen.findByRole("status");
+    expect(panel).toHaveTextContent(SUCCESS_TICKET.ticketNumber);
     expect(
-      fetchMock.mock.calls.filter(([url]) => url === TICKETS_URL),
-    ).toHaveLength(0);
+      screen.getByRole("button", { name: /view ticket/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create another/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("Create another resets the form to its initial state", async () => {
+    mockFetch({ createTicket: () => jsonResponse(201, SUCCESS_TICKET) });
+    renderScreen();
+    await fillValidForm();
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+    await screen.findByRole("status");
+
+    fireEvent.click(screen.getByRole("button", { name: /create another/i }));
+
+    expect(await screen.findByLabelText(/ticket summary/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^description/i)).toHaveValue("");
+    expect(screen.getByLabelText(/requested priority/i)).toHaveValue(
+      "MEDIUM",
+    );
+  });
+
+  it("View ticket navigates to /tickets/:id", async () => {
+    mockFetch({ createTicket: () => jsonResponse(201, SUCCESS_TICKET) });
+    renderScreen();
+    await fillValidForm();
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+    await screen.findByRole("status");
+
+    fireEvent.click(screen.getByRole("button", { name: /view ticket/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /ticket details/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("C-14 create API failure", () => {
+  it("shows a safe error, preserves every entered value, and re-enables Submit", async () => {
+    mockFetch({ createTicket: () => Promise.reject(new Error("network down")) });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not create the ticket. Please check your connection and try again.",
+    );
+
+    expect(screen.getByLabelText(/category/i)).toHaveValue("1");
+    expect(screen.getByLabelText(/related system/i)).toHaveValue("10");
+    expect(screen.getByLabelText(/ticket summary/i)).toHaveValue(
+      SUMMARY_TEXT,
+    );
+    expect(screen.getByLabelText(/^description/i)).toHaveValue(
+      DESCRIPTION_TEXT,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /submit ticket/i }),
+    ).toBeEnabled();
   });
 });
