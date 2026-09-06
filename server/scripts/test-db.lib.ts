@@ -1,5 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
 import { Client } from "pg";
@@ -14,34 +16,95 @@ export const serverRoot = path.resolve(here, "..");
 
 const PG_DUPLICATE_DATABASE = "42P04";
 
-// Windows needs care here. npm installs its shims as `npx.cmd`, and
-// `execFileSync` looks up the exact filename it is given without PATHEXT
-// resolution, so plain "npx" fails with `spawnSync npx ENOENT`. Naming
-// `npx.cmd` explicitly is not enough either: since the fix for
-// CVE-2024-27980 (Node 18.20.2 / 20.12.2 / 21.7.3 and later), spawning a
-// `.cmd` or `.bat` file *without* `shell: true` is refused outright with
-// EINVAL. The combination that actually works on a current Node is to let
-// the shell do the resolution on Windows only.
-//
-// `shell: true` normally invites quoting/injection problems, but every
-// argument passed through here is a hard-coded literal with no spaces or
-// metacharacters — no caller-supplied data reaches it — so there is nothing
-// to quote wrongly. POSIX keeps the direct, shell-free exec.
-const IS_WINDOWS = process.platform === "win32";
+const require = createRequire(import.meta.url);
 
 /**
- * Runs an `npx <args>` command the same way on every platform. Use this
- * instead of calling `execFileSync("npx", ...)` directly.
+ * Resolves the on-disk entry script for a package's CLI binary, without
+ * going through `npx` or a shell.
+ *
+ * `require.resolve("<pkg>/package.json")` finds exactly the copy of the
+ * package Node's own module resolution would use (respecting the same
+ * node_modules lookup, workspaces, etc.). Its `bin` field then says where
+ * the executable script lives, relative to the package directory — as a
+ * bare string for a single-binary package, or as an object keyed by binary
+ * name for a package that publishes more than one. Either way this returns
+ * an absolute path to a plain JS/TS entry file that can be handed straight
+ * to `process.execPath`.
  */
-export function runNpx(
+function resolvePackageBin(packageName: string): string {
+  const packageJsonPath = require.resolve(`${packageName}/package.json`);
+  const packageDir = path.dirname(packageJsonPath);
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+    bin?: string | Record<string, string>;
+  };
+
+  if (!packageJson.bin) {
+    throw new Error(
+      `Package "${packageName}" has no "bin" field in its package.json.`
+    );
+  }
+
+  const binRelativePath =
+    typeof packageJson.bin === "string"
+      ? packageJson.bin
+      : packageJson.bin[packageName];
+
+  if (!binRelativePath) {
+    throw new Error(
+      `Package "${packageName}" has no "${packageName}" entry in its ` +
+        '"bin" field.'
+    );
+  }
+
+  return path.join(packageDir, binRelativePath);
+}
+
+/**
+ * Runs a package's CLI (e.g. `prisma`, `tsx`) the same way on every
+ * platform, without a shell.
+ *
+ * There is no `npx` and no `.cmd`/`.bat` shim involved: this resolves the
+ * package's own entry script and runs it directly with the current Node
+ * binary (`process.execPath`), passing arguments as an array. That sidesteps
+ * both problems a shell-based approach runs into on Windows — plain "npx"
+ * failing with ENOENT because `execFileSync` doesn't do PATHEXT resolution,
+ * and spawning `npx.cmd` directly being refused with EINVAL since the fix
+ * for CVE-2024-27980 unless `shell: true` is set — and it avoids what
+ * `shell: true` costs everywhere else: with a shell, arguments are
+ * concatenated into one command line and re-split by the shell's own
+ * quoting rules, so any argument containing a space (a very real
+ * possibility here — see the seed path built from `serverRoot`, which is
+ * wherever the repository happens to be checked out) silently becomes two
+ * arguments instead of one. Passing an argv array straight to
+ * `execFileSync` with no `shell` option means nothing re-parses it: each
+ * element arrives at the child process exactly as written, on every OS.
+ */
+export function runPackageBin(
+  packageName: string,
   args: string[],
   options: { cwd: string; env?: NodeJS.ProcessEnv; stdio?: "inherit" | "pipe" }
 ): void {
-  execFileSync("npx", args, {
+  execNodeScript(resolvePackageBin(packageName), args, options);
+}
+
+/**
+ * Runs a JS/TS entry script with the current Node binary, passing `args` as
+ * a literal argv array and no `shell` option. This is the exact invocation
+ * `runPackageBin` uses once it has resolved a package's bin script; it is
+ * exported separately so the argv round-trip property (an argument survives
+ * byte-for-byte, regardless of spaces or shell metacharacters) can be
+ * exercised directly in tests against a throwaway script, without needing a
+ * real npm package as a stand-in.
+ */
+export function execNodeScript(
+  scriptPath: string,
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv; stdio?: "inherit" | "pipe" }
+): void {
+  execFileSync(process.execPath, [scriptPath, ...args], {
     cwd: options.cwd,
     env: options.env,
     stdio: options.stdio ?? "inherit",
-    shell: IS_WINDOWS,
   });
 }
 
@@ -199,11 +262,14 @@ export async function resetTestDatabase(): Promise<string> {
   // without this the seed script below, and every test file that imports
   // `src/lib/prisma.ts`, would fail with ERR_MODULE_NOT_FOUND. Running it
   // here means `npm test` alone is sufficient on a clean checkout.
-  runNpx(["prisma", "generate"], { cwd: serverRoot, env: childEnv });
+  runPackageBin("prisma", ["generate"], { cwd: serverRoot, env: childEnv });
 
-  runNpx(["prisma", "migrate", "deploy"], { cwd: serverRoot, env: childEnv });
+  runPackageBin("prisma", ["migrate", "deploy"], {
+    cwd: serverRoot,
+    env: childEnv,
+  });
 
-  runNpx(["tsx", "prisma/seed.ts"], { cwd: serverRoot, env: childEnv });
+  runPackageBin("tsx", ["prisma/seed.ts"], { cwd: serverRoot, env: childEnv });
 
   process.env.DATABASE_URL = testDatabaseUrl;
 
