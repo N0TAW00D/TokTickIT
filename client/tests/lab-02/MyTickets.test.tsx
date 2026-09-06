@@ -867,6 +867,40 @@ describe("Page resets to 1 on filter/search/sort/page-size change (bug guard, ui
     expect(params.get("page")).toBe("1");
   });
 
+  it("changing the Priority filter while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("priority")).toBe("HIGH");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("changing the Status filter while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("status")).toBe("NEW");
+    expect(params.get("page")).toBe("1");
+  });
+
   it("toggling sort via a column header while on page 3 resets to page 1", async () => {
     stubMatchMedia(true);
     const fetchMock = mockFetch(manyPagesHandler());
@@ -931,16 +965,36 @@ describe("Page resets to 1 on filter/search/sort/page-size change (bug guard, ui
     stubMatchMedia(true);
     const fetchMock = mockFetch(manyPagesHandler());
     renderScreen();
-    await goToPage3(fetchMock);
 
-    // Move a filter off default first so Clear filters is present to click
-    // (it's hidden at defaults) — this also means the assertion below is
-    // load-bearing for the page reset specifically, not just a no-op.
+    // Move a filter off default *before* navigating to page 3 (not after)
+    // so Clear filters' own reset is what's under test: handleCategoryChange
+    // already resets the page itself (covered above), so triggering it on
+    // page 3 would land back on page 1 regardless of what Clear filters
+    // does, making the assertion below pass even with that reset deleted.
+    // Changing the filter first, then paging to 3 off the back of it, means
+    // Clear filters is the only thing touched while on page 3.
+    await screen.findByRole("table");
     fireEvent.change(screen.getByLabelText("Category"), {
       target: { value: String(CATEGORIES[0].id) },
     });
     await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+
+    // Page to 3 by hand (rather than the goToPage3 helper, which hardcodes
+    // absolute call counts starting from the initial render).
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    expect(
+      new URL(ticketsCall(fetchMock, 3)[0]).searchParams.get("page"),
+    ).toBe("2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+    await screen.findByRole("table");
     expect(ticketsCallCount(fetchMock)).toBe(4);
+    expect(
+      new URL(ticketsCall(fetchMock, 4)[0]).searchParams.get("page"),
+    ).toBe("3");
 
     fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
     await screen.findByRole("table");
