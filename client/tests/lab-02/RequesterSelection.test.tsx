@@ -1,18 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import App from "../../src/App.tsx";
 import { RequesterSelectionScreen } from "../../src/screens/RequesterSelectionScreen.tsx";
 import {
   REQUESTER_STORAGE_KEY,
   RequesterProvider,
 } from "../../src/requester/RequesterContext.tsx";
 
-// C-01 (route guard redirecting an unauthenticated visit to /tickets here)
-// and C-06 (a stale stored id being cleared by the guard) are covered in
-// AppShell/App-level tests once the route guard exists — see
-// client/src/routes/RequireRequester.tsx and the tests added alongside it.
-// This file covers the parts of the Selection screen's own behavior that
-// don't depend on the guard: its loading/error/empty/success states.
+// C-01 and C-06 exercise the route guard (client/src/routes/RequireRequester.tsx)
+// so they render the full App under a MemoryRouter. The rest of this file
+// covers the Selection screen's own behavior in isolation (loading / error /
+// empty / success), independent of routing/the guard.
 
 const API_BASE_URL = "http://localhost:3000";
 const REQUESTERS_URL = `${API_BASE_URL}/api/requesters`;
@@ -66,6 +65,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.localStorage.clear();
+});
+
+describe("C-01 route guard", () => {
+  it("renders the Requester Selection screen when visiting /tickets with no stored requester", async () => {
+    mockRequestersFetch(() => jsonResponse(200, ACTIVE_REQUESTERS));
+
+    render(
+      <MemoryRouter initialEntries={["/tickets"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Select Development Requester",
+      }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("C-06 stale stored requester", () => {
+  it("clears an invalid stored id and shows the unavailable notice on the selection screen", async () => {
+    window.localStorage.setItem(REQUESTER_STORAGE_KEY, "999");
+    mockRequestersFetch(() => jsonResponse(200, ACTIVE_REQUESTERS));
+
+    render(
+      <MemoryRouter initialEntries={["/tickets"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", {
+      name: "Select Development Requester",
+    });
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(
+      "Your previous development requester is no longer available. Please choose again.",
+    );
+    expect(window.localStorage.getItem(REQUESTER_STORAGE_KEY)).toBeNull();
+  });
 });
 
 describe("C-02 selection loading", () => {
