@@ -1,0 +1,59 @@
+/*
+ * Shared badge shell — ui-spec.md §7: "Both badges: 999px radius,
+ * 0.75rem/600, 2–8px padding". PriorityBadge and StatusBadge both import
+ * this file (same pattern as FeedbackStates.css shared by LoadingState /
+ * EmptyState / NoResultsState / ErrorState) so the two badge families can
+ * never drift out of visual sync.
+ */
+
+.zen-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border-radius: var(--zen-radius-badge);
+  font-family: var(--zen-font-family);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: var(--zen-line-height-body);
+  white-space: nowrap;
+}
+
+.zen-badge__icon {
+  font-size: 0.875em;
+  line-height: 1;
+}
+
+/* Priority variants (ui-spec.md §7.1). */
+.zen-badge--priority-low {
+  background: var(--zen-priority-low-bg);
+  color: var(--zen-priority-low-text);
+}
+
+.zen-badge--priority-medium {
+  background: var(--zen-warning-bg);
+  color: var(--zen-warning);
+}
+
+.zen-badge--priority-high {
+  background: var(--zen-error-bg);
+  color: var(--zen-error);
+}
+
+/* Status variants (ui-spec.md §7.2). Lab 3 adds rows here, not new markup. */
+.zen-badge--status-new {
+  background: var(--zen-pale);
+  color: var(--zen-secondary);
+}
+
+/*
+ * Default style for an unrecognized value (ui-spec.md §7.2: "the component
+ * switches on value, default style for unknown"), shared by both badges.
+ * Reuses the existing read-only tokens rather than inventing a new pair —
+ * a neutral, unmistakably "unstyled" look rather than a hex literal.
+ */
+.zen-badge--unknown {
+  background: var(--zen-readonly-bg);
+  color: var(--zen-text-muted);
+}
