@@ -1,0 +1,87 @@
+/*
+ * Zen Green theme foundation — Lab 2 UI spec §2 (color tokens) and §3
+ * (typography, spacing, radius, shadow, container).
+ *
+ * This is the ONLY stylesheet allowed to contain hex color literals.
+ * Every other file (components, screens, etc.) must reference these
+ * tokens via var(--zen-*) — never a raw hex value.
+ */
+
+:root {
+  /* ---- Color tokens (ui-spec.md §2) ---- */
+  --zen-primary: #006b3c;
+  --zen-primary-hover: #005a32;
+  --zen-secondary: #0b7a46;
+  --zen-pale: #eaf6ef;
+  --zen-page-bg: #f5f7f6;
+  --zen-surface: #ffffff;
+  --zen-border: #d7e0db;
+  --zen-border-strong: #b7c6bd;
+  --zen-text: #1b2b23;
+  --zen-text-muted: #5b6b62;
+  --zen-readonly-bg: #eef3f0;
+  --zen-readonly-text: #3a4a42;
+  --zen-error: #b3261e;
+  --zen-error-bg: #fcecea;
+  --zen-warning: #8a5a00;
+  --zen-warning-bg: #fff4e5;
+  --zen-success: #0b7a46;
+  --zen-focus-ring: #0b7a46;
+
+  /* ---- Typography (ui-spec.md §3) ---- */
+  --zen-font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  --zen-font-size-page-title: 1.5rem;
+  --zen-font-weight-page-title: 700;
+
+  --zen-font-size-section-heading: 1.125rem;
+  --zen-font-weight-section-heading: 600;
+
+  --zen-font-size-body: 1rem;
+  --zen-font-weight-body: 400;
+
+  --zen-font-size-label: 0.875rem;
+  --zen-font-weight-label: 600;
+
+  --zen-font-size-helper: 0.75rem;
+  --zen-font-weight-helper: 400;
+
+  --zen-font-size-error: 0.8125rem;
+  --zen-font-weight-error: 500;
+
+  --zen-line-height-body: 1.5;
+  --zen-line-height-heading: 1.3;
+
+  /* ---- Spacing (4px base unit) ---- */
+  --zen-space-unit: 4px;
+  --zen-space-field-gap: 16px;
+  --zen-space-group-gap: 24px;
+  --zen-space-section-gap: 32px;
+  --zen-space-card-padding-desktop: 24px;
+  --zen-space-card-padding-mobile: 16px;
+
+  /* ---- Radius ---- */
+  --zen-radius-card: 8px;
+  --zen-radius-control: 6px;
+  --zen-radius-badge: 999px;
+
+  /* ---- Shadow (restrained card elevation) ---- */
+  --zen-shadow-card: 0 1px 2px rgba(16, 40, 28, 0.06),
+    0 1px 3px rgba(16, 40, 28, 0.1);
+
+  /* ---- Container / layout ---- */
+  --zen-container-max-width: 1120px;
+  --zen-container-gutter-desktop: 24px;
+  --zen-container-gutter-mobile: 16px;
+
+  /* ---- Shared control sizing ---- */
+  --zen-control-height: 40px;
+  --zen-control-height-touch: 44px;
+}
+
+/* Keyboard-first focus visibility (ui-spec.md §1 principle 5, §12). */
+:focus-visible {
+  outline: 2px solid var(--zen-focus-ring);
+  outline-offset: 2px;
+}

@@ -1,0 +1,61 @@
+.zen-input,
+.zen-textarea,
+.zen-select {
+  box-sizing: border-box;
+  width: 100%;
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-body);
+  color: var(--zen-text);
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+  padding: 0 12px;
+}
+
+.zen-input,
+.zen-select {
+  height: var(--zen-control-height);
+}
+
+.zen-textarea {
+  min-height: 120px;
+  max-height: 480px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  resize: vertical;
+}
+
+.zen-input:hover:not(:disabled):not([readonly]),
+.zen-textarea:hover:not(:disabled):not([readonly]),
+.zen-select:hover:not(:disabled) {
+  border-color: var(--zen-border-strong);
+}
+
+/* Read-only presentation (ui-spec.md §5.3): visually distinct from an
+   editable control, no caret, but still focusable and SR-announced. */
+.zen-input--readonly,
+.zen-textarea--readonly,
+.zen-input[readonly],
+.zen-textarea[readonly] {
+  background: var(--zen-readonly-bg);
+  color: var(--zen-readonly-text);
+  border-color: var(--zen-border);
+  caret-color: transparent;
+}
+
+.zen-input:disabled,
+.zen-textarea:disabled,
+.zen-select:disabled {
+  background: var(--zen-readonly-bg);
+  color: var(--zen-text-muted);
+  cursor: not-allowed;
+}
+
+.zen-input--invalid,
+.zen-textarea--invalid,
+.zen-select--invalid,
+.zen-input[aria-invalid="true"],
+.zen-textarea[aria-invalid="true"],
+.zen-select[aria-invalid="true"] {
+  border-color: var(--zen-error);
+}
