@@ -4,6 +4,7 @@ import { categoriesRouter } from './routes/categories.ts';
 import { relatedSystemsRouter } from './routes/relatedSystems.ts';
 import { requestersRouter } from './routes/requesters.ts';
 import { ticketsRouter } from './routes/tickets.ts';
+import { attachmentsRouter } from './routes/attachments.ts';
 
 const app: Express = express();
 
@@ -46,5 +47,6 @@ app.use('/api/related-systems', relatedSystemsRouter);
 
 app.use('/api/requesters', requestersRouter);
 app.use('/api/tickets', ticketsRouter);
+app.use('/api/attachments', attachmentsRouter);
 
 export default app;

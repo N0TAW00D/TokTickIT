@@ -7,16 +7,14 @@ import { fileURLToPath } from 'node:url';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 
-// Covers docs/lab-02/api-spec.md §4.1 (POST /api/tickets/:id/attachments)
+// Covers docs/lab-02/api-spec.md §4.1-4.2 (attachment upload and metadata)
 // and tests.md API-22, API-23, API-25, the 6th-upload half of API-24, and
-// the upload half of API-26.
+// the upload/read halves of API-26.
 //
-// NOT covered here (slice 9b, #17's next slice — GET/download/DELETE on
-// /api/attachments/:id do not exist yet):
-//   - API-24's "after removing one, upload succeeds" half — needs DELETE
-//     to free up a slot.
-//   - API-26's read/download/delete-ownership halves — needs GET/download
-//     /DELETE routes to exist at all.
+// NOT covered here (slice 9b, #17's next commits — GET download and DELETE
+// on /api/attachments/:id do not exist yet):
+//   - API-24's "after removing one, upload succeeds" half — needs DELETE.
+//   - API-26's download/delete-ownership halves — needs those routes.
 //
 // This suite points ATTACHMENTS_DIR at a throwaway temp directory (rather
 // than the real, git-ignored server/uploads/) so test runs never write to
@@ -211,8 +209,8 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(activeCount).toBe(5);
 
       // "after removing one, upload succeeds" (the other half of API-24)
-      // needs DELETE /api/attachments/:id, which is slice 9b — not built
-      // yet. Left uncovered here deliberately rather than faked.
+      // needs DELETE /api/attachments/:id, which lands in a later slice-9b
+      // commit. Left uncovered here deliberately rather than faked.
     });
 
     it('holds the limit under genuinely concurrent uploads: one below the limit, 3 requests race for the last slot, exactly 1 succeeds and the rest are 409 (never 500)', async () => {
@@ -344,7 +342,7 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
   });
 
-  describe('API-26: attachment ownership (AC-37, BR-14) — upload half only', () => {
+  describe('API-26: attachment ownership (AC-37, BR-14) — upload/read halves only', () => {
     it("B uploading to A's ticket returns 404, byte-identical to uploading to an unknown ticket id", async () => {
       const ticketId = await createTicket(requesterAId);
 
@@ -362,9 +360,6 @@ describe('POST /api/tickets/:id/attachments', () => {
 
       const created = await prisma.attachment.count({ where: { ticketId } });
       expect(created).toBe(0);
-
-      // read/download/delete-ownership halves need GET/download/DELETE
-      // routes, which are slice 9b — not built yet.
     });
 
     it('a non-integer ticket id is treated as not found, not a 400 (api-spec.md §1.4)', async () => {
@@ -373,6 +368,29 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
+
+    it("B reading A's attachment returns 404, byte-identical to reading an unknown attachment id", async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+        filename: 'photo.jpg',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const notOwnedRes = await request(app)
+        .get(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterBId));
+      const unknownRes = await request(app)
+        .get('/api/attachments/999999')
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(notOwnedRes.status).toBe(404);
+      expect(unknownRes.status).toBe(404);
+      expect(notOwnedRes.body).toEqual(unknownRes.body);
+      expect(notOwnedRes.body.error).toBe('NOT_FOUND');
+    });
+
+    // download/delete-ownership halves need those routes, which land in
+    // later slice-9b commits — not built yet.
   });
 
   // api-spec.md §1.4a: "POST /api/tickets/:id/attachments requires
@@ -425,6 +443,89 @@ describe('POST /api/tickets/:id/attachments', () => {
         .post(`/api/tickets/${ticketId}/attachments`)
         .set('X-Requester-Id', '999999')
         .attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toBe('INVALID_REQUESTER');
+    });
+  });
+});
+
+describe('GET /api/attachments/:id', () => {
+  // No dedicated tests.md API-xx row for the happy path (only ownership,
+  // API-26, and the ticket-detail listing, API-21, are tracked) — this
+  // closes that gap the same way the §1.4a block above does for NO_FILE.
+  describe('metadata shape (api-spec.md §4.2) — no tests.md API-xx row', () => {
+    it('returns the same 9-key shape as the upload 201 body, including ticketId', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const res = await request(app)
+        .get(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body).sort()).toEqual(
+        ['id', 'ticketId', 'originalFilename', 'mimeType', 'fileSize', 'isRemoved', 'removedAt', 'removedReason', 'createdAt'].sort()
+      );
+      expect(res.body).toMatchObject({
+        id: attachmentId,
+        ticketId,
+        originalFilename: 'report.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 1000,
+        isRemoved: false,
+        removedAt: null,
+        removedReason: null,
+      });
+    });
+
+    it('returns a removed attachment too, with its removal metadata populated (BR-33)', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      // Soft-removed directly (DELETE /api/attachments/:id lands in a later
+      // slice-9b commit) — this test is about §4.2's read shape for a
+      // removed row, not about how the row came to be removed.
+      await prisma.attachment.update({
+        where: { id: attachmentId },
+        data: { isRemoved: true, removedAt: new Date(), removedReason: 'Uploaded the wrong file by mistake' },
+      });
+
+      const res = await request(app)
+        .get(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(res.status).toBe(200);
+      expect(res.body.isRemoved).toBe(true);
+      expect(res.body.removedAt).not.toBeNull();
+      expect(res.body.removedReason).toBe('Uploaded the wrong file by mistake');
+    });
+
+    it('a non-integer attachment id is treated as not found, not a 400 (api-spec.md §1.4)', async () => {
+      const res = await request(app).get('/api/attachments/abc').set('X-Requester-Id', String(requesterAId));
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('NOT_FOUND');
+    });
+
+    it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const missing = await request(app).get(`/api/attachments/${attachmentId}`);
+      expect(missing.status).toBe(400);
+      expect(missing.body.error).toBe('MISSING_REQUESTER');
+
+      const invalid = await request(app)
+        .get(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', '999999');
       expect(invalid.status).toBe(400);
       expect(invalid.body.error).toBe('INVALID_REQUESTER');
     });
