@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import type { Server } from 'node:http';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
@@ -16,6 +17,19 @@ import type { Priority } from '../../src/validation/ticketFields.js';
 // /api/attachments/:id` endpoint, which is being built on a different branch
 // and is not available here.
 
+// supertest spins up a brand-new ephemeral `app.listen(0)` server for every
+// single `request(app)` call unless it's handed an already-listening
+// server. See attachments.api.test.ts for the full explanation of the
+// resulting port-reuse/socket-hang-up failure mode this avoids. Binding one
+// real server here and reusing it (`request(server)`, never `request(app)`)
+// removes the churn for this file too.
+//
+// TODO(#34): once test/12-shared-supertest-server's `useTestServer(app)`
+// helper (server/tests/setup/http-server.ts) lands, fold this local
+// beforeAll/afterAll pair into that shared helper instead of keeping a
+// separate copy here.
+let server: Server;
+
 let categoryId: number;
 let relatedSystemId: number;
 let requesterAId: number;
@@ -24,6 +38,10 @@ let requesterBId: number;
 let ticketSeq = 0;
 
 beforeAll(async () => {
+  server = await new Promise<Server>((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+
   const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
   const requesters = await prisma.requesterUser.findMany({
@@ -36,6 +54,12 @@ beforeAll(async () => {
   relatedSystemId = relatedSystem.id;
   requesterAId = requesters[0]!.id;
   requesterBId = requesters[1]!.id;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
 });
 
 interface SeedTicketOverrides {
@@ -93,7 +117,7 @@ async function seedAttachment(ticketId: number, overrides: SeedAttachmentOverrid
 }
 
 function getTicket(ticketId: number | string, requesterId?: number) {
-  const req = request(app).get(`/api/tickets/${ticketId}`);
+  const req = request(server).get(`/api/tickets/${ticketId}`);
   return requesterId === undefined ? req : req.set('X-Requester-Id', String(requesterId));
 }
 
