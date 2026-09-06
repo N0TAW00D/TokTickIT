@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import express, { type Express, type Request, type Response } from 'express';
 import app from '../../src/app.js';
@@ -50,6 +50,41 @@ describe('GET /api/requesters', () => {
     expect(withInactiveHeader.status).toBe(200);
     expect(withBogusHeader.body).toEqual(withoutHeader.body);
     expect(withInactiveHeader.body).toEqual(withoutHeader.body);
+  });
+});
+
+// Covers docs/lab-02/tests.md API-04: GET /api/requesters failure/empty
+// shape — DB error -> 500 {error:"INTERNAL"} generic; empty table -> 200 [].
+// RequesterUser is shared seed reference data that reset-db.ts deliberately
+// never truncates and the suite above depends on, so the empty-table case
+// is proven by stubbing prisma.requesterUser.findMany to resolve [] rather
+// than by deleting the seeded rows.
+describe('API-04: GET /api/requesters failure/empty shape', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('DB error: returns the standard INTERNAL error body without leaking the thrown error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(prisma.requesterUser, 'findMany').mockRejectedValue(new Error('boom'));
+
+    const res = await request(app).get('/api/requesters');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('INTERNAL');
+    expect(typeof res.body.message).toBe('string');
+    expect(res.body.message.length).toBeGreaterThan(0);
+    expect(res.body.message).not.toContain('boom');
+    expect('fields' in res.body).toBe(false);
+  });
+
+  it('empty table: returns 200 []', async () => {
+    vi.spyOn(prisma.requesterUser, 'findMany').mockResolvedValue([]);
+
+    const res = await request(app).get('/api/requesters');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 });
 
