@@ -6,11 +6,17 @@ import {
   validateTicketFields,
 } from '../../src/validation/ticketFields.js';
 import { parseTicketListQuery } from '../../src/validation/ticketListQuery.js';
+import {
+  safeOriginalFilename,
+  sniffMimeType,
+  validateAttachmentType,
+} from '../../src/validation/attachmentFile.js';
 
 // Covers docs/lab-02/specification.md §4-fields, A-03 and tests.md UNIT-04,
 // plus (below) UNIT-05, the GET /api/tickets query-param parser (#18).
 //
-// Out of scope here: UNIT-06 (attachment type guard + safe filename, #17).
+// UNIT-06 (attachment type guard + safe filename, #17 slice 9a) is covered
+// in the `describe` blocks below as well.
 
 describe('validateSummary (UNIT-04)', () => {
   it('rejects a trimmed length of 4 (below the 5 minimum)', () => {
@@ -299,5 +305,121 @@ describe('parseTicketListQuery (UNIT-05)', () => {
     if (result.ok) return;
     const fields = result.errors.map((e) => e.field).sort();
     expect(fields).toEqual(['page', 'pageSize', 'sort']);
+  });
+});
+
+// UNIT-06 (docs/lab-02/tests.md): attachment type guard + safe filename
+// (specification.md BR-21, BR-29; api-spec.md §4.1).
+describe('validateAttachmentType (UNIT-06)', () => {
+  it('rejects a .exe file (extension not in the allowed set at all)', () => {
+    const result = validateAttachmentType('virus.exe', 'application/octet-stream');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a .txt file declaring text/plain', () => {
+    const result = validateAttachmentType('notes.txt', 'text/plain');
+    expect(result.ok).toBe(false);
+  });
+
+  it('accepts report.pdf declaring application/pdf', () => {
+    const result = validateAttachmentType('report.pdf', 'application/pdf');
+    expect(result).toEqual({ ok: true, value: { mimeType: 'application/pdf', extension: 'pdf' } });
+  });
+
+  it('accepts photo.jpg / photo.jpeg declaring image/jpeg, normalizing to the .jpg extension', () => {
+    expect(validateAttachmentType('photo.jpg', 'image/jpeg')).toEqual({
+      ok: true,
+      value: { mimeType: 'image/jpeg', extension: 'jpg' },
+    });
+    expect(validateAttachmentType('photo.jpeg', 'image/jpeg')).toEqual({
+      ok: true,
+      value: { mimeType: 'image/jpeg', extension: 'jpg' },
+    });
+  });
+
+  it('accepts icon.png / image.webp declaring their matching mime types', () => {
+    expect(validateAttachmentType('icon.png', 'image/png')).toEqual({
+      ok: true,
+      value: { mimeType: 'image/png', extension: 'png' },
+    });
+    expect(validateAttachmentType('image.webp', 'image/webp')).toEqual({
+      ok: true,
+      value: { mimeType: 'image/webp', extension: 'webp' },
+    });
+  });
+
+  it('rejects an extension/content mismatch: a .pdf name whose detected type is image/png (BR-21, API-22)', () => {
+    // This is the exact "renamed" scenario API-22 exercises against the
+    // live route: the route passes `sniffMimeType(buffer)` — the detected
+    // content type — as the second argument here, not the client's
+    // declared Content-Type, so a PNG's bytes renamed to a .pdf filename
+    // fail this comparison even though the extension alone looks fine.
+    const result = validateAttachmentType('renamed.pdf', 'image/png');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a file with no extension', () => {
+    expect(validateAttachmentType('noextension', 'application/pdf').ok).toBe(false);
+  });
+});
+
+describe('sniffMimeType (UNIT-06)', () => {
+  it('detects a JPEG from its FF D8 FF magic bytes', () => {
+    expect(sniffMimeType(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]))).toBe('image/jpeg');
+  });
+
+  it('detects a PNG from its 8-byte signature', () => {
+    expect(
+      sniffMimeType(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]))
+    ).toBe('image/png');
+  });
+
+  it('detects a WEBP from its RIFF....WEBP container', () => {
+    const buf = Buffer.concat([
+      Buffer.from('RIFF', 'ascii'),
+      Buffer.from([0x00, 0x00, 0x00, 0x00]), // size field, not part of the signature
+      Buffer.from('WEBP', 'ascii'),
+    ]);
+    expect(sniffMimeType(buf)).toBe('image/webp');
+  });
+
+  it('detects a PDF from its %PDF- header', () => {
+    expect(sniffMimeType(Buffer.from('%PDF-1.4\n%...', 'ascii'))).toBe('application/pdf');
+  });
+
+  it('returns null for unrecognized content (e.g. plain text or a PNG-renamed-.pdf payload)', () => {
+    expect(sniffMimeType(Buffer.from('just some plain text', 'ascii'))).toBeNull();
+  });
+
+  it('returns null for a buffer too short to contain any signature', () => {
+    expect(sniffMimeType(Buffer.from([0x89, 0x50]))).toBeNull();
+    expect(sniffMimeType(Buffer.alloc(0))).toBeNull();
+  });
+});
+
+describe('safeOriginalFilename (UNIT-06, BR-29)', () => {
+  it('strips Unix path components, keeping only the final segment', () => {
+    expect(safeOriginalFilename('../../etc/passwd')).toBe('passwd');
+  });
+
+  it('strips Windows-style path components too', () => {
+    expect(safeOriginalFilename('..\\..\\etc\\passwd')).toBe('passwd');
+  });
+
+  it('leaves a plain filename with no path components untouched', () => {
+    expect(safeOriginalFilename('battery-report.pdf')).toBe('battery-report.pdf');
+  });
+
+  it('truncates a filename longer than 255 characters', () => {
+    const longName = 'a'.repeat(300) + '.pdf';
+    const result = safeOriginalFilename(longName);
+    expect(result.length).toBe(255);
+    expect(result).toBe(longName.slice(0, 255));
+  });
+
+  it('a path-traversal name yields a stored-safe originalFilename with no path and length <= 255', () => {
+    const result = safeOriginalFilename('../../etc/passwd');
+    expect(result).not.toMatch(/[/\\]/);
+    expect(result.length).toBeLessThanOrEqual(255);
   });
 });
