@@ -13,37 +13,8 @@ import {
   TicketNotFoundError,
   type TicketDetailResponse,
 } from "../tickets/api";
+import { formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./TicketDetailScreen.css";
-
-const MONTH_ABBREVIATIONS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/**
- * Formats an ISO timestamp as "1 Sep 2026, 15:14" (ui-spec.md §10 mockup).
- * Built from UTC getters rather than `toLocaleString` so the rendered text
- * is deterministic regardless of the host's locale or timezone.
- */
-function formatTicketDate(iso: string): string {
-  const date = new Date(iso);
-  const day = date.getUTCDate();
-  const month = MONTH_ABBREVIATIONS[date.getUTCMonth()];
-  const year = date.getUTCFullYear();
-  const hours = String(date.getUTCHours()).padStart(2, "0");
-  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-  return `${day} ${month} ${year}, ${hours}:${minutes}`;
-}
 
 interface StaticFieldProps {
   label: string;
@@ -234,7 +205,7 @@ export function TicketDetailScreen() {
             />
             <StaticField
               label="Ticket Date"
-              value={formatTicketDate(state.ticket.createdAt)}
+              value={formatDateTimeWithYear(state.ticket.createdAt)}
             />
             <StaticField label="Category" value={state.ticket.category.name} />
             <StaticField

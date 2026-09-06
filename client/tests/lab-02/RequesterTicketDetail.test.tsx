@@ -158,7 +158,10 @@ describe("C-29 Ticket Detail read-only render", () => {
     if (!card) throw new Error("ticket information card did not render");
     const detail = within(card as HTMLElement);
 
-    expect(detail.getByText("1 Sep 2026, 08:14")).toBeInTheDocument();
+    // createdAt is "2026-09-01T08:14:00.000Z"; Asia/Bangkok is UTC+7, so the
+    // displayed value is 15:14, not the raw UTC 08:14 (specification.md
+    // BR-04/A-11, ui-spec.md §10).
+    expect(detail.getByText("1 Sep 2026, 15:14")).toBeInTheDocument();
     expect(detail.getByText(TICKET.category.name)).toBeInTheDocument();
     expect(detail.getByText(TICKET.requester.name)).toBeInTheDocument();
     expect(detail.getByText(TICKET.relatedSystem.name)).toBeInTheDocument();
