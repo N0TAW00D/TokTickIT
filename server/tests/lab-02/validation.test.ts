@@ -195,6 +195,49 @@ describe('parseTicketListQuery (UNIT-05)', () => {
     expect(result.value.search).toBe('vpn');
   });
 
+  it('UNIT-05 (extended): a present-but-blank value on any non-search param is 400, not defaulted (BR-19, FR-29)', () => {
+    // §3.2's table gives the "blank ⇒ ignored" exemption to `search`
+    // alone (BR-16); every other param's rule is "must be X ⇒ else 400",
+    // and a blank string is not a valid integer or enum member. Silently
+    // defaulting a *present* blank value would be exactly the coercion
+    // FR-29 forbids — this must not regress to the old (wrong) behavior
+    // where blank was read as "not specified" for every param.
+    const blankCases: Array<[field: string, query: Record<string, string>]> = [
+      ['page', { page: '' }],
+      ['page', { page: '   ' }],
+      ['pageSize', { pageSize: '' }],
+      ['priority', { priority: '' }],
+      ['status', { status: '' }],
+      ['sort', { sort: '' }],
+      ['order', { order: '' }],
+      ['categoryId', { categoryId: '' }],
+    ];
+
+    for (const [field, query] of blankCases) {
+      const result = parseTicketListQuery(query);
+      expect(result.ok, JSON.stringify(query)).toBe(false);
+      if (result.ok) continue;
+      expect(result.errors.map((e) => e.field), JSON.stringify(query)).toEqual([field]);
+    }
+  });
+
+  it('UNIT-05 (extended): an absent param still takes its documented default, unaffected by the blank-param fix', () => {
+    const result = parseTicketListQuery({ page: undefined, pageSize: undefined, priority: undefined });
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        search: undefined,
+        categoryId: undefined,
+        priority: undefined,
+        status: undefined,
+        sort: 'createdAt',
+        order: 'desc',
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
   it('accepts every valid pageSize (10, 20, 50)', () => {
     for (const pageSize of [10, 20, 50]) {
       const result = parseTicketListQuery({ pageSize: String(pageSize) });

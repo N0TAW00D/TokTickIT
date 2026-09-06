@@ -63,26 +63,31 @@ export type TicketListQueryResult =
   | { ok: false; errors: FieldError[] };
 
 /**
- * Collapses one query-string value to a single trimmed string.
+ * Collapses one query-string value to a single trimmed string, without
+ * judging blank vs. non-blank — §3.2 gives that judgment to `search`
+ * alone ("blank/whitespace-only search is treated as no search", BR-16),
+ * not to every param, so it can't be decided here in the shared helper.
+ * (An earlier version of this function did collapse blank to `undefined`
+ * for every param — that was wrong: BR-19/FR-29 require a *present*
+ * blank value like `?page=` or `?priority=` to be `400 INVALID_QUERY`,
+ * not silently treated as absent. Only `search`'s own parser, below, gets
+ * to treat blank as "ignored".)
  *
- * Returns `undefined` when the param was absent, or present but
- * blank/whitespace-only. §3.2 states that rule explicitly only for
- * `search` ("blank/whitespace-only search is treated as no search",
- * BR-16); this parser applies the same reading uniformly to every param —
- * `?priority=&page=` is naturally read as "the caller didn't specify
- * these", not as a rejection of an empty string.
- *
- * Returns `null` when the raw value isn't a single plain string at all —
- * e.g. Express/`qs` parses a repeated `?sort=a&sort=b` into an array, or a
- * bracketed `?sort[x]=a` into an object. Silently picking `raw[0]` or
- * stringifying an object would be exactly the kind of coercion BR-19/FR-29
- * forbid, so callers treat `null` as a shape failure for that field.
+ * Returns `undefined` when the param key was absent entirely (§3.2:
+ * absent ⇒ default). Returns `null` when the raw value isn't a single
+ * plain string at all — e.g. Express/`qs` parses a repeated
+ * `?sort=a&sort=b` into an array, or a bracketed `?sort[x]=a` into an
+ * object. Silently picking `raw[0]` or stringifying an object would be
+ * exactly the kind of coercion BR-19/FR-29 forbid, so callers treat
+ * `null` as a shape failure for that field. Otherwise returns the trimmed
+ * string, which is `''` for a present-but-blank value — every caller
+ * except `parseSearch` naturally rejects `''` via its own enum/regex
+ * check, producing the required `400`.
  */
 function singleTrimmedValue(raw: unknown): string | undefined | null {
   if (raw === undefined) return undefined;
   if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  return trimmed === '' ? undefined : trimmed;
+  return raw.trim();
 }
 
 type ParamResult<T> = { ok: true; value: T | undefined } | { ok: false; error: FieldError };
@@ -101,6 +106,10 @@ function parseSearch(raw: unknown): ParamResult<string> {
   if (value === null) {
     return { ok: false, error: { field: 'search', message: 'search must be a single string value.' } };
   }
+  // `search` is the one param §3.2/BR-16 exempts from the "blank ⇒ 400"
+  // rule: blank/whitespace-only (absent or `?search=` / `?search=%20%20`)
+  // is treated as "no search", not an error.
+  if (value === '') return { ok: true, value: undefined };
   return { ok: true, value };
 }
 

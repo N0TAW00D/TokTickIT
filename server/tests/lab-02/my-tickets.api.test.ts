@@ -372,6 +372,50 @@ describe('GET /api/tickets', () => {
     expect(stillRejected.body.error).toBe('INVALID_QUERY');
   });
 
+  it('API-17 (extended): a present-but-blank value on any non-search param is 400, not silently defaulted (BR-19, FR-29)', async () => {
+    // §3.2's query-param table gives the "blank ⇒ ignored" exemption to
+    // `search` alone (BR-16). Every other row is enum/integer "must be X
+    // ⇒ else 400", so `?page=`, `?pageSize=`, `?priority=`, `?status=`,
+    // `?sort=`, `?order=`, and `?categoryId=` must all reject rather than
+    // fall back to their defaults.
+    await seedTicket();
+
+    const blankCases: Array<[field: string, query: Record<string, string>]> = [
+      ['page', { page: '' }],
+      ['pageSize', { pageSize: '' }],
+      ['priority', { priority: '' }],
+      ['status', { status: '' }],
+      ['sort', { sort: '' }],
+      ['order', { order: '' }],
+      ['categoryId', { categoryId: '' }],
+    ];
+
+    for (const [field, query] of blankCases) {
+      const res = await listTickets(requesterAId, query);
+      expect(res.status, field).toBe(400);
+      expect(res.body.error, field).toBe('INVALID_QUERY');
+      const fields = (res.body.fields as Array<{ field: string; message: string }>).map((f) => f.field);
+      expect(fields, field).toContain(field);
+    }
+  });
+
+  it('API-17 (extended): blank search is still ignored (200), and an entirely omitted query still gets the documented defaults', async () => {
+    // The two behaviors the blank-param fix above must NOT change: BR-16's
+    // exemption for `search`, and absent (as opposed to present-but-blank)
+    // params still defaulting per §3.2.
+    const ticket = await seedTicket();
+
+    const blankSearch = await listTickets(requesterAId, { search: '   ' });
+    expect(blankSearch.status).toBe(200);
+    expect(idsOf(blankSearch.body.items)).toEqual([ticket.id]);
+
+    const noParams = await request(app).get('/api/tickets').set('X-Requester-Id', String(requesterAId));
+    expect(noParams.status).toBe(200);
+    expect(noParams.body.meta).toEqual(
+      expect.objectContaining({ sort: 'createdAt', order: 'desc', page: 1, pageSize: 10 })
+    );
+  });
+
   it('API-18: missing/unknown/inactive X-Requester-Id returns 400', async () => {
     const missing = await request(app).get('/api/tickets');
     expect(missing.status).toBe(400);
