@@ -1,0 +1,116 @@
+/* Development Requester Selection screen (ui-spec.md §6). This screen gets
+   its own slim, wordmark-only bar rather than the full AppShell — there is
+   no current Requester yet, so the nav and Requester menu would be
+   non-functional (see the "intentional deviation" note in ui-spec.md §6). */
+
+.zen-selection-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--zen-page-bg);
+}
+
+.zen-selection-screen__topbar {
+  background: var(--zen-primary);
+  color: var(--zen-surface);
+  padding: var(--zen-space-field-gap) var(--zen-container-gutter-desktop);
+}
+
+@media (max-width: 767px) {
+  .zen-selection-screen__topbar {
+    padding: var(--zen-space-field-gap) var(--zen-container-gutter-mobile);
+  }
+}
+
+.zen-selection-screen__wordmark {
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-section-heading);
+  font-weight: var(--zen-font-weight-section-heading);
+}
+
+.zen-selection-screen__main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--zen-space-section-gap) var(--zen-container-gutter-mobile);
+  box-sizing: border-box;
+}
+
+.zen-selection-screen__card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .zen-selection-screen__card {
+    max-width: none;
+    padding: var(--zen-space-card-padding-mobile);
+  }
+}
+
+.zen-selection-screen__icon {
+  text-align: center;
+  font-size: 2rem;
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-selection-screen__card h1 {
+  text-align: center;
+}
+
+.zen-selection-screen__description {
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-body);
+  text-align: center;
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+.zen-selection-screen__notice {
+  background: var(--zen-pale);
+  color: var(--zen-text);
+  border-radius: var(--zen-radius-control);
+  padding: var(--zen-space-field-gap);
+  margin-bottom: var(--zen-space-group-gap);
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-selection-screen__info {
+  background: var(--zen-pale);
+  color: var(--zen-text);
+  border-radius: var(--zen-radius-control);
+  padding: var(--zen-space-unit) var(--zen-space-field-gap);
+  font-size: var(--zen-font-size-helper);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+.zen-selection-screen__callout {
+  background: var(--zen-pale);
+  border-radius: var(--zen-radius-control);
+  padding: var(--zen-space-field-gap);
+  margin-bottom: var(--zen-space-group-gap);
+  font-size: var(--zen-font-size-helper);
+  color: var(--zen-text);
+}
+
+.zen-selection-screen__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--zen-space-unit);
+}
+
+@media (max-width: 479px) {
+  .zen-selection-screen__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-selection-screen__actions .zen-btn {
+    width: 100%;
+  }
+}
