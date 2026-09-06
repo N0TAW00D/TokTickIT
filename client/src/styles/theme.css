@@ -89,15 +89,12 @@
 /* ---------------------------------------------------------------------------
    Base layer — applies the tokens above to the page itself.
 
-   Without this the tokens are inert: the Vite scaffold in index.css still owns
-   `:root`'s color/background/font and ships a `prefers-color-scheme: dark`
-   block that repaints the page #16171d, so the app would render dark on a
-   dark-mode machine instead of the --zen-page-bg the spec requires. theme.css
-   is imported last, so these rules win.
-
-   index.css itself is left in place for now because the Lab 1 demo page in
-   App.tsx still depends on it; it is removed in the slice that replaces that
-   page with AppShell.
+   The Vite scaffold's index.css/App.css (which used to own `:root`'s
+   color/background/font and shipped a `prefers-color-scheme: dark` block
+   repainting the page #16171d) have been removed — theme.css is now the
+   only stylesheet styling the page shell, so the app no longer risks
+   rendering dark on a dark-mode machine instead of the --zen-page-bg the
+   spec requires.
    --------------------------------------------------------------------------- */
 
 :root {
