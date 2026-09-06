@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -15,12 +16,22 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-22 and C-28. Search/filter/sort
-// (C-23), pagination (C-24), and the empty / no-results / over-page states
-// (C-25, C-26, C-27) belong to the next slice.
+// Covers docs/lab-02/tests.md rows C-22, C-23, and C-28. Pagination (C-24)
+// and the empty / no-results / over-page states (C-25, C-26, C-27) belong
+// to the next slice.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
+const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
+
+// Category filter options (ui-spec.md §9's controls bar fetches these via
+// `GET /api/categories` on mount, independent of the tickets fetch). Named
+// to match the two seed tickets' own categories below, so a C-23 test that
+// filters by one of these is exercising a realistic scenario.
+const CATEGORIES = [
+  { id: 4, name: "Network" },
+  { id: 2, name: "Hardware" },
+];
 
 const TICKET_WITH_ATTACHMENTS = {
   id: 12,
@@ -112,10 +123,32 @@ function mockFetch(ticketsHandler?: TicketsHandler) {
         ticketsHandler ?? (() => jsonResponse(200, TICKETS_RESPONSE))
       )(input, init);
     }
+    if (input.startsWith(CATEGORIES_URL)) {
+      return jsonResponse(200, CATEGORIES);
+    }
     return jsonResponse(404, {});
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+/** Number of `/api/tickets` calls `fetchMock` has recorded — excludes the
+ * one `/api/categories` call the C-23 controls bar also fires on mount. */
+function ticketsCallCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([input]: [string]) =>
+    input.startsWith(TICKETS_URL),
+  ).length;
+}
+
+/** The `[url, init]` args of the Nth (1-indexed) `/api/tickets` call. */
+function ticketsCall(
+  fetchMock: ReturnType<typeof vi.fn>,
+  n: number,
+): [string, RequestInit | undefined] {
+  const calls = fetchMock.mock.calls.filter(([input]: [string]) =>
+    input.startsWith(TICKETS_URL),
+  ) as [string, RequestInit | undefined][];
+  return calls[n - 1];
 }
 
 /**
@@ -186,6 +219,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // A no-op when a test never switched to fake timers (C-23's debounce
+  // test does); always restoring here means a failure mid-test can never
+  // leak fake timers into the next test's real-timer `findBy*` calls.
+  vi.useRealTimers();
   window.localStorage.clear();
 });
 
@@ -223,16 +260,19 @@ describe("C-22 My Tickets list render", () => {
     expect(
       screen.getByRole("link", { name: "TKT-2026-000012" }),
     ).toHaveAttribute("href", "/tickets/12");
-    expect(screen.getByText("Cannot connect to VPN")).toBeInTheDocument();
-    expect(screen.getByText("Network")).toBeInTheDocument();
-    expect(screen.getByText("VPN")).toBeInTheDocument();
-    expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getAllByText("New")).toHaveLength(2);
+    // Scoped to the table (rather than the whole document): the C-23
+    // controls bar's Priority/Status filter selects render "High"/"New" as
+    // <option> text too, so an unscoped query would be ambiguous.
+    expect(within(table).getByText("Cannot connect to VPN")).toBeInTheDocument();
+    expect(within(table).getByText("Network")).toBeInTheDocument();
+    expect(within(table).getByText("VPN")).toBeInTheDocument();
+    expect(within(table).getByText("High")).toBeInTheDocument();
+    expect(within(table).getAllByText("New")).toHaveLength(2);
     expect(
-      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)),
+      within(table).getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)),
+      within(table).getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)),
     ).toBeInTheDocument();
 
     // Explicit, keyboard-reachable "View" affordance distinct from the
@@ -248,8 +288,11 @@ describe("C-22 My Tickets list render", () => {
       await screen.findByRole("heading", { name: /ticket details/i }),
     ).toBeInTheDocument();
 
-    // Requester-scoped per api-spec.md §1.2/§3.2.
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // Requester-scoped per api-spec.md §1.2/§3.2. Read via `ticketsCall`,
+    // not `fetchMock.mock.calls[0]` directly: the C-23 controls bar's
+    // `/api/categories` call (unrelated to Requester scoping) can land
+    // first depending on effect order.
+    const [, init] = ticketsCall(fetchMock, 1) as [string, RequestInit];
     expect(init.headers).toMatchObject({ "X-Requester-Id": "1" });
   });
 
@@ -307,6 +350,146 @@ describe("C-22 My Tickets list render", () => {
   });
 });
 
+describe("C-23 My Tickets controls fire correct query", () => {
+  it("debounces the search box 300ms: rapid typing fires no request per keystroke, then exactly one request carries the final value", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    vi.useFakeTimers();
+    const searchInput = screen.getByLabelText("Search");
+
+    // Three keystrokes, each within the previous one's 300ms window, so
+    // each restarts the timer instead of letting it fire.
+    fireEvent.change(searchInput, { target: { value: "v" } });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.change(searchInput, { target: { value: "vp" } });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.change(searchInput, { target: { value: "vpn" } });
+
+    // Half of "debounced": 299ms after the last keystroke, still nothing —
+    // rapid typing alone never fires a request per keystroke.
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // The other half: the remaining 1ms completes the 300ms window since
+    // the *last* keystroke, and exactly one new request fires, carrying
+    // the final typed value.
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+
+    const [finalUrl] = ticketsCall(fetchMock, 2);
+    expect(new URL(finalUrl).searchParams.get("search")).toBe("vpn");
+
+    vi.useRealTimers();
+  });
+
+  it("Category, Priority, and Status filters combine as AND in the request params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Default (unfiltered) request sends none of these params.
+    const [initialUrl] = ticketsCall(fetchMock, 1);
+    const initialParams = new URL(initialUrl).searchParams;
+    expect(initialParams.has("categoryId")).toBe(false);
+    expect(initialParams.has("priority")).toBe(false);
+    expect(initialParams.has("status")).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+
+    // Each filter change fires its own request (no debounce on selects):
+    // 1 initial + 3 changes.
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+
+    // The final request carries all three simultaneously — combined AND,
+    // not each filter overwriting the last.
+    const [finalUrl] = ticketsCall(fetchMock, 4);
+    const finalParams = new URL(finalUrl).searchParams;
+    expect(finalParams.get("categoryId")).toBe(String(CATEGORIES[0].id));
+    expect(finalParams.get("priority")).toBe("HIGH");
+    expect(finalParams.get("status")).toBe("NEW");
+  });
+
+  it("the Sort select and the sortable column headers both drive sort+order in the request", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Default is "Created (newest)" (ui-spec.md §9).
+    const defaultParams = new URL(
+      ticketsCall(fetchMock, 1)[0],
+    ).searchParams;
+    expect(defaultParams.get("sort")).toBe("createdAt");
+    expect(defaultParams.get("order")).toBe("desc");
+
+    // Sort select: "Ticket number (A→Z)" → sort=ticketNumber&order=asc.
+    // Controls (including this select) are disabled while a request is in
+    // flight (ui-spec.md §9's Loading row), so each step below awaits the
+    // list re-loading before the next interaction — otherwise the next
+    // fireEvent would land on a still-disabled control and silently do
+    // nothing, which is exactly the failure mode this awaits around.
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    let table = await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    let params = new URL(ticketsCall(fetchMock, 2)[0]).searchParams;
+    expect(params.get("sort")).toBe("ticketNumber");
+    expect(params.get("order")).toBe("asc");
+
+    // Column header click on "Last Updated": not yet the active sort
+    // field, so it switches to updatedAt at that column's own default
+    // order (descending).
+    let lastUpdatedHeader = within(table).getByRole("button", {
+      name: /sort by last updated/i,
+    });
+    fireEvent.click(lastUpdatedHeader);
+    table = await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    params = new URL(ticketsCall(fetchMock, 3)[0]).searchParams;
+    expect(params.get("sort")).toBe("updatedAt");
+    expect(params.get("order")).toBe("desc");
+
+    // Clicking the same header again toggles the order (desc → asc),
+    // rather than doing nothing or resetting to a default.
+    lastUpdatedHeader = within(table).getByRole("button", {
+      name: /sort by last updated/i,
+    });
+    fireEvent.click(lastUpdatedHeader);
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("sort")).toBe("updatedAt");
+    expect(params.get("order")).toBe("asc");
+  });
+});
+
 describe("C-28 My Tickets failure state", () => {
   it("shows role=alert with Retry when the list fetch rejects; Retry re-fetches and recovers", async () => {
     stubMatchMedia(true);
@@ -332,7 +515,11 @@ describe("C-28 My Tickets failure state", () => {
 
     await screen.findByRole("table");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Counts only `/api/tickets` calls: the C-23 controls bar also fires one
+    // `/api/categories` call on mount (for the Category filter), which
+    // `fetchMock` intercepts too but which isn't what this assertion is
+    // about.
+    expect(ticketsCallCount(fetchMock)).toBe(2);
   });
 });
 
