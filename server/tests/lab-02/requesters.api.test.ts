@@ -117,6 +117,22 @@ describe('requesterContext middleware', () => {
     expect('fields' in res.body).toBe(false);
   });
 
+  it('rejects an id beyond Postgres int4 range with 400 INVALID_REQUESTER, not 500', async () => {
+    // A positive integer larger than int4 is syntactically valid but cannot
+    // reference any row, so api-spec.md §1.2 puts it in the existence branch.
+    // Passing it to Prisma raises "out of range", which would leak as a 500
+    // for what is really bad client input (BR-41 / §1.3).
+    for (const id of ['2147483648', '3000000000', '99999999999999999999']) {
+      const res = await request(buildTestApp())
+        .get('/__test/protected')
+        .set('X-Requester-Id', id);
+
+      expect(res.status, `id ${id} should not 500`).toBe(400);
+      expect(res.body.error).toBe('INVALID_REQUESTER');
+      expect('fields' in res.body).toBe(false);
+    }
+  });
+
   it('rejects a header for an inactive Requester with 400 INVALID_REQUESTER', async () => {
     const inactive = await prisma.requesterUser.findFirstOrThrow({
       where: { isActive: false },

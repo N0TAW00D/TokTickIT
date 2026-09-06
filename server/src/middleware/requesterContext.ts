@@ -10,6 +10,9 @@ import { prisma } from '../lib/prisma.ts';
 // not mount this middleware and therefore ignore the header entirely, as
 // required by api-spec.md §1.2.
 
+/** Largest value Postgres `int4` (and therefore Prisma `Int`) can hold. */
+const PG_INT4_MAX = 2_147_483_647;
+
 export interface RequesterContext {
   id: number;
   name: string;
@@ -53,8 +56,18 @@ export async function requesterContext(req: Request, res: Response, next: NextFu
   }
 
   const id = Number(trimmed);
-  if (!Number.isSafeInteger(id) || id <= 0) {
+  if (id <= 0) {
     missingRequester(res);
+    return;
+  }
+
+  // A syntactically valid positive integer can still be larger than the
+  // Postgres `int4` that backs `RequesterUser.id`. Querying with it makes the
+  // driver raise "out of range", which would surface as a 500 for what is
+  // really bad client input. Such an id cannot reference any row, so §1.2's
+  // table puts it in the existence branch: 400 INVALID_REQUESTER.
+  if (id > PG_INT4_MAX) {
+    invalidRequester(res);
     return;
   }
 
