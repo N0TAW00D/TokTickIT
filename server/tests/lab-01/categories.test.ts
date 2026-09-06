@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
+import { useTestServer } from '../setup/http-server.js';
+
+// See tests/setup/http-server.ts for why requests go through one shared,
+// already-listening server rather than `request(app)`.
+const testServer = useTestServer(app);
 
 describe('GET /api/categories', () => {
   it('responds with categories ordered by id, containing only id and name', async () => {
-    const response = await request(app).get('/api/categories')
+    const response = await request(testServer.server).get('/api/categories')
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual([
