@@ -17,11 +17,9 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-22, C-23, and C-28, plus AC-09 (the
+// Covers docs/lab-02/tests.md rows C-22 through C-28, plus AC-09 (the
 // My-Tickets-side half of the Requester-switch reset; tests.md files C-08
-// under AppShell.test.tsx for the id/name-context half). Pagination (C-24)
-// and the empty / no-results / over-page states (C-25, C-26, C-27) belong
-// to the next slice.
+// under AppShell.test.tsx for the id/name-context half).
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
@@ -164,6 +162,71 @@ function ticketsCall(
     input.startsWith(TICKETS_URL),
   ) as [string, RequestInit | undefined][];
   return calls[n - 1];
+}
+
+/** One page's worth of dummy items — `count` tickets numbered from `start`,
+ * for tests where the pagination `meta` is what's under test, not any
+ * particular ticket's content. */
+function makeTickets(start: number, count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const n = start + index;
+    return {
+      id: n,
+      ticketNumber: `TKT-2026-${String(n).padStart(6, "0")}`,
+      summary: `Ticket ${n}`,
+      category: CATEGORIES[0],
+      relatedSystem: { id: 3, name: "VPN" },
+      requestedPriority: "LOW",
+      status: "NEW",
+      createdAt: "2026-09-01T02:08:00.000Z",
+      updatedAt: "2026-09-01T02:08:00.000Z",
+      activeAttachmentCount: 0,
+    };
+  });
+}
+
+/** A 3-page (30-item, pageSize-10) `/api/tickets` handler whose response
+ * `meta.page` always echoes back whatever `page` the request asked for —
+ * used by the page-reset tests below, where the fixed 2-item payload keeps
+ * each response focused on `meta.page`, not on distinguishing item content
+ * per page (C-24 above already covers that). */
+function manyPagesHandler(): TicketsHandler {
+  return (input) => {
+    const page = Number(new URL(input).searchParams.get("page") ?? "1");
+    return jsonResponse(200, {
+      items: [TICKET_WITH_ATTACHMENTS, TICKET_WITHOUT_ATTACHMENTS],
+      meta: {
+        page,
+        pageSize: 10,
+        totalItems: 30,
+        totalPages: 3,
+        sort: "createdAt",
+        order: "desc",
+      },
+    });
+  };
+}
+
+/** Drives the screen from its initial page 1 load to page 3, awaiting the
+ * list between each click since ui-spec.md §9's Loading row disables the
+ * pagination controls (including the page-number buttons) while a request
+ * is in flight — clicking "Page 3" before "Page 2"'s request has resolved
+ * would land on a still-disabled button and silently do nothing. */
+async function goToPage3(fetchMock: ReturnType<typeof vi.fn>) {
+  await screen.findByRole("table");
+  fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+  await screen.findByRole("table");
+  expect(ticketsCallCount(fetchMock)).toBe(2);
+  expect(new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("page")).toBe(
+    "2",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+  await screen.findByRole("table");
+  expect(ticketsCallCount(fetchMock)).toBe(3);
+  expect(new URL(ticketsCall(fetchMock, 3)[0]).searchParams.get("page")).toBe(
+    "3",
+  );
 }
 
 /**
@@ -508,6 +571,539 @@ describe("C-23 My Tickets controls fire correct query", () => {
     params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
     expect(params.get("sort")).toBe("updatedAt");
     expect(params.get("order")).toBe("asc");
+  });
+});
+
+describe("C-24 My Tickets pagination", () => {
+  it("Next fetches page 2, 'Showing a-b of total' comes from meta, and Prev is disabled only on page 1", async () => {
+    stubMatchMedia(true);
+    const PAGE_1 = {
+      items: makeTickets(1, 10),
+      meta: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 22,
+        totalPages: 3,
+        sort: "createdAt",
+        order: "desc",
+      },
+    };
+    const PAGE_2 = {
+      items: makeTickets(11, 10),
+      meta: {
+        page: 2,
+        pageSize: 10,
+        totalItems: 22,
+        totalPages: 3,
+        sort: "createdAt",
+        order: "desc",
+      },
+    };
+    const fetchMock = mockFetch((input) => {
+      const page = new URL(input).searchParams.get("page");
+      return jsonResponse(200, page === "2" ? PAGE_2 : PAGE_1);
+    });
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(screen.getByText("Showing 1–10 of 22")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /prev/i })).toBeDisabled();
+    // Numbered pages: the current page's own button is also disabled
+    // (nothing to gain by re-requesting the page already shown).
+    expect(screen.getByRole("button", { name: "Page 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Page 2" })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("page"),
+    ).toBe("2");
+    expect(screen.getByText("Showing 11–20 of 22")).toBeInTheDocument();
+    // Prev is enabled once off page 1; Next stays enabled (page 2 of 3).
+    expect(screen.getByRole("button", { name: /prev/i })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
+
+    // A numbered-page button (not just Next) also drives the request —
+    // clicking "Page 1" goes directly back, not merely toggling Prev.
+    fireEvent.click(screen.getByRole("button", { name: "Page 1" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    expect(
+      new URL(ticketsCall(fetchMock, 3)[0]).searchParams.get("page"),
+    ).toBe("1");
+    expect(screen.getByRole("button", { name: /prev/i })).toBeDisabled();
+  });
+
+  it("changing the rows-per-page select sends the new pageSize", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(
+      new URL(ticketsCall(fetchMock, 1)[0]).searchParams.get("pageSize"),
+    ).toBe("10");
+
+    fireEvent.change(screen.getByLabelText("Rows"), {
+      target: { value: "20" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("pageSize"),
+    ).toBe("20");
+  });
+});
+
+describe("C-25 My Tickets empty state", () => {
+  it("shows EmptyState with a 'create your first ticket' CTA when the Requester owns zero tickets — not the no-results state", async () => {
+    stubMatchMedia(true);
+    mockFetch(() =>
+      jsonResponse(200, {
+        items: [],
+        meta: {
+          page: 1,
+          pageSize: 10,
+          totalItems: 0,
+          totalPages: 0,
+          sort: "createdAt",
+          order: "desc",
+        },
+      }),
+    );
+    renderScreen();
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "You haven't created any tickets yet.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create your first ticket/i }),
+    ).toBeInTheDocument();
+
+    // Not the no-results presentation.
+    expect(
+      screen.queryByText("No tickets match your search or filters."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^clear filters$/i }),
+    ).not.toBeInTheDocument();
+
+    // AC-29: "Filters/search hidden ... nothing to filter" — the whole
+    // controls bar is gone, not just disabled-and-invisible-anyway.
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Category")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sort")).not.toBeInTheDocument();
+
+    // No list, and no pagination summary for an empty list.
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^showing /i)).not.toBeInTheDocument();
+  });
+});
+
+describe("C-26 My Tickets no-results state", () => {
+  it("shows NoResultsState with Clear filters when an active filter matches nothing, keeping the filter bar visible and populated", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch((input) => {
+      const categoryId = new URL(input).searchParams.get("categoryId");
+      if (categoryId === String(CATEGORIES[0].id)) {
+        return jsonResponse(200, {
+          items: [],
+          meta: {
+            page: 1,
+            pageSize: 10,
+            totalItems: 0,
+            totalPages: 0,
+            sort: "createdAt",
+            order: "desc",
+          },
+        });
+      }
+      return jsonResponse(200, TICKETS_RESPONSE);
+    });
+    renderScreen();
+
+    await screen.findByRole("table");
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+
+    const noResultsMessage = await screen.findByText(
+      "No tickets match your search or filters.",
+    );
+    expect(noResultsMessage).toBeInTheDocument();
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    // Scoped to the no-results block itself: the header's own "Clear
+    // filters" button (ui-spec.md §9) is also visible right now — the
+    // Category filter it clears is exactly what's non-default — so an
+    // unscoped query would match two buttons of the same name.
+    const noResultsRegion = noResultsMessage.parentElement as HTMLElement;
+    const clearButton = within(noResultsRegion).getByRole("button", {
+      name: /clear filters/i,
+    });
+    expect(clearButton).toBeInTheDocument();
+
+    // Not the true-empty presentation.
+    expect(
+      screen.queryByText("You haven't created any tickets yet."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /create your first ticket/i }),
+    ).not.toBeInTheDocument();
+
+    // BR-37: the filter bar stays visible AND populated — not hidden, not
+    // reset back to defaults.
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+    expect(screen.getByLabelText("Category")).toHaveValue(
+      String(CATEGORIES[0].id),
+    );
+
+    // Clear filters recovers the list.
+    fireEvent.click(clearButton);
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+  });
+});
+
+describe("Whitespace-only search counts as inactive (bug guard, api.ts BR-16 / ui-spec.md §9 BR-37)", () => {
+  it("keeps the true-empty state (not no-results) once a whitespace-only search commits, for a Requester who owns zero tickets", async () => {
+    stubMatchMedia(true);
+    // Every /api/tickets call reports zero tickets, regardless of query
+    // params — api.ts itself already trims and drops a whitespace-only
+    // `search` before it ever reaches the request (never sent as a
+    // param), so this handler doesn't need to branch on the query string
+    // to be a faithful stand-in for the real API.
+    mockFetch(() =>
+      jsonResponse(200, {
+        items: [],
+        meta: {
+          page: 1,
+          pageSize: 10,
+          totalItems: 0,
+          totalPages: 0,
+          sort: "createdAt",
+          order: "desc",
+        },
+      }),
+    );
+    renderScreen();
+
+    // The controls bar (including Search) renders from the very first
+    // paint — `variant` is hard-coded to "rows" (hideControls: false)
+    // until `state.phase` becomes "loaded" — so the box is there to type
+    // into immediately, before the in-flight request has told the screen
+    // this Requester owns zero tickets.
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "   " },
+    });
+
+    // The initial load lands with zero tickets and no committed query yet
+    // (the debounce hasn't fired): C-25's true-empty presentation.
+    await screen.findByRole("heading", {
+      name: "You haven't created any tickets yet.",
+    });
+
+    // Let the 300ms debounce actually commit the whitespace-only value
+    // (real timers throughout this test, so a real wait is what settles
+    // it — see the mount-debounce regression test above for the same
+    // technique).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    // BR-16: a whitespace-only search is not an active query. The
+    // Requester still owns zero tickets, so this must stay the true-empty
+    // state — not flip to "no tickets match your search or filters".
+    expect(
+      screen.getByRole("heading", {
+        name: "You haven't created any tickets yet.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create your first ticket/i }),
+    ).toBeInTheDocument();
+    // Not the no-results presentation (that text is NoResultsState's own
+    // marker — ui-spec.md §9, BR-37, C-26). The header-level "Clear
+    // filters" button is a separate control keyed off the raw field
+    // values rather than this empty/no-results split, so it isn't a
+    // signal for this assertion either way.
+    expect(
+      screen.queryByText("No tickets match your search or filters."),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("C-27 My Tickets last/over page", () => {
+  it("shows 'No more tickets on this page.' with a Back to page 1 action when the requested page is past the end — not an error", async () => {
+    stubMatchMedia(true);
+    const PAGE_1 = {
+      items: makeTickets(1, 10),
+      meta: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 15,
+        totalPages: 2,
+        sort: "createdAt",
+        order: "desc",
+      },
+    };
+    // Simulates tickets having been removed between page 1 loading (which
+    // advertised 2 pages) and the page-2 request landing: the API still
+    // returns 200 with items: [] and a meta reflecting the now-smaller
+    // count (api-spec.md §3.2, BR-19, AC-27) — never an error.
+    const OVER_PAGE = {
+      items: [],
+      meta: {
+        page: 2,
+        pageSize: 10,
+        totalItems: 5,
+        totalPages: 1,
+        sort: "createdAt",
+        order: "desc",
+      },
+    };
+    const fetchMock = mockFetch((input) => {
+      const page = new URL(input).searchParams.get("page");
+      return jsonResponse(200, page === "2" ? OVER_PAGE : PAGE_1);
+    });
+    renderScreen();
+
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    expect(
+      await screen.findByText("No more tickets on this page."),
+    ).toBeInTheDocument();
+    const backButton = screen.getByRole("button", {
+      name: /back to page 1/i,
+    });
+    expect(backButton).toBeInTheDocument();
+
+    // Not an error — no alert region, and not the plain no-results wording.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No tickets match your search or filters."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(backButton);
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    expect(
+      new URL(ticketsCall(fetchMock, 3)[0]).searchParams.get("page"),
+    ).toBe("1");
+  });
+});
+
+describe("Page resets to 1 on filter/search/sort/page-size change (bug guard, ui-spec.md §9)", () => {
+  it("changing the Category filter while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("categoryId")).toBe(String(CATEGORIES[0].id));
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("changing the Sort select while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("sort")).toBe("ticketNumber");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("changing the Priority filter while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("priority")).toBe("HIGH");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("changing the Status filter while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("status")).toBe("NEW");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("toggling sort via a column header while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+    // Captured only now, not before goToPage3: each page change flashes a
+    // LoadingState in between, unmounting and remounting the table, so an
+    // earlier reference would be a detached node clicking on which would
+    // silently do nothing to the live component.
+    const table = await screen.findByRole("table");
+
+    fireEvent.click(
+      within(table).getByRole("button", { name: /sort by last updated/i }),
+    );
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("sort")).toBe("updatedAt");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("committing a debounced search while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "vpn" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    vi.useRealTimers();
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("search")).toBe("vpn");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("changing the rows-per-page select while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+    await goToPage3(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("Rows"), {
+      target: { value: "20" },
+    });
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    const params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("pageSize")).toBe("20");
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("clicking Clear filters while on page 3 resets to page 1", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+
+    // Move a filter off default *before* navigating to page 3 (not after)
+    // so Clear filters' own reset is what's under test: handleCategoryChange
+    // already resets the page itself (covered above), so triggering it on
+    // page 3 would land back on page 1 regardless of what Clear filters
+    // does, making the assertion below pass even with that reset deleted.
+    // Changing the filter first, then paging to 3 off the back of it, means
+    // Clear filters is the only thing touched while on page 3.
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+
+    // Page to 3 by hand (rather than the goToPage3 helper, which hardcodes
+    // absolute call counts starting from the initial render).
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    expect(
+      new URL(ticketsCall(fetchMock, 3)[0]).searchParams.get("page"),
+    ).toBe("2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 3" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    expect(
+      new URL(ticketsCall(fetchMock, 4)[0]).searchParams.get("page"),
+    ).toBe("3");
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    await screen.findByRole("table");
+
+    expect(ticketsCallCount(fetchMock)).toBe(5);
+    const params = new URL(ticketsCall(fetchMock, 5)[0]).searchParams;
+    expect(params.has("categoryId")).toBe(false);
+    expect(params.get("page")).toBe("1");
+  });
+
+  it("does NOT reset an already-advanced page when the mount-time debounce settles on an unchanged (still empty) search (regression guard)", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+
+    // The search-debounce effect's 300ms timer starts ticking the instant
+    // this component mounts — it fires once on mount just like any other
+    // effect, even though the search box was never touched. Real time
+    // elapsed getting from mount through the initial page-1 load and a
+    // click to page 2 is a handful of milliseconds, well inside that
+    // still-pending window, so this reproduces "the user reaches page 3
+    // within 300ms of mount" without needing fake timers (this test never
+    // touches the search box, so there is nothing for fake-timer
+    // advancement to target).
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("page"),
+    ).toBe("2");
+
+    // Let the mount-time debounce timer actually elapse for real. The
+    // search box's value ("") hasn't changed since mount, so this must
+    // not bounce the page back to 1 or fire a spurious extra request.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(screen.getByRole("button", { name: "Page 2" })).toBeDisabled();
   });
 });
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -6,6 +6,9 @@ import { SelectField, type SelectOption } from "../components/SelectField";
 import { TextInput } from "../components/TextInput";
 import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
+import { EmptyState } from "../components/EmptyState";
+import { NoResultsState } from "../components/NoResultsState";
+import { Pagination, type PageSizeValue } from "../components/Pagination";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -17,6 +20,7 @@ import {
   type RequestedPriority,
   type SortOrder,
   type TicketListItem,
+  type TicketListMeta,
   type TicketSortField,
 } from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
@@ -30,8 +34,34 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 type ListState =
   | { phase: "loading" }
-  | { phase: "loaded"; items: TicketListItem[] }
+  | { phase: "loaded"; items: TicketListItem[]; meta: TicketListMeta }
   | { phase: "error"; message: string };
+
+/**
+ * Which of the three "list came back empty" presentations (ui-spec.md §9
+ * States table, BR-37) applies. All three share `items: []` from the API
+ * (api-spec.md §3.2, AC-27) — this is derived from `meta` plus whether a
+ * search/filter query is active, never from anything the caller can't see
+ * in the response.
+ *
+ * - `empty`: the Requester owns zero tickets at all (`meta.totalItems`
+ *   is 0 with no active query) — AC-29.
+ * - `noResults`: an active search/filter matched nothing (`totalItems`
+ *   is 0 *because* a query is active) — AC-30, BR-37.
+ * - `overPage`: real tickets exist (`totalItems > 0`) but the requested
+ *   page is past the last one, so this page's slice is empty — AC-27.
+ */
+type EmptyishVariant = "rows" | "empty" | "noResults" | "overPage";
+
+function classifyList(
+  items: TicketListItem[],
+  meta: TicketListMeta,
+  hasActiveQuery: boolean,
+): EmptyishVariant {
+  if (items.length > 0) return "rows";
+  if (meta.totalItems === 0) return hasActiveQuery ? "noResults" : "empty";
+  return "overPage";
+}
 
 const PRIORITY_OPTIONS: SelectOption[] = [
   { value: "LOW", label: "Low" },
@@ -60,6 +90,8 @@ const SORT_OPTIONS: SortSelectOption[] = [
 
 const DEFAULT_SORT: TicketSortField = "createdAt";
 const DEFAULT_ORDER: SortOrder = "desc";
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE: PageSizeValue = 10;
 
 /** The order a column header's first click applies, per field (ui-spec.md §9). */
 const HEADER_DEFAULT_ORDER: Record<TicketSortField, SortOrder> = {
@@ -330,9 +362,9 @@ function TicketsCards({ items }: TicketRowsProps) {
 
 /**
  * My Tickets screen (ui-spec.md §9, `/tickets`) — data fetch, list
- * rendering, controls (search/filter/sort/clear), and loading/failure
- * states. Pagination and the empty / no-results / over-page states belong
- * to the next slice (Issue #18 part 3).
+ * rendering, controls (search/filter/sort/clear), pagination, and every
+ * loading/failure/empty-ish state (loading, failure, empty, no-results,
+ * over-page).
  */
 export function MyTicketsScreen() {
   const navigate = useNavigate();
@@ -349,6 +381,8 @@ export function MyTicketsScreen() {
   const [status, setStatus] = useState("");
   const [sort, setSort] = useState<TicketSortField>(DEFAULT_SORT);
   const [order, setOrder] = useState<SortOrder>(DEFAULT_ORDER);
+  const [page, setPage] = useState(DEFAULT_PAGE);
+  const [pageSize, setPageSize] = useState<PageSizeValue>(DEFAULT_PAGE_SIZE);
 
   const isLoading = state.phase === "loading";
 
@@ -359,6 +393,19 @@ export function MyTicketsScreen() {
     status === "" &&
     sort === DEFAULT_SORT &&
     order === DEFAULT_ORDER;
+
+  // Drives the empty vs. no-results split (BR-37): only a search/filter
+  // counts as an active "query" here — sort and page never do, since
+  // reordering or paging an otherwise-empty owner's list can't be what
+  // produced zero results. debouncedSearch is trimmed before the check so
+  // a whitespace-only search — which api.ts already drops rather than
+  // sending as a `search` param (BR-16) — counts as inactive here too,
+  // matching what the server actually saw.
+  const hasActiveQuery =
+    debouncedSearch.trim() !== "" ||
+    categoryId !== "" ||
+    priority !== "" ||
+    status !== "";
 
   // Reference data for the Category filter (ui-spec.md §9, `GET
   // /api/categories`) — not Requester-scoped, loaded once. A failure here
@@ -371,12 +418,33 @@ export function MyTicketsScreen() {
       .catch(() => {});
   }, []);
 
+  // The last search value the debounce actually *committed*, normalized
+  // the same way hasActiveQuery/BR-16 treat "active" (trimmed). Seeded
+  // from the initial searchInput so this effect's mount-time run — it
+  // fires once on mount just like any other effect, with the search box
+  // still empty — reads as "unchanged" rather than a change into "".
+  const previousSearchRef = useRef(searchInput.trim());
+
   // Debounce the search box 300ms before it drives the `search` param
   // (ui-spec.md §9, AC-23): every keystroke restarts this timer, so only
   // the value that has stood still for the full delay is ever applied.
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchInput);
+      const normalizedSearch = searchInput.trim();
+      // Reset the page only when the search term actually changed.
+      // Without this guard, the mount-time run above (searchInput is
+      // still "" then) would unconditionally bounce an already-paginated
+      // user back to page 1 moments after mount. A genuine change, on
+      // the other hand, can move the current page past the new result
+      // count (or simply mean something different at "page 3") — so that
+      // case still lands back on page 1 rather than risk stranding the
+      // user on an over-page/no-results state a fresh page 1 wouldn't
+      // have shown.
+      if (normalizedSearch !== previousSearchRef.current) {
+        setPage(DEFAULT_PAGE);
+      }
+      previousSearchRef.current = normalizedSearch;
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [searchInput]);
@@ -394,9 +462,11 @@ export function MyTicketsScreen() {
       status: status || undefined,
       sort,
       order,
+      page,
+      pageSize,
     })
       .then((response) => {
-        setState({ phase: "loaded", items: response.items });
+        setState({ phase: "loaded", items: response.items, meta: response.meta });
       })
       .catch(() => {
         setState({
@@ -405,11 +475,29 @@ export function MyTicketsScreen() {
             "Could not load your tickets. Please check your connection and try again.",
         });
       });
-  }, [requesterId, debouncedSearch, categoryId, priority, status, sort, order]);
+  }, [
+    requesterId,
+    debouncedSearch,
+    categoryId,
+    priority,
+    status,
+    sort,
+    order,
+    page,
+    pageSize,
+  ]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Every handler below that changes search/filters/sort/page-size also
+  // resets to page 1 in the same call — not via a separate "watch for
+  // change, then reset" effect. Reacting to a filter change with a fetch
+  // fired against the *old* page before a follow-up effect corrects it
+  // would flash a wrong request (or a stray "no more tickets" message)
+  // between the two; batching both state updates into one handler means
+  // `load` only ever sees the two changes together, as a single request.
 
   function handleToggleSort(field: TicketSortField) {
     if (sort === field) {
@@ -418,6 +506,7 @@ export function MyTicketsScreen() {
       setSort(field);
       setOrder(HEADER_DEFAULT_ORDER[field]);
     }
+    setPage(DEFAULT_PAGE);
   }
 
   function handleSortSelectChange(value: string) {
@@ -425,6 +514,31 @@ export function MyTicketsScreen() {
     if (!option) return;
     setSort(option.sort);
     setOrder(option.order);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handleCategoryChange(value: string) {
+    setCategoryId(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handlePriorityChange(value: string) {
+    setPriority(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handleStatusChange(value: string) {
+    setStatus(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handlePageChange(nextPage: number) {
+    setPage(nextPage);
+  }
+
+  function handlePageSizeChange(nextPageSize: PageSizeValue) {
+    setPageSize(nextPageSize);
+    setPage(DEFAULT_PAGE);
   }
 
   function handleClearFilters() {
@@ -435,6 +549,7 @@ export function MyTicketsScreen() {
     setStatus("");
     setSort(DEFAULT_SORT);
     setOrder(DEFAULT_ORDER);
+    setPage(DEFAULT_PAGE);
   }
 
   const categoryOptions = useMemo<SelectOption[]>(
@@ -445,6 +560,22 @@ export function MyTicketsScreen() {
       })),
     [categories],
   );
+
+  // Only meaningful once loaded — classifyList always returns "rows" for
+  // the loading/error phases' placeholder meta, which nothing below reads
+  // in those phases anyway.
+  const variant: EmptyishVariant =
+    state.phase === "loaded"
+      ? classifyList(state.items, state.meta, hasActiveQuery)
+      : "rows";
+
+  // ui-spec.md §9 AC-29: the true-empty state ("Requester owns zero
+  // tickets") hides the search/filter/sort bar entirely — there is
+  // nothing to search or filter yet. The no-results and over-page states
+  // (both reached only once a query is active or a page requested) keep
+  // it visible and populated on purpose (AC-30, BR-37) so the user can see
+  // and undo what produced the empty slice.
+  const hideControls = variant === "empty";
 
   return (
     <AppShell>
@@ -471,59 +602,61 @@ export function MyTicketsScreen() {
         </div>
       </div>
 
-      <div className="zen-my-tickets__controls">
-        <div className="zen-my-tickets__search-field">
-          <label htmlFor="my-tickets-search" className="zen-visually-hidden">
-            Search
-          </label>
-          <TextInput
-            id="my-tickets-search"
-            type="search"
-            placeholder="Search by ticket number or summary"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            disabled={isLoading}
-          />
-        </div>
+      {!hideControls && (
+        <div className="zen-my-tickets__controls">
+          <div className="zen-my-tickets__search-field">
+            <label htmlFor="my-tickets-search" className="zen-visually-hidden">
+              Search
+            </label>
+            <TextInput
+              id="my-tickets-search"
+              type="search"
+              placeholder="Search by ticket number or summary"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              disabled={isLoading}
+            />
+          </div>
 
-        <div className="zen-my-tickets__filters">
-          <SelectField
-            id="my-tickets-category"
-            label="Category"
-            value={categoryId}
-            onChange={setCategoryId}
-            placeholder="All Categories"
-            disabled={isLoading}
-            options={categoryOptions}
-          />
-          <SelectField
-            id="my-tickets-priority"
-            label="Priority"
-            value={priority}
-            onChange={setPriority}
-            placeholder="All Priorities"
-            disabled={isLoading}
-            options={PRIORITY_OPTIONS}
-          />
-          <SelectField
-            id="my-tickets-status"
-            label="Status"
-            value={status}
-            onChange={setStatus}
-            placeholder="All Statuses"
-            disabled={isLoading}
-            options={STATUS_OPTIONS}
-          />
-          <SelectField
-            id="my-tickets-sort"
-            label="Sort"
-            value={`${sort}-${order}`}
-            onChange={handleSortSelectChange}
-            disabled={isLoading}
-            options={SORT_OPTIONS}
-          />
+          <div className="zen-my-tickets__filters">
+            <SelectField
+              id="my-tickets-category"
+              label="Category"
+              value={categoryId}
+              onChange={handleCategoryChange}
+              placeholder="All Categories"
+              disabled={isLoading}
+              options={categoryOptions}
+            />
+            <SelectField
+              id="my-tickets-priority"
+              label="Priority"
+              value={priority}
+              onChange={handlePriorityChange}
+              placeholder="All Priorities"
+              disabled={isLoading}
+              options={PRIORITY_OPTIONS}
+            />
+            <SelectField
+              id="my-tickets-status"
+              label="Status"
+              value={status}
+              onChange={handleStatusChange}
+              placeholder="All Statuses"
+              disabled={isLoading}
+              options={STATUS_OPTIONS}
+            />
+            <SelectField
+              id="my-tickets-sort"
+              label="Sort"
+              value={`${sort}-${order}`}
+              onChange={handleSortSelectChange}
+              disabled={isLoading}
+              options={SORT_OPTIONS}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {state.phase === "loading" && (
         <LoadingState label="Loading your tickets…" />
@@ -533,18 +666,66 @@ export function MyTicketsScreen() {
         <ErrorState message={state.message} onRetry={load} />
       )}
 
-      {state.phase === "loaded" &&
-        (isDesktop ? (
-          <TicketsTable
-            items={state.items}
-            sort={sort}
-            order={order}
-            onToggleSort={handleToggleSort}
+      {state.phase === "loaded" && variant === "rows" && (
+        <>
+          {isDesktop ? (
+            <TicketsTable
+              items={state.items}
+              sort={sort}
+              order={order}
+              onToggleSort={handleToggleSort}
+              disabled={isLoading}
+            />
+          ) : (
+            <TicketsCards items={state.items} />
+          )}
+          <Pagination
+            page={state.meta.page}
+            pageSize={state.meta.pageSize}
+            totalItems={state.meta.totalItems}
+            totalPages={state.meta.totalPages}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
             disabled={isLoading}
           />
-        ) : (
-          <TicketsCards items={state.items} />
-        ))}
+        </>
+      )}
+
+      {/* AC-29, BR-37: the Requester owns zero tickets at all — distinct
+          from a query matching nothing, and the controls bar above is
+          hidden rather than shown empty. */}
+      {state.phase === "loaded" && variant === "empty" && (
+        <EmptyState
+          title="You haven't created any tickets yet."
+          action={
+            <Button variant="primary" onClick={() => navigate("/tickets/new")}>
+              + Create your first ticket
+            </Button>
+          }
+        />
+      )}
+
+      {/* AC-30, BR-37: an active search/filter matched nothing. The
+          controls bar above stays visible and populated (not hidden or
+          reset) so the user can see and undo what they typed. */}
+      {state.phase === "loaded" && variant === "noResults" && (
+        <NoResultsState
+          message="No tickets match your search or filters."
+          onClearFilters={handleClearFilters}
+          clearFiltersLabel="Clear filters"
+        />
+      )}
+
+      {/* AC-27: the API returned 200 with items: [] because the requested
+          page is past the last one for this query, not because the query
+          itself failed or matched nothing — meta.totalItems is still > 0. */}
+      {state.phase === "loaded" && variant === "overPage" && (
+        <NoResultsState
+          message="No more tickets on this page."
+          onClearFilters={() => setPage(DEFAULT_PAGE)}
+          clearFiltersLabel="Back to page 1"
+        />
+      )}
     </AppShell>
   );
 }
