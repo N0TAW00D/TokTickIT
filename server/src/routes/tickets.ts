@@ -392,9 +392,22 @@ ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) 
 // `storeAttachmentFile` explicitly, once, after those checks. Buffering in
 // memory is bounded by `limits.fileSize` below, so a client can't force an
 // unbounded amount of memory use by streaming an enormous file.
+//
+// `defParamCharset: 'utf8'` overrides multer's own default of `'latin1'`
+// for this option, which it otherwise passes straight through to busboy.
+// Without it, busboy decodes the `filename`/`filename*` Content-Disposition
+// parameter of the file part as latin1: each raw UTF-8 byte of a non-ASCII
+// name (e.g. `résumé.pdf`) becomes its own latin1 code point, and
+// `file.originalname` arrives already mojibake'd — re-encoding those code
+// points back to UTF-8 is what produced the doubled bytes (`Ã©` for `é`)
+// this fix corrects. Setting it to 'utf8' makes busboy instead reinterpret
+// those raw bytes as UTF-8, so `file.originalname` is correct before
+// `safeOriginalFilename` (BR-29) ever sees it. ASCII filenames are encoded
+// identically in latin1 and UTF-8, so this is a no-op for the common case.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_ATTACHMENT_SIZE_BYTES },
+  defParamCharset: 'utf8',
 });
 
 /** Runs `multer`'s single-file parse as a Promise so the route can `await` and `catch` it directly. */

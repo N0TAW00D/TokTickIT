@@ -716,30 +716,40 @@ describe('GET /api/attachments/:id/download', () => {
       expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
     });
 
-    it('a non-ASCII filename downloads 200 with an ASCII fallback and the exact stored name carried in filename*', async () => {
-      const { uploadRes, downloadRes, originalBytes } = await uploadAndDownload('résumé.pdf');
+    it.each([
+      ['résumé.pdf', 'a Latin-1-range accented name'],
+      ['报告.pdf', 'a CJK name entirely outside Latin-1'],
+    ])(
+      'round-trips %s (%s) exactly through upload, storage, and download (regression: busboy latin1 mojibake)',
+      async (filename) => {
+        const { uploadRes, downloadRes, originalBytes } = await uploadAndDownload(filename);
 
-      // Ground truth is whatever the server actually persisted as
-      // originalFilename, not the literal JS string this test sent as the
-      // multipart filename: multer/busboy's own multipart-header decoding
-      // (a separate, pre-existing layer this PR does not touch) is not
-      // guaranteed to preserve non-ASCII bytes losslessly on the way in.
-      // What this test verifies is that the *download* header safely and
-      // losslessly encodes whatever originalFilename value ended up stored
-      // — the concern §4.3 and this fix are actually about.
-      const storedName = uploadRes.body.originalFilename as string;
-      expect(storedName.length).toBeGreaterThan(0);
+        // The client's exact filename must survive multer/busboy's own
+        // multipart Content-Disposition decoding byte for byte — not just
+        // "whatever ended up stored," which is all a prior version of this
+        // test checked and is exactly how a latin1-decoded-as-UTF-8
+        // mojibake bug (routes/tickets.ts's `defParamCharset: 'utf8'`)
+        // could have slipped through undetected: BR-29 requires
+        // originalFilename to be the client's filename (path-stripped,
+        // 255-char capped), and a mojibake'd name is not that.
+        expect(uploadRes.body.originalFilename).toBe(filename);
 
-      expect(downloadRes.status).toBe(200);
-      const cd = downloadRes.headers['content-disposition'] as string | undefined;
-      expect(cd).toBeDefined();
-      // filename="..." has no defined charset for non-ASCII (RFC 6266), so
-      // only the ASCII-safe fallback needs to appear there; the exact
-      // stored name must still be recoverable, losslessly, from filename*.
-      expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
-      expect(cd).toContain(`filename*=UTF-8''${encodeURIComponent(storedName)}`);
-      expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
-    });
+        const row = await prisma.attachment.findUniqueOrThrow({ where: { id: uploadRes.body.id as number } });
+        expect(row.originalFilename).toBe(filename);
+
+        expect(downloadRes.status).toBe(200);
+        const cd = downloadRes.headers['content-disposition'] as string | undefined;
+        expect(cd).toBeDefined();
+        // filename="..." has no defined charset for non-ASCII (RFC 6266),
+        // so only the ASCII-safe fallback needs to appear there; the exact
+        // original name must be recoverable, losslessly, from filename*.
+        expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+        const extended = cd!.match(/filename\*=UTF-8''([^;]+)$/)?.[1];
+        expect(extended).toBeDefined();
+        expect(decodeURIComponent(extended!)).toBe(filename);
+        expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
+      }
+    );
   });
 
   describe('API-28: download of a removed attachment (AC-34, BR-33)', () => {
