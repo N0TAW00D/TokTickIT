@@ -68,12 +68,13 @@ function internalError(res: Response): void {
 }
 
 ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) => {
-  // express.json() (app.ts) leaves req.body undefined for a missing/other
-  // Content-Type or an unparsable body — the parse-error handler mounted
-  // right after it (app.ts) catches actually-malformed JSON. What's left
-  // for this route to reject is JSON that parsed fine but isn't an object
-  // (e.g. an array or a bare primitive), which "strict" JSON parsing alone
-  // does not rule out (§1.4).
+  // express.json() (app.ts) parses in "strict" mode, which already rejects
+  // a bare top-level primitive (e.g. `42`) as a parse error — caught by the
+  // handler mounted right after it (app.ts) — before this guard ever runs.
+  // What's left for this route to reject is a body that parsed fine but
+  // isn't a plain object: a top-level JSON array (strict mode lets arrays
+  // through) or a missing/undefined body (no/unhandled Content-Type), which
+  // would otherwise fall through into the create path and crash (§1.4).
   if (!isPlainRequestBody(req.body)) {
     malformedBody(res);
     return;
