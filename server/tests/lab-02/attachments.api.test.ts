@@ -429,4 +429,95 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(invalid.body.error).toBe('INVALID_REQUESTER');
     });
   });
+
+  // Regression coverage for a PR #31 review finding: app.ts used to mount
+  // express.json() (and its parse-error handler) globally, ahead of every
+  // route, so a non-multipart request to this path that merely *claimed* to
+  // be JSON never reached multer/the route at all — express.json() answered
+  // it first. That produced two wrong outcomes: invalid JSON became 400
+  // MALFORMED_BODY (this route doesn't recognize that error code — §1.4a
+  // says NO_FILE), and a body over express.json()'s default 100kb limit
+  // became a bare Express 413 with no `error` key at all (§1.3 requires one
+  // on every error; §1.5 reserves 413 for an oversized *attachment file*,
+  // API-23, not an oversized JSON body). Every case below must land on the
+  // same 400 NO_FILE body §1.3 requires. No tests.md API-xx row covers this.
+  describe('non-multipart request bodies are all 400 NO_FILE, never MALFORMED_BODY or a bare parser error (§1.3, §1.4a)', () => {
+    function expectNoFileShape(res: request.Response): void {
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('NO_FILE');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+      expect('fields' in res.body).toBe(false);
+    }
+
+    it('an invalid JSON body with Content-Type: application/json returns 400 NO_FILE, not MALFORMED_BODY', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const res = await request(app)
+        .post(`/api/tickets/${ticketId}/attachments`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send('{"file": ');
+
+      expectNoFileShape(res);
+
+      const count = await prisma.attachment.count({ where: { ticketId } });
+      expect(count).toBe(0);
+    });
+
+    it('a JSON body over 100kb (express.json()\'s default limit) returns 400 NO_FILE, not a bare 413', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const oversizedJson = JSON.stringify({ padding: 'A'.repeat(200 * 1024) });
+
+      const res = await request(app)
+        .post(`/api/tickets/${ticketId}/attachments`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send(oversizedJson);
+
+      expectNoFileShape(res);
+
+      const count = await prisma.attachment.count({ where: { ticketId } });
+      expect(count).toBe(0);
+    });
+
+    it('a valid JSON object body with Content-Type: application/json returns 400 NO_FILE', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const res = await request(app)
+        .post(`/api/tickets/${ticketId}/attachments`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ file: 'not-a-file' });
+
+      expectNoFileShape(res);
+
+      const count = await prisma.attachment.count({ where: { ticketId } });
+      expect(count).toBe(0);
+    });
+
+    it('a text/plain body returns 400 NO_FILE', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const res = await request(app)
+        .post(`/api/tickets/${ticketId}/attachments`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'text/plain')
+        .send('just some plain text');
+
+      expectNoFileShape(res);
+
+      const count = await prisma.attachment.count({ where: { ticketId } });
+      expect(count).toBe(0);
+    });
+
+    it('no body and no Content-Type returns 400 NO_FILE', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const res = await request(app)
+        .post(`/api/tickets/${ticketId}/attachments`)
+        .set('X-Requester-Id', String(requesterAId));
+
+      expectNoFileShape(res);
+
+      const count = await prisma.attachment.count({ where: { ticketId } });
+      expect(count).toBe(0);
+    });
+  });
 });
