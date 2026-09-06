@@ -1,0 +1,51 @@
+/*
+ * List pagination (ui-spec.md §9, AC-26). Wraps to stacked, full-width
+ * rows on narrow viewports (ui-spec.md §11: no horizontal page scroll).
+ */
+
+.zen-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zen-space-field-gap);
+  margin-top: var(--zen-space-group-gap);
+}
+
+.zen-pagination__summary {
+  margin: 0;
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+  white-space: nowrap;
+}
+
+.zen-pagination__pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.zen-pagination__page-button {
+  min-width: var(--zen-control-height);
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.zen-pagination__page-size {
+  width: 96px;
+}
+
+@media (max-width: 767px) {
+  .zen-pagination {
+    justify-content: flex-start;
+  }
+
+  .zen-pagination__summary {
+    flex-basis: 100%;
+  }
+
+  .zen-pagination__page-size {
+    width: 100%;
+  }
+}
