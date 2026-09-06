@@ -1,8 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import express, { type Express, type Request, type Response } from 'express';
+import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 import { requesterContext } from '../../src/middleware/requesterContext.js';
+
+// Covers docs/lab-02/api-spec.md §2.3 (BR-08, BR-35; AC-05, AC-06, AC-42):
+// only active Development Requesters, shaped {id,name,email}, ordered by
+// name. The seed fixture (server/prisma/seed.ts) is the exact set from the
+// api-spec §2.3 example, so the expected array below is asserted verbatim
+// rather than re-derived — this also proves no extra field (isActive,
+// createdAt, updatedAt) leaks through, since toEqual rejects unexpected keys.
+describe('GET /api/requesters', () => {
+  it('returns only active Requesters, ordered by name, shaped as {id,name,email}', async () => {
+    const res = await request(app).get('/api/requesters');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: 4, name: 'David Lee', email: 'david.lee@example.edu' },
+      { id: 1, name: 'Jennifer Anderson', email: 'jennifer.anderson@example.edu' },
+      { id: 2, name: 'Michael Brown', email: 'michael.brown@example.edu' },
+      { id: 3, name: 'Sarah Johnson', email: 'sarah.johnson@example.edu' },
+    ]);
+  });
+
+  it('never returns the inactive seed Requester (Robert Wilson)', async () => {
+    const res = await request(app).get('/api/requesters');
+
+    const names = (res.body as Array<{ name: string }>).map((r) => r.name);
+    expect(names).not.toContain('Robert Wilson');
+
+    const inactive = await prisma.requesterUser.findFirstOrThrow({
+      where: { isActive: false },
+    });
+    const ids = (res.body as Array<{ id: number }>).map((r) => r.id);
+    expect(ids).not.toContain(inactive.id);
+  });
+
+  it('ignores the X-Requester-Id header — this endpoint is not Requester-scoped', async () => {
+    const withoutHeader = await request(app).get('/api/requesters');
+    const withBogusHeader = await request(app)
+      .get('/api/requesters')
+      .set('X-Requester-Id', '999999');
+    const withInactiveHeader = await request(app)
+      .get('/api/requesters')
+      .set('X-Requester-Id', '0');
+
+    expect(withBogusHeader.status).toBe(200);
+    expect(withInactiveHeader.status).toBe(200);
+    expect(withBogusHeader.body).toEqual(withoutHeader.body);
+    expect(withInactiveHeader.body).toEqual(withoutHeader.body);
+  });
+});
 
 // Covers docs/lab-02/api-spec.md §1.2 (BR-13, A-10): the X-Requester-Id
 // requester-context middleware. There is no 🔒 endpoint to mount it on yet
