@@ -47,10 +47,67 @@ function readDatabaseUrl(envFileName: string): string | undefined {
   return result.parsed?.DATABASE_URL;
 }
 
+// Hostnames that all mean "this machine" for a locally-run Postgres. Two
+// DATABASE_URLs that differ only by which of these they use still point at
+// the exact same server, so the dev/test safety check below must treat them
+// as identical rather than as "different hosts".
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function normalizeHost(hostname: string): string {
+  const lower = hostname.toLowerCase();
+  return LOOPBACK_HOSTNAMES.has(lower) ? "localhost" : lower;
+}
+
+interface DatabaseIdentity {
+  host: string;
+  port: number;
+  database: string;
+}
+
+/**
+ * Parses a Postgres connection string down to the (host, port, database)
+ * triple that actually identifies *which database* it points at, ignoring
+ * incidentals like credentials, query-string options (e.g. `?schema=public`)
+ * or trailing slashes that don't change the target. Throws if the URL can't
+ * be parsed or has no database name — an ambiguous URL must never be
+ * treated as "safely different" from another one.
+ */
+function parseDatabaseIdentity(rawUrl: string): DatabaseIdentity {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Could not parse database URL "${rawUrl}".`);
+  }
+
+  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  if (!database) {
+    throw new Error(`Database URL "${rawUrl}" has no database name.`);
+  }
+
+  return {
+    host: normalizeHost(parsed.hostname),
+    port: parsed.port ? Number(parsed.port) : 5432, // Postgres default
+    database,
+  };
+}
+
+function sameDatabase(a: DatabaseIdentity, b: DatabaseIdentity): boolean {
+  return a.host === b.host && a.port === b.port && a.database === b.database;
+}
+
 /**
  * Resolves the test database URL from `server/.env.test` and asserts it is
  * safe to run destructive operations (migrate/seed/truncate) against it —
  * i.e. that it is not accidentally the same database the dev server uses.
+ *
+ * The dev/test comparison is done on the *parsed* connection identity
+ * (host, port, database name), not the raw URL string, so that two
+ * differently-written URLs which resolve to the same database (different
+ * casing, `localhost` vs `127.0.0.1`, an extra `?schema=public`, a
+ * different but equivalent form, ...) are still correctly recognised as
+ * the same database. A URL that can't be parsed is treated as ambiguous
+ * and refused rather than assumed safe.
  */
 export function resolveTestDatabaseUrl(): string {
   const testDatabaseUrl = readDatabaseUrl(".env.test");
@@ -62,21 +119,26 @@ export function resolveTestDatabaseUrl(): string {
     );
   }
 
+  const testIdentity = parseDatabaseIdentity(testDatabaseUrl);
+
   const devDatabaseUrl = readDatabaseUrl(".env");
-  if (devDatabaseUrl && devDatabaseUrl === testDatabaseUrl) {
-    throw new Error(
-      "server/.env.test points at the same DATABASE_URL as server/.env. " +
-        "Refusing to run test-database operations against the dev database."
-    );
+  if (devDatabaseUrl) {
+    const devIdentity = parseDatabaseIdentity(devDatabaseUrl);
+    if (sameDatabase(devIdentity, testIdentity)) {
+      throw new Error(
+        "server/.env.test resolves to the same database as server/.env " +
+          `(host "${testIdentity.host}", port ${testIdentity.port}, ` +
+          `database "${testIdentity.database}"). Refusing to run ` +
+          "test-database operations against the dev database."
+      );
+    }
   }
 
-  const parsed = new URL(testDatabaseUrl);
-  const dbName = parsed.pathname.replace(/^\//, "");
-  if (!dbName.toLowerCase().includes("test")) {
+  if (!testIdentity.database.toLowerCase().includes("test")) {
     throw new Error(
-      `server/.env.test database name "${dbName}" does not contain "test". ` +
-        "Refusing to run test-database operations against a database that " +
-        "doesn't look like a dedicated test database."
+      `server/.env.test database name "${testIdentity.database}" does not ` +
+        'contain "test". Refusing to run test-database operations against ' +
+        "a database that doesn't look like a dedicated test database."
     );
   }
 
