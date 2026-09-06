@@ -631,7 +631,14 @@ describe('GET /api/attachments/:id/download', () => {
 
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toBe('application/pdf');
-      expect(res.headers['content-disposition']).toBe('attachment; filename="battery-report.pdf"');
+      // §4.3 documents `Content-Disposition: attachment; filename="<originalFilename>"`
+      // literally; for an ordinary name that quoted-string is byte-for-byte
+      // unchanged by the RFC 5987 hardening below — this asserts the exact
+      // full header (including the `filename*` fallback every response now
+      // carries) so a regression in either half would fail this test.
+      expect(res.headers['content-disposition']).toBe(
+        "attachment; filename=\"battery-report.pdf\"; filename*=UTF-8''battery-report.pdf"
+      );
       expect(res.headers['content-length']).toBe(String(originalBytes.length));
 
       // The load-bearing assertion: the downloaded bytes match what was
@@ -640,6 +647,98 @@ describe('GET /api/attachments/:id/download', () => {
       expect(Buffer.isBuffer(downloadedBytes)).toBe(true);
       expect(downloadedBytes.length).toBe(originalBytes.length);
       expect(downloadedBytes.equals(originalBytes)).toBe(true);
+    });
+  });
+
+  describe('Content-Disposition safety for hostile originalFilename values (api-spec.md §4.3) — no tests.md API-xx row', () => {
+    /**
+     * Uploads a file with the given client-supplied filename and downloads
+     * it back, returning both responses plus the exact bytes sent — every
+     * test below checks that the round trip never 500s and never corrupts
+     * the payload, in addition to whatever it asserts about the header.
+     */
+    async function uploadAndDownload(filename: string) {
+      const ticketId = await createTicket(requesterAId);
+      const originalBytes = pdfBuffer(64);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', originalBytes, { filename });
+      expect(uploadRes.status).toBe(201);
+      const attachmentId = uploadRes.body.id as number;
+
+      const downloadRes = await request(server)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterAId))
+        .buffer(true)
+        .parse((response, callback) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('end', () => callback(null, Buffer.concat(chunks)));
+        });
+
+      return { uploadRes, downloadRes, originalBytes };
+    }
+
+    it('a filename with an embedded double quote downloads 200 with a well-formed header, never mangled', async () => {
+      const { downloadRes, originalBytes } = await uploadAndDownload('we"ird.pdf');
+
+      expect(downloadRes.status).toBe(200);
+      const cd = downloadRes.headers['content-disposition'] as string | undefined;
+      expect(cd).toBeDefined();
+      // Exactly the two quotes delimiting filename="..." may appear — an
+      // embedded '"' surviving unescaped would add a third/fourth and mangle
+      // the quoted-string, which is the bug this test guards against.
+      expect((cd!.match(/"/g) ?? []).length).toBe(2);
+      expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+      expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
+    });
+
+    it('a filename with an embedded CR/LF downloads 200 (never 500) and injects no extra header', async () => {
+      const { downloadRes, originalBytes } = await uploadAndDownload('a\r\nX-Injected: yes.pdf');
+
+      // This is the availability half of the bug report: raw CR/LF reaching
+      // res.setHeader used to make Node throw and the download 500 outright.
+      expect(downloadRes.status).toBe(200);
+      expect(downloadRes.headers['x-injected']).toBeUndefined();
+      const cd = downloadRes.headers['content-disposition'] as string | undefined;
+      expect(cd).toBeDefined();
+      expect(cd).not.toMatch(/[\r\n]/);
+      expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+      expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
+    });
+
+    it('a filename with an embedded semicolon downloads 200 with the semicolon preserved inside the quoted value', async () => {
+      const { downloadRes, originalBytes } = await uploadAndDownload('sem;i.pdf');
+
+      expect(downloadRes.status).toBe(200);
+      // A semicolon inside a quoted-string is not a parameter separator —
+      // valid HTTP parsers treat quoted-string content as opaque — so this
+      // name needs no special handling and passes through unchanged.
+      expect(downloadRes.headers['content-disposition']).toContain('filename="sem;i.pdf"');
+      expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
+    });
+
+    it('a non-ASCII filename downloads 200 with an ASCII fallback and the exact stored name carried in filename*', async () => {
+      const { uploadRes, downloadRes, originalBytes } = await uploadAndDownload('résumé.pdf');
+
+      // Ground truth is whatever the server actually persisted as
+      // originalFilename, not the literal JS string this test sent as the
+      // multipart filename: multer/busboy's own multipart-header decoding
+      // (a separate, pre-existing layer this PR does not touch) is not
+      // guaranteed to preserve non-ASCII bytes losslessly on the way in.
+      // What this test verifies is that the *download* header safely and
+      // losslessly encodes whatever originalFilename value ended up stored
+      // — the concern §4.3 and this fix are actually about.
+      const storedName = uploadRes.body.originalFilename as string;
+      expect(storedName.length).toBeGreaterThan(0);
+
+      expect(downloadRes.status).toBe(200);
+      const cd = downloadRes.headers['content-disposition'] as string | undefined;
+      expect(cd).toBeDefined();
+      // filename="..." has no defined charset for non-ASCII (RFC 6266), so
+      // only the ASCII-safe fallback needs to appear there; the exact
+      // stored name must still be recoverable, losslessly, from filename*.
+      expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+      expect(cd).toContain(`filename*=UTF-8''${encodeURIComponent(storedName)}`);
+      expect((downloadRes.body as Buffer).equals(originalBytes)).toBe(true);
     });
   });
 

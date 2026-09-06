@@ -6,6 +6,7 @@ import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
 import { AttachmentAlreadyRemovedError, removeAttachment } from '../services/removeAttachment.ts';
 import { validateRemovalReason } from '../validation/attachmentRemoval.ts';
+import { contentDispositionFilename } from '../validation/attachmentFile.ts';
 import type { FieldError } from '../validation/ticketFields.ts';
 
 // GET /api/attachments/:id — api-spec.md §4.2 (BR-14; AC-36).
@@ -185,7 +186,14 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
 
     res.status(200);
     res.setHeader('Content-Type', attachment.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${attachment.originalFilename}"`);
+    // originalFilename is attacker-controlled and only lightly sanitized on
+    // the write path (safeOriginalFilename strips path separators and
+    // truncates to 255 chars — quotes, CR/LF, and non-ASCII all survive
+    // that), so it is never interpolated into this header directly; see
+    // contentDispositionFilename's own comment for exactly what it does to
+    // make that safe. This is a presentation-only concern — the stored
+    // originalFilename (BR-29, BR-30) is untouched.
+    res.setHeader('Content-Disposition', contentDispositionFilename(attachment.originalFilename));
     res.setHeader('Content-Length', String(attachment.fileSize));
     res.send(buffer);
   } catch (error) {
