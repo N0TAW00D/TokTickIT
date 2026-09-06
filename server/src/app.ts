@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
 import { prisma } from './lib/prisma.ts';
+import { requestersRouter } from './routes/requesters.ts';
 
 const app: Express = express();
 
@@ -26,5 +27,7 @@ app.get('/api/categories', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+app.use('/api/requesters', requestersRouter);
 
 export default app;
