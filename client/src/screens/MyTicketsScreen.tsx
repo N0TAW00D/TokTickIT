@@ -1,26 +1,154 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
+import { Button } from "../components/Button";
+import { SelectField, type SelectOption } from "../components/SelectField";
+import { TextInput } from "../components/TextInput";
 import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useRequester } from "../requester/RequesterContext";
-import { fetchMyTickets, type TicketListItem } from "../tickets/api";
+import {
+  fetchCategories,
+  fetchMyTickets,
+  type ReferenceOption,
+  type RequestedPriority,
+  type SortOrder,
+  type TicketListItem,
+  type TicketSortField,
+} from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
 import "./MyTicketsScreen.css";
 
 /** Table (`≥ 768px`) / card (`< 768px`) breakpoint (ui-spec.md §9, §11). */
 const DESKTOP_QUERY = "(min-width: 768px)";
 
+/** Search → `search` param debounce delay (ui-spec.md §9, AC-23). */
+const SEARCH_DEBOUNCE_MS = 300;
+
 type ListState =
   | { phase: "loading" }
   | { phase: "loaded"; items: TicketListItem[] }
   | { phase: "error"; message: string };
 
+const PRIORITY_OPTIONS: SelectOption[] = [
+  { value: "LOW", label: "Low" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "HIGH", label: "High" },
+];
+
+// Status is a single-value enum in Lab 2 (specification.md A-05); the "All"
+// placeholder plus this one option is the whole list until Lab 3 adds more.
+const STATUS_OPTIONS: SelectOption[] = [{ value: "NEW", label: "New" }];
+
+interface SortSelectOption extends SelectOption {
+  sort: TicketSortField;
+  order: SortOrder;
+}
+
+/** The six sort choices ui-spec.md §9 lists, in the order it lists them. */
+const SORT_OPTIONS: SortSelectOption[] = [
+  { value: "createdAt-desc", label: "Created (newest)", sort: "createdAt", order: "desc" },
+  { value: "createdAt-asc", label: "Created (oldest)", sort: "createdAt", order: "asc" },
+  { value: "updatedAt-desc", label: "Last updated (newest)", sort: "updatedAt", order: "desc" },
+  { value: "updatedAt-asc", label: "Last updated (oldest)", sort: "updatedAt", order: "asc" },
+  { value: "ticketNumber-asc", label: "Ticket number (A→Z)", sort: "ticketNumber", order: "asc" },
+  { value: "ticketNumber-desc", label: "Ticket number (Z→A)", sort: "ticketNumber", order: "desc" },
+];
+
+const DEFAULT_SORT: TicketSortField = "createdAt";
+const DEFAULT_ORDER: SortOrder = "desc";
+
+/** The order a column header's first click applies, per field (ui-spec.md §9). */
+const HEADER_DEFAULT_ORDER: Record<TicketSortField, SortOrder> = {
+  createdAt: "desc",
+  updatedAt: "desc",
+  ticketNumber: "asc",
+};
+
+const COLUMN_LABEL: Record<TicketSortField, string> = {
+  ticketNumber: "Ticket No.",
+  createdAt: "Created",
+  updatedAt: "Last Updated",
+};
+
+/**
+ * Accessible name for a sortable column header's toggle button (ui-spec.md
+ * §12: "icon-only controls (e.g. sort carets) get an aria-label + title" —
+ * the visual caret itself is pure CSS (`::after`, see MyTicketsScreen.css)
+ * so it carries no text of its own; this string is what actually names the
+ * control for assistive tech and the hover tooltip).
+ */
+function sortToggleLabel(
+  field: TicketSortField,
+  activeSort: TicketSortField,
+  activeOrder: SortOrder,
+): string {
+  const label = COLUMN_LABEL[field];
+  if (activeSort !== field) return `Sort by ${label}`;
+  return activeOrder === "asc"
+    ? `Sort by ${label}, ascending`
+    : `Sort by ${label}, descending`;
+}
+
+/** `data-sort-state` driving the ⇅ / ▲ / ▼ CSS content (MyTicketsScreen.css). */
+function sortState(
+  field: TicketSortField,
+  activeSort: TicketSortField,
+  activeOrder: SortOrder,
+): "none" | SortOrder {
+  return activeSort === field ? activeOrder : "none";
+}
+
 interface TicketRowsProps {
   items: TicketListItem[];
+}
+
+interface SortableTableProps extends TicketRowsProps {
+  sort: TicketSortField;
+  order: SortOrder;
+  onToggleSort: (field: TicketSortField) => void;
+  disabled: boolean;
+}
+
+/**
+ * One `<th>` for a sortable column (ui-spec.md §9: Ticket No., Created, and
+ * Last Updated column headers "also toggle sort and show a ⇅ / ▲ / ▼
+ * affordance"). The button's only text child is the plain column label —
+ * the caret is added by CSS alone — so this never changes what `C-22`'s
+ * header-text assertions read via `textContent`.
+ */
+function SortableHeader({
+  field,
+  sort,
+  order,
+  onToggleSort,
+  disabled,
+}: {
+  field: TicketSortField;
+  sort: TicketSortField;
+  order: SortOrder;
+  onToggleSort: (field: TicketSortField) => void;
+  disabled: boolean;
+}) {
+  const label = sortToggleLabel(field, sort, order);
+  return (
+    <th scope="col">
+      <button
+        type="button"
+        className="zen-my-tickets__sort-toggle"
+        data-sort-state={sortState(field, sort, order)}
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        onClick={() => onToggleSort(field)}
+      >
+        {COLUMN_LABEL[field]}
+      </button>
+    </th>
+  );
 }
 
 /**
@@ -37,20 +165,38 @@ interface TicketRowsProps {
  * exactly two real links per row (the number and the explicit "View"),
  * never a third overlapping one.
  */
-function TicketsTable({ items }: TicketRowsProps) {
+function TicketsTable({ items, sort, order, onToggleSort, disabled }: SortableTableProps) {
   return (
     <div className="zen-my-tickets__table-scroll">
       <table className="zen-my-tickets__table">
         <thead>
           <tr>
-            <th scope="col">Ticket No.</th>
-            <th scope="col">Created</th>
+            <SortableHeader
+              field="ticketNumber"
+              sort={sort}
+              order={order}
+              onToggleSort={onToggleSort}
+              disabled={disabled}
+            />
+            <SortableHeader
+              field="createdAt"
+              sort={sort}
+              order={order}
+              onToggleSort={onToggleSort}
+              disabled={disabled}
+            />
             <th scope="col">Summary</th>
             <th scope="col">Category</th>
             <th scope="col">Related System</th>
             <th scope="col">Priority</th>
             <th scope="col">Status</th>
-            <th scope="col">Last Updated</th>
+            <SortableHeader
+              field="updatedAt"
+              sort={sort}
+              order={order}
+              onToggleSort={onToggleSort}
+              disabled={disabled}
+            />
             <th scope="col">
               <span className="zen-visually-hidden">Actions</span>
             </th>
@@ -184,14 +330,56 @@ function TicketsCards({ items }: TicketRowsProps) {
 
 /**
  * My Tickets screen (ui-spec.md §9, `/tickets`) — data fetch, list
- * rendering, and loading/failure states only (Issue #18 part 1).
- * Search/filter/sort/pagination and the empty / no-results / over-page
- * states belong to the next slice.
+ * rendering, controls (search/filter/sort/clear), and loading/failure
+ * states. Pagination and the empty / no-results / over-page states belong
+ * to the next slice (Issue #18 part 3).
  */
 export function MyTicketsScreen() {
+  const navigate = useNavigate();
   const { requesterId } = useRequester();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [state, setState] = useState<ListState>({ phase: "loading" });
+
+  const [categories, setCategories] = useState<ReferenceOption[]>([]);
+
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [priority, setPriority] = useState("");
+  const [status, setStatus] = useState("");
+  const [sort, setSort] = useState<TicketSortField>(DEFAULT_SORT);
+  const [order, setOrder] = useState<SortOrder>(DEFAULT_ORDER);
+
+  const isLoading = state.phase === "loading";
+
+  const isFiltersDefault =
+    searchInput === "" &&
+    categoryId === "" &&
+    priority === "" &&
+    status === "" &&
+    sort === DEFAULT_SORT &&
+    order === DEFAULT_ORDER;
+
+  // Reference data for the Category filter (ui-spec.md §9, `GET
+  // /api/categories`) — not Requester-scoped, loaded once. A failure here
+  // simply leaves the Category filter at "All Categories only"; this
+  // slice doesn't add a dedicated error UI for it (out of the controls
+  // scope, and not something tests.md's C-23 exercises).
+  useEffect(() => {
+    fetchCategories()
+      .then(setCategories)
+      .catch(() => {});
+  }, []);
+
+  // Debounce the search box 300ms before it drives the `search` param
+  // (ui-spec.md §9, AC-23): every keystroke restarts this timer, so only
+  // the value that has stood still for the full delay is ever applied.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const load = useCallback(() => {
     // RequireRequester guarantees a valid requesterId by the time this
@@ -199,7 +387,14 @@ export function MyTicketsScreen() {
     if (requesterId === null) return;
 
     setState({ phase: "loading" });
-    fetchMyTickets(requesterId)
+    fetchMyTickets(requesterId, {
+      search: debouncedSearch,
+      categoryId: categoryId ? Number(categoryId) : undefined,
+      priority: priority ? (priority as RequestedPriority) : undefined,
+      status: status || undefined,
+      sort,
+      order,
+    })
       .then((response) => {
         setState({ phase: "loaded", items: response.items });
       })
@@ -210,18 +405,125 @@ export function MyTicketsScreen() {
             "Could not load your tickets. Please check your connection and try again.",
         });
       });
-  }, [requesterId]);
+  }, [requesterId, debouncedSearch, categoryId, priority, status, sort, order]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  function handleToggleSort(field: TicketSortField) {
+    if (sort === field) {
+      setOrder((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSort(field);
+      setOrder(HEADER_DEFAULT_ORDER[field]);
+    }
+  }
+
+  function handleSortSelectChange(value: string) {
+    const option = SORT_OPTIONS.find((candidate) => candidate.value === value);
+    if (!option) return;
+    setSort(option.sort);
+    setOrder(option.order);
+  }
+
+  function handleClearFilters() {
+    setSearchInput("");
+    setDebouncedSearch("");
+    setCategoryId("");
+    setPriority("");
+    setStatus("");
+    setSort(DEFAULT_SORT);
+    setOrder(DEFAULT_ORDER);
+  }
+
+  const categoryOptions = useMemo<SelectOption[]>(
+    () =>
+      categories.map((category) => ({
+        value: String(category.id),
+        label: category.name,
+      })),
+    [categories],
+  );
+
   return (
     <AppShell>
-      <h1>My Tickets</h1>
-      <p className="zen-my-tickets__intro">
-        View and track all of your support requests.
-      </p>
+      <div className="zen-my-tickets__header">
+        <div>
+          <h1>My Tickets</h1>
+          <p className="zen-my-tickets__intro">
+            View and track all of your support requests.
+          </p>
+        </div>
+        <div className="zen-my-tickets__header-actions">
+          {!isFiltersDefault && (
+            <Button
+              variant="tertiary"
+              onClick={handleClearFilters}
+              disabled={isLoading}
+            >
+              Clear filters
+            </Button>
+          )}
+          <Button variant="primary" onClick={() => navigate("/tickets/new")}>
+            + Create Ticket
+          </Button>
+        </div>
+      </div>
+
+      <div className="zen-my-tickets__controls">
+        <div className="zen-my-tickets__search-field">
+          <label htmlFor="my-tickets-search" className="zen-visually-hidden">
+            Search
+          </label>
+          <TextInput
+            id="my-tickets-search"
+            type="search"
+            placeholder="Search by ticket number or summary"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            disabled={isLoading}
+          />
+        </div>
+
+        <div className="zen-my-tickets__filters">
+          <SelectField
+            id="my-tickets-category"
+            label="Category"
+            value={categoryId}
+            onChange={setCategoryId}
+            placeholder="All Categories"
+            disabled={isLoading}
+            options={categoryOptions}
+          />
+          <SelectField
+            id="my-tickets-priority"
+            label="Priority"
+            value={priority}
+            onChange={setPriority}
+            placeholder="All Priorities"
+            disabled={isLoading}
+            options={PRIORITY_OPTIONS}
+          />
+          <SelectField
+            id="my-tickets-status"
+            label="Status"
+            value={status}
+            onChange={setStatus}
+            placeholder="All Statuses"
+            disabled={isLoading}
+            options={STATUS_OPTIONS}
+          />
+          <SelectField
+            id="my-tickets-sort"
+            label="Sort"
+            value={`${sort}-${order}`}
+            onChange={handleSortSelectChange}
+            disabled={isLoading}
+            options={SORT_OPTIONS}
+          />
+        </div>
+      </div>
 
       {state.phase === "loading" && (
         <LoadingState label="Loading your tickets…" />
@@ -233,7 +535,13 @@ export function MyTicketsScreen() {
 
       {state.phase === "loaded" &&
         (isDesktop ? (
-          <TicketsTable items={state.items} />
+          <TicketsTable
+            items={state.items}
+            sort={sort}
+            order={order}
+            onToggleSort={handleToggleSort}
+            disabled={isLoading}
+          />
         ) : (
           <TicketsCards items={state.items} />
         ))}

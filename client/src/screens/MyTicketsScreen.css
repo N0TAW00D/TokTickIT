@@ -9,6 +9,76 @@
   margin: 0 0 var(--zen-space-group-gap);
 }
 
+/* ---- Header row: title + Clear filters / Create Ticket (ui-spec.md §9) ---- */
+
+.zen-my-tickets__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-field-gap);
+  flex-wrap: wrap;
+}
+
+.zen-my-tickets__header h1 {
+  margin: 0;
+}
+
+.zen-my-tickets__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--zen-space-unit);
+  flex-shrink: 0;
+}
+
+/* ---- Controls bar: search + filters + sort (ui-spec.md §9) ---- */
+
+.zen-my-tickets__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--zen-space-field-gap);
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  padding: var(--zen-space-field-gap);
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+.zen-my-tickets__search-field {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.zen-my-tickets__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zen-space-field-gap);
+  flex: 2 1 480px;
+}
+
+.zen-my-tickets__filters > * {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* Mobile: controls wrap to full-width stacked selects (ui-spec.md §9, §11 —
+   no horizontal page scroll at any viewport). */
+@media (max-width: 767px) {
+  .zen-my-tickets__search-field,
+  .zen-my-tickets__filters,
+  .zen-my-tickets__filters > * {
+    flex-basis: 100%;
+  }
+
+  .zen-my-tickets__header-actions {
+    width: 100%;
+  }
+
+  .zen-my-tickets__header-actions .zen-btn {
+    flex: 1 1 auto;
+  }
+}
+
 /* Visually hidden but screen-reader reachable (ui-spec.md §12: the
    row-level "View" affordance and per-row accessible names must stay
    distinguishable without adding visible clutter). */
@@ -54,6 +124,52 @@
   font-size: var(--zen-font-size-label);
   font-weight: var(--zen-font-weight-label);
   color: var(--zen-text-muted);
+}
+
+/* Sortable column header (ui-spec.md §9: Ticket No., Created, and Last
+   Updated headers "toggle sort and show a ⇅ / ▲ / ▼ affordance"). The
+   caret is pure CSS `::after` content, not a DOM text node — the button's
+   only real text child is the plain column label (see SortableHeader in
+   MyTicketsScreen.tsx), so this affordance never changes what a test
+   reading `th.textContent` sees. The button's `aria-label`/`title`
+   (ui-spec.md §12) is what actually names the control for assistive tech,
+   since the caret itself has no accessible text of its own. */
+.zen-my-tickets__sort-toggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text-muted);
+  cursor: pointer;
+}
+
+.zen-my-tickets__sort-toggle::after {
+  content: "⇅";
+  font-size: 0.75em;
+}
+
+.zen-my-tickets__sort-toggle[data-sort-state="asc"]::after {
+  content: "▲";
+}
+
+.zen-my-tickets__sort-toggle[data-sort-state="desc"]::after {
+  content: "▼";
+}
+
+.zen-my-tickets__sort-toggle:not(:disabled):hover {
+  color: var(--zen-text);
+}
+
+.zen-my-tickets__sort-toggle:focus-visible {
+  outline: 2px solid var(--zen-focus-ring);
+  outline-offset: 2px;
+}
+
+.zen-my-tickets__sort-toggle:disabled {
+  cursor: not-allowed;
 }
 
 .zen-my-tickets__table tbody tr:last-child td {

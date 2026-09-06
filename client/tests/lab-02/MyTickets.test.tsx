@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,18 +10,40 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
+import { RequesterSelectionScreen } from "../../src/screens/RequesterSelectionScreen.tsx";
 import { formatDateTime } from "../../src/tickets/formatDateTime.ts";
 import {
   RequesterProvider,
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-22 and C-28. Search/filter/sort
-// (C-23), pagination (C-24), and the empty / no-results / over-page states
-// (C-25, C-26, C-27) belong to the next slice.
+// Covers docs/lab-02/tests.md rows C-22, C-23, and C-28, plus AC-09 (the
+// My-Tickets-side half of the Requester-switch reset; tests.md files C-08
+// under AppShell.test.tsx for the id/name-context half). Pagination (C-24)
+// and the empty / no-results / over-page states (C-25, C-26, C-27) belong
+// to the next slice.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
+const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
+const REQUESTERS_URL = `${API_BASE_URL}/api/requesters`;
+
+// Category filter options (ui-spec.md §9's controls bar fetches these via
+// `GET /api/categories` on mount, independent of the tickets fetch). Named
+// to match the two seed tickets' own categories below, so a C-23 test that
+// filters by one of these is exercising a realistic scenario.
+const CATEGORIES = [
+  { id: 4, name: "Network" },
+  { id: 2, name: "Hardware" },
+];
+
+// Development Requesters for the AC-09 switch test: id 1 matches
+// `Bootstrap`'s initial seed below, so "Change Requester → id 2" is a real
+// switch, not a no-op.
+const ACTIVE_REQUESTERS = [
+  { id: 1, name: "Jennifer Anderson", email: "jennifer.anderson@example.edu" },
+  { id: 2, name: "Michael Brown", email: "michael.brown@example.edu" },
+];
 
 const TICKET_WITH_ATTACHMENTS = {
   id: 12,
@@ -112,10 +135,35 @@ function mockFetch(ticketsHandler?: TicketsHandler) {
         ticketsHandler ?? (() => jsonResponse(200, TICKETS_RESPONSE))
       )(input, init);
     }
+    if (input.startsWith(CATEGORIES_URL)) {
+      return jsonResponse(200, CATEGORIES);
+    }
+    if (input.startsWith(REQUESTERS_URL)) {
+      return jsonResponse(200, ACTIVE_REQUESTERS);
+    }
     return jsonResponse(404, {});
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+/** Number of `/api/tickets` calls `fetchMock` has recorded — excludes the
+ * one `/api/categories` call the C-23 controls bar also fires on mount. */
+function ticketsCallCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([input]: [string]) =>
+    input.startsWith(TICKETS_URL),
+  ).length;
+}
+
+/** The `[url, init]` args of the Nth (1-indexed) `/api/tickets` call. */
+function ticketsCall(
+  fetchMock: ReturnType<typeof vi.fn>,
+  n: number,
+): [string, RequestInit | undefined] {
+  const calls = fetchMock.mock.calls.filter(([input]: [string]) =>
+    input.startsWith(TICKETS_URL),
+  ) as [string, RequestInit | undefined][];
+  return calls[n - 1];
 }
 
 /**
@@ -171,6 +219,12 @@ function renderScreen() {
           <Routes>
             <Route path="/tickets" element={<MyTicketsScreen />} />
             <Route path="/tickets/:id" element={<h1>Ticket Details</h1>} />
+            {/* Only exercised by the AC-09 Requester-switch test below —
+                RequesterBadge's "Change Requester" navigates here for real. */}
+            <Route
+              path="/select-requester"
+              element={<RequesterSelectionScreen />}
+            />
           </Routes>
         </MemoryRouter>
       </Bootstrap>
@@ -186,6 +240,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // A no-op when a test never switched to fake timers (C-23's debounce
+  // test does); always restoring here means a failure mid-test can never
+  // leak fake timers into the next test's real-timer `findBy*` calls.
+  vi.useRealTimers();
   window.localStorage.clear();
 });
 
@@ -223,16 +281,19 @@ describe("C-22 My Tickets list render", () => {
     expect(
       screen.getByRole("link", { name: "TKT-2026-000012" }),
     ).toHaveAttribute("href", "/tickets/12");
-    expect(screen.getByText("Cannot connect to VPN")).toBeInTheDocument();
-    expect(screen.getByText("Network")).toBeInTheDocument();
-    expect(screen.getByText("VPN")).toBeInTheDocument();
-    expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getAllByText("New")).toHaveLength(2);
+    // Scoped to the table (rather than the whole document): the C-23
+    // controls bar's Priority/Status filter selects render "High"/"New" as
+    // <option> text too, so an unscoped query would be ambiguous.
+    expect(within(table).getByText("Cannot connect to VPN")).toBeInTheDocument();
+    expect(within(table).getByText("Network")).toBeInTheDocument();
+    expect(within(table).getByText("VPN")).toBeInTheDocument();
+    expect(within(table).getByText("High")).toBeInTheDocument();
+    expect(within(table).getAllByText("New")).toHaveLength(2);
     expect(
-      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)),
+      within(table).getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)),
+      within(table).getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)),
     ).toBeInTheDocument();
 
     // Explicit, keyboard-reachable "View" affordance distinct from the
@@ -248,8 +309,11 @@ describe("C-22 My Tickets list render", () => {
       await screen.findByRole("heading", { name: /ticket details/i }),
     ).toBeInTheDocument();
 
-    // Requester-scoped per api-spec.md §1.2/§3.2.
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // Requester-scoped per api-spec.md §1.2/§3.2. Read via `ticketsCall`,
+    // not `fetchMock.mock.calls[0]` directly: the C-23 controls bar's
+    // `/api/categories` call (unrelated to Requester scoping) can land
+    // first depending on effect order.
+    const [, init] = ticketsCall(fetchMock, 1) as [string, RequestInit];
     expect(init.headers).toMatchObject({ "X-Requester-Id": "1" });
   });
 
@@ -307,6 +371,344 @@ describe("C-22 My Tickets list render", () => {
   });
 });
 
+describe("C-23 My Tickets controls fire correct query", () => {
+  it("debounces the search box 300ms: rapid typing fires no request per keystroke, then exactly one request carries the final value", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    vi.useFakeTimers();
+    const searchInput = screen.getByLabelText("Search");
+
+    // Three keystrokes, each within the previous one's 300ms window, so
+    // each restarts the timer instead of letting it fire.
+    fireEvent.change(searchInput, { target: { value: "v" } });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.change(searchInput, { target: { value: "vp" } });
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.change(searchInput, { target: { value: "vpn" } });
+
+    // Half of "debounced": 299ms after the last keystroke, still nothing —
+    // rapid typing alone never fires a request per keystroke.
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // The other half: the remaining 1ms completes the 300ms window since
+    // the *last* keystroke, and exactly one new request fires, carrying
+    // the final typed value.
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+
+    const [finalUrl] = ticketsCall(fetchMock, 2);
+    expect(new URL(finalUrl).searchParams.get("search")).toBe("vpn");
+
+    vi.useRealTimers();
+  });
+
+  it("Category, Priority, and Status filters combine as AND in the request params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Default (unfiltered) request sends none of these params.
+    const [initialUrl] = ticketsCall(fetchMock, 1);
+    const initialParams = new URL(initialUrl).searchParams;
+    expect(initialParams.has("categoryId")).toBe(false);
+    expect(initialParams.has("priority")).toBe(false);
+    expect(initialParams.has("status")).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+
+    // Each filter change fires its own request (no debounce on selects):
+    // 1 initial + 3 changes.
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+
+    // The final request carries all three simultaneously — combined AND,
+    // not each filter overwriting the last.
+    const [finalUrl] = ticketsCall(fetchMock, 4);
+    const finalParams = new URL(finalUrl).searchParams;
+    expect(finalParams.get("categoryId")).toBe(String(CATEGORIES[0].id));
+    expect(finalParams.get("priority")).toBe("HIGH");
+    expect(finalParams.get("status")).toBe("NEW");
+  });
+
+  it("the Sort select and the sortable column headers both drive sort+order in the request", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Default is "Created (newest)" (ui-spec.md §9).
+    const defaultParams = new URL(
+      ticketsCall(fetchMock, 1)[0],
+    ).searchParams;
+    expect(defaultParams.get("sort")).toBe("createdAt");
+    expect(defaultParams.get("order")).toBe("desc");
+
+    // Sort select: "Ticket number (A→Z)" → sort=ticketNumber&order=asc.
+    // Controls (including this select) are disabled while a request is in
+    // flight (ui-spec.md §9's Loading row), so each step below awaits the
+    // list re-loading before the next interaction — otherwise the next
+    // fireEvent would land on a still-disabled control and silently do
+    // nothing, which is exactly the failure mode this awaits around.
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    let table = await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    let params = new URL(ticketsCall(fetchMock, 2)[0]).searchParams;
+    expect(params.get("sort")).toBe("ticketNumber");
+    expect(params.get("order")).toBe("asc");
+
+    // Column header click on "Last Updated": not yet the active sort
+    // field, so it switches to updatedAt at that column's own default
+    // order (descending).
+    let lastUpdatedHeader = within(table).getByRole("button", {
+      name: /sort by last updated/i,
+    });
+    fireEvent.click(lastUpdatedHeader);
+    table = await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(3);
+    params = new URL(ticketsCall(fetchMock, 3)[0]).searchParams;
+    expect(params.get("sort")).toBe("updatedAt");
+    expect(params.get("order")).toBe("desc");
+
+    // Clicking the same header again toggles the order (desc → asc),
+    // rather than doing nothing or resetting to a default.
+    lastUpdatedHeader = within(table).getByRole("button", {
+      name: /sort by last updated/i,
+    });
+    fireEvent.click(lastUpdatedHeader);
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(4);
+    params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
+    expect(params.get("sort")).toBe("updatedAt");
+    expect(params.get("order")).toBe("asc");
+  });
+});
+
+describe("Clear filters (ui-spec.md §9, supports C-23, no dedicated tests.md row)", () => {
+  it("is absent at defaults, appears once a filter is non-default, and clicking it resets every control and re-fetches with no filter params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Absent while every control is still at its default.
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+
+    // Drive every control the button claims to reset away from its
+    // default — not just Category — so the post-clear assertions below
+    // are load-bearing for each one individually, not just coincidentally
+    // true because that control was never touched. Search needs the real
+    // 300ms debounce to actually land as a fired request (same fake-timer
+    // technique as the C-23 debounce test); the rest fire immediately.
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "vpn" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("search"),
+    ).toBe("vpn");
+    vi.useRealTimers();
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    await screen.findByRole("table");
+
+    // Sanity check every one of them actually took effect — otherwise the
+    // "resets" assertions below wouldn't prove anything for that control.
+    const callsBeforeClear = ticketsCallCount(fetchMock);
+    expect(callsBeforeClear).toBe(6); // initial + search + category + priority + status + sort
+    const beforeClearParams = new URL(
+      ticketsCall(fetchMock, callsBeforeClear)[0],
+    ).searchParams;
+    expect(beforeClearParams.get("search")).toBe("vpn");
+    expect(beforeClearParams.get("categoryId")).toBe(
+      String(CATEGORIES[0].id),
+    );
+    expect(beforeClearParams.get("priority")).toBe("HIGH");
+    expect(beforeClearParams.get("status")).toBe("NEW");
+    expect(beforeClearParams.get("sort")).toBe("ticketNumber");
+    expect(beforeClearParams.get("order")).toBe("asc");
+
+    // Appears once something is non-default.
+    const clearButton = await screen.findByRole("button", {
+      name: /clear filters/i,
+    });
+
+    fireEvent.click(clearButton);
+    await screen.findByRole("table");
+
+    // Disappears again — every control read back at default.
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    expect(screen.getByLabelText("Priority")).toHaveValue("");
+    expect(screen.getByLabelText("Status")).toHaveValue("");
+    expect(screen.getByLabelText("Sort")).toHaveValue("createdAt-desc");
+
+    // The re-fetch it triggers carries none of the filter params, and the
+    // default sort.
+    expect(ticketsCallCount(fetchMock)).toBe(callsBeforeClear + 1);
+    const finalParams = new URL(
+      ticketsCall(fetchMock, callsBeforeClear + 1)[0],
+    ).searchParams;
+    expect(finalParams.has("search")).toBe(false);
+    expect(finalParams.has("categoryId")).toBe(false);
+    expect(finalParams.has("priority")).toBe(false);
+    expect(finalParams.has("status")).toBe(false);
+    expect(finalParams.get("sort")).toBe("createdAt");
+    expect(finalParams.get("order")).toBe("desc");
+  });
+});
+
+describe("AC-09 My Tickets resets on Requester switch (tests.md C-08 covers the id/name-context half in AppShell.test.tsx)", () => {
+  it("switching Requesters via Change Requester resets search/filters/sort to defaults and reloads for the new Requester with no filter params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Drive every control away from its default for the original Requester
+    // (1). The search half needs the real 300ms debounce to actually land
+    // as a fired request — fake timers here, same technique as the C-23
+    // debounce test — before switching back to real timers for the
+    // multi-screen navigation below (`findByRole` polling needs real
+    // timers).
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "vpn" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("search"),
+    ).toBe("vpn");
+    vi.useRealTimers();
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    await screen.findByRole("table");
+
+    const callsBeforeSwitch = ticketsCallCount(fetchMock);
+    expect(callsBeforeSwitch).toBe(4); // initial + search + category + sort
+
+    // The last request for Requester 1 really does carry the non-default
+    // state — the baseline the reset below has to actually undo.
+    const beforeSwitchParams = new URL(
+      ticketsCall(fetchMock, callsBeforeSwitch)[0],
+    ).searchParams;
+    expect(beforeSwitchParams.get("search")).toBe("vpn");
+    expect(beforeSwitchParams.get("categoryId")).toBe(
+      String(CATEGORIES[0].id),
+    );
+    expect(beforeSwitchParams.get("sort")).toBe("ticketNumber");
+
+    // Change Requester → pick Requester 2 → Continue (the real flow:
+    // RequesterBadge navigates to /select-requester, which is a different
+    // route than /tickets, so MyTicketsScreen unmounts here and remounts
+    // fresh when Continue routes back).
+    fireEvent.click(
+      screen.getByRole("button", { name: /jennifer anderson/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Change Requester" }),
+    );
+
+    const requesterSelect = await screen.findByLabelText(
+      /development requester/i,
+    );
+    fireEvent.change(requesterSelect, { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    const table = await screen.findByRole("table");
+    expect(screen.getByText("Michael Brown")).toBeInTheDocument();
+
+    // Exactly one new /api/tickets call for the fresh mount, scoped to the
+    // new Requester, with none of the old filters/search/sort carried over.
+    expect(ticketsCallCount(fetchMock)).toBe(callsBeforeSwitch + 1);
+    const [afterSwitchUrl, afterSwitchInit] = ticketsCall(
+      fetchMock,
+      callsBeforeSwitch + 1,
+    );
+    expect(afterSwitchInit?.headers).toMatchObject({ "X-Requester-Id": "2" });
+    const afterSwitchParams = new URL(afterSwitchUrl).searchParams;
+    expect(afterSwitchParams.has("search")).toBe(false);
+    expect(afterSwitchParams.has("categoryId")).toBe(false);
+    expect(afterSwitchParams.get("sort")).toBe("createdAt");
+    expect(afterSwitchParams.get("order")).toBe("desc");
+
+    // The controls themselves read back at default, and Clear filters is
+    // gone again.
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    expect(screen.getByLabelText("Sort")).toHaveValue("createdAt-desc");
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+
+    // A fresh table, not a stale one left over from before the switch.
+    expect(within(table).getAllByRole("row").length).toBeGreaterThan(0);
+  });
+});
+
 describe("C-28 My Tickets failure state", () => {
   it("shows role=alert with Retry when the list fetch rejects; Retry re-fetches and recovers", async () => {
     stubMatchMedia(true);
@@ -332,7 +734,11 @@ describe("C-28 My Tickets failure state", () => {
 
     await screen.findByRole("table");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Counts only `/api/tickets` calls: the C-23 controls bar also fires one
+    // `/api/categories` call on mount (for the Category filter), which
+    // `fetchMock` intercepts too but which isn't what this assertion is
+    // about.
+    expect(ticketsCallCount(fetchMock)).toBe(2);
   });
 });
 
