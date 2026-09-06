@@ -28,6 +28,13 @@
   --zen-success: #0b7a46;
   --zen-focus-ring: #0b7a46;
 
+  /* ---- Priority badge — LOW (ui-spec.md §7.1) ----
+     MEDIUM and HIGH reuse --zen-warning(-bg) and --zen-error(-bg) above;
+     LOW has no existing token, so it gets its own pair here rather than a
+     hard-coded hex in PriorityBadge.css. */
+  --zen-priority-low-bg: #e7f0ea;
+  --zen-priority-low-text: #2f6b49;
+
   /* ---- Typography (ui-spec.md §3) ---- */
   --zen-font-family: system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
