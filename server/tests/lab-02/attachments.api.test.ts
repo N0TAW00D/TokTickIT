@@ -7,15 +7,8 @@ import { fileURLToPath } from 'node:url';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 
-// Covers docs/lab-02/api-spec.md §4.1-4.3 (attachment upload, metadata, and
-// download) and tests.md API-22, API-23, API-25, the 6th-upload half of
-// API-24, the upload/read/download halves of API-26, API-27, and API-28.
-//
-// NOT covered here (slice 9b, #17's last commit — DELETE
-// /api/attachments/:id does not exist yet):
-//   - API-24's "after removing one, upload succeeds" half — needs DELETE.
-//   - API-26's delete-ownership half — needs DELETE.
-//   - API-29, API-30, API-31 — all need DELETE.
+// Covers docs/lab-02/api-spec.md §4.1-4.4 (attachment upload, metadata,
+// download, and soft removal) and tests.md API-22..API-31.
 //
 // This suite points ATTACHMENTS_DIR at a throwaway temp directory (rather
 // than the real, git-ignored server/uploads/) so test runs never write to
@@ -193,13 +186,15 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
   });
 
-  describe('API-24: attachment active-count limit (AC-20, BR-23) — 6th-upload half only', () => {
+  describe('API-24: attachment active-count limit (AC-20, BR-23)', () => {
     it('allows 5 active attachments, then rejects the 6th with 409 ATTACHMENT_LIMIT', async () => {
       const ticketId = await createTicket(requesterAId);
+      const uploadedIds: number[] = [];
 
       for (let i = 0; i < 5; i++) {
         const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `file-${i}.pdf` });
         expect(res.status, `upload #${i + 1}`).toBe(201);
+        uploadedIds.push(res.body.id as number);
       }
 
       const sixth = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: 'file-6.pdf' });
@@ -209,9 +204,20 @@ describe('POST /api/tickets/:id/attachments', () => {
       const activeCount = await prisma.attachment.count({ where: { ticketId, isRemoved: false } });
       expect(activeCount).toBe(5);
 
-      // "after removing one, upload succeeds" (the other half of API-24)
-      // needs DELETE /api/attachments/:id, which lands in a later slice-9b
-      // commit. Left uncovered here deliberately rather than faked.
+      // "after removing one, upload succeeds" — the other half of API-24,
+      // now that DELETE /api/attachments/:id (slice 9b) exists.
+      const removeRes = await request(app)
+        .delete(`/api/attachments/${uploadedIds[0]}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Freeing a slot to prove the limit re-opens' });
+      expect(removeRes.status).toBe(200);
+
+      const seventh = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: 'file-7.pdf' });
+      expect(seventh.status).toBe(201);
+
+      const activeCountAfter = await prisma.attachment.count({ where: { ticketId, isRemoved: false } });
+      expect(activeCountAfter).toBe(5);
     });
 
     it('holds the limit under genuinely concurrent uploads: one below the limit, 3 requests race for the last slot, exactly 1 succeeds and the rest are 409 (never 500)', async () => {
@@ -343,7 +349,7 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
   });
 
-  describe('API-26: attachment ownership (AC-37, BR-14) — upload/read/download halves only', () => {
+  describe('API-26: attachment ownership (AC-37, BR-14)', () => {
     it("B uploading to A's ticket returns 404, byte-identical to uploading to an unknown ticket id", async () => {
       const ticketId = await createTicket(requesterAId);
 
@@ -410,8 +416,32 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(notOwnedRes.body.error).toBe('NOT_FOUND');
     });
 
-    // delete-ownership half needs DELETE, which lands in the next
-    // slice-9b commit — not built yet.
+    it("B deleting A's attachment returns 404, byte-identical to deleting an unknown attachment id, and A's attachment stays active", async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+        filename: 'photo.jpg',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const notOwnedRes = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterBId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: "B trying to remove A's attachment" });
+      const unknownRes = await request(app)
+        .delete('/api/attachments/999999')
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Removing an attachment that does not exist' });
+
+      expect(notOwnedRes.status).toBe(404);
+      expect(unknownRes.status).toBe(404);
+      expect(notOwnedRes.body).toEqual(unknownRes.body);
+      expect(notOwnedRes.body.error).toBe('NOT_FOUND');
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(false);
+    });
   });
 
   // api-spec.md §1.4a: "POST /api/tickets/:id/attachments requires
@@ -509,9 +539,9 @@ describe('GET /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      // Soft-removed directly (DELETE /api/attachments/:id lands in a later
-      // slice-9b commit) — this test is about §4.2's read shape for a
-      // removed row, not about how the row came to be removed.
+      // Soft-removed directly (DELETE /api/attachments/:id is a later
+      // slice) — this test is about §4.2's read shape for a removed row,
+      // not about how the row came to be removed.
       await prisma.attachment.update({
         where: { id: attachmentId },
         data: { isRemoved: true, removedAt: new Date(), removedReason: 'Uploaded the wrong file by mistake' },
@@ -601,10 +631,10 @@ describe('GET /api/attachments/:id/download', () => {
         .set('X-Requester-Id', String(requesterAId));
       expect(beforeRemoval.status).toBe(200);
 
-      // Soft-removed directly (DELETE /api/attachments/:id lands in the
-      // next slice-9b commit) — this test is about the download route's
-      // gate on `isRemoved`, not about how the row came to be removed.
-      // API-29 covers DELETE's own correctness end-to-end once it exists.
+      // Soft-removed directly (DELETE /api/attachments/:id is a later
+      // slice) — this test is about the download route's gate on
+      // `isRemoved`, not about how the row came to be removed. API-29
+      // covers DELETE's own correctness end-to-end once it exists.
       await prisma.attachment.update({
         where: { id: attachmentId },
         data: { isRemoved: true, removedAt: new Date(), removedReason: 'Wrong file uploaded' },
@@ -640,6 +670,183 @@ describe('GET /api/attachments/:id/download', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('INTERNAL');
+    });
+  });
+});
+
+describe('DELETE /api/attachments/:id', () => {
+  describe('API-29: soft removal happy path (AC-34, BR-31)', () => {
+    it('sets isRemoved/removedAt/removedReason/removedById, drops from the active count, and bumps the ticket updatedAt', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'screenshot.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const ticketBefore = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      await new Promise((resolve) => setTimeout(resolve, 10)); // ensure a distinguishable timestamp
+
+      const res = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Uploaded the wrong screenshot' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.isRemoved).toBe(true);
+      expect(res.body.removedAt).not.toBeNull();
+      expect(res.body.removedReason).toBe('Uploaded the wrong screenshot');
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(true);
+      expect(row.removedAt).not.toBeNull();
+      expect(row.removedReason).toBe('Uploaded the wrong screenshot');
+      expect(row.removedById).toBe(requesterAId);
+
+      const activeCount = await prisma.attachment.count({ where: { ticketId, isRemoved: false } });
+      expect(activeCount).toBe(0);
+
+      const ticketAfter = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      expect(ticketAfter.updatedAt.getTime()).toBeGreaterThan(ticketBefore.updatedAt.getTime());
+    });
+  });
+
+  describe('API-30: removal reason validation (AC-35, BR-31, A-09)', () => {
+    it.each([
+      ['missing', undefined],
+      ['2 characters (under the 3 minimum)', 'ab'],
+      ['201 characters (over the 200 maximum)', 'a'.repeat(201)],
+      ['whitespace-only', '   '],
+    ] as const)('rejects a reason that is %s with 400 VALIDATION_FAILED, and the attachment stays active', async (_label, reason) => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const body = reason === undefined ? {} : { reason };
+      const res = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('VALIDATION_FAILED');
+      expect(res.body.fields).toEqual([{ field: 'reason', message: expect.any(String) }]);
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(false);
+      expect(row.removedAt).toBeNull();
+      expect(row.removedReason).toBeNull();
+    });
+
+    it('accepts a reason of exactly 3 characters and exactly 200 characters', async () => {
+      const ticketId = await createTicket(requesterAId);
+
+      const shortReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'a.pdf',
+      });
+      const shortRes = await request(app)
+        .delete(`/api/attachments/${shortReasonUpload.body.id}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'abc' });
+      expect(shortRes.status).toBe(200);
+
+      const longReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'b.pdf',
+      });
+      const longRes = await request(app)
+        .delete(`/api/attachments/${longReasonUpload.body.id}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'a'.repeat(200) });
+      expect(longRes.status).toBe(200);
+    });
+
+    it('a non-JSON content type returns 400 MALFORMED_BODY and leaves the attachment active', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const res = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .send('reason=whatever');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('MALFORMED_BODY');
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(false);
+    });
+  });
+
+  describe('API-31: removing an already-removed attachment (BR-32)', () => {
+    it('the second removal returns 409 ALREADY_REMOVED', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const first = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'First removal' });
+      expect(first.status).toBe(200);
+
+      const second = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Second removal attempt' });
+
+      expect(second.status).toBe(409);
+      expect(second.body.error).toBe('ALREADY_REMOVED');
+      expect('fields' in second.body).toBe(false);
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.removedReason).toBe('First removal');
+    });
+  });
+
+  describe('a non-integer attachment id and missing/invalid header (api-spec.md §1.4, §1.2) — no tests.md API-xx row', () => {
+    it('a non-integer attachment id is treated as not found, not a 400', async () => {
+      const res = await request(app)
+        .delete('/api/attachments/abc')
+        .set('X-Requester-Id', String(requesterAId))
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Does not matter' });
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('NOT_FOUND');
+    });
+
+    it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const missing = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Does not matter' });
+      expect(missing.status).toBe(400);
+      expect(missing.body.error).toBe('MISSING_REQUESTER');
+
+      const invalid = await request(app)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('X-Requester-Id', '999999')
+        .set('Content-Type', 'application/json')
+        .send({ reason: 'Does not matter' });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toBe('INVALID_REQUESTER');
     });
   });
 });

@@ -4,17 +4,19 @@ import { Router, type Request, type Response } from 'express';
 import { requesterContext } from '../middleware/requesterContext.ts';
 import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
+import { AttachmentAlreadyRemovedError, removeAttachment } from '../services/removeAttachment.ts';
+import { validateRemovalReason } from '../validation/attachmentRemoval.ts';
+import type { FieldError } from '../validation/ticketFields.ts';
 
 // GET /api/attachments/:id — api-spec.md §4.2 (BR-14; AC-36).
 // GET /api/attachments/:id/download — api-spec.md §4.3 (BR-30, BR-33;
 // AC-33, AC-34, AC-37).
+// DELETE /api/attachments/:id — api-spec.md §4.4 (BR-07, BR-31, BR-32, A-08,
+// A-09; AC-34, AC-35, AC-36).
 //
 // Mounted at /api/attachments (app.ts), separate from ticketsRouter — these
 // are attachment-scoped, not ticket-scoped, even though ownership is always
 // resolved through the attachment's parent ticket (§4 preamble, BR-14).
-//
-// DELETE /api/attachments/:id is added on top of this router by the next
-// slice-9b commit.
 export const attachmentsRouter: Router = Router();
 
 /** Largest value Postgres `int4` (and therefore Prisma `Int`) can hold. */
@@ -37,10 +39,29 @@ function parseAttachmentIdParam(raw: string): number | null {
   return id;
 }
 
+function isPlainRequestBody(body: unknown): body is Record<string, unknown> {
+  return typeof body === 'object' && body !== null && !Array.isArray(body);
+}
+
+function malformedBody(res: Response): void {
+  res.status(400).json({
+    error: 'MALFORMED_BODY',
+    message: 'Request body must be a JSON object.',
+  });
+}
+
+function validationFailed(res: Response, fields: FieldError[]): void {
+  res.status(400).json({
+    error: 'VALIDATION_FAILED',
+    message: 'One or more fields are invalid.',
+    fields,
+  });
+}
+
 function attachmentNotFound(res: Response): void {
   // Byte-identical whether the attachment id is unknown or its ticket is
   // simply not owned by the caller (BR-14, BR-42, api-spec.md §1.4) — the
-  // only place this route sends a 404.
+  // only place any of these three routes sends a 404.
   res.status(404).json({
     error: 'NOT_FOUND',
     message: 'Attachment not found.',
@@ -54,15 +75,23 @@ function attachmentRemoved(res: Response): void {
   });
 }
 
+function alreadyRemoved(res: Response): void {
+  res.status(409).json({
+    error: 'ALREADY_REMOVED',
+    message: 'This attachment is already removed.',
+  });
+}
+
 function internalError(res: Response): void {
   res.status(500).json({ error: 'INTERNAL', message: 'An unexpected error occurred.' });
 }
 
 /**
- * The metadata shape §4.2's `GET /api/attachments/:id` response uses — the
- * same 9 keys the `POST` `201` body uses (routes/tickets.ts), deliberately
- * never including `storedFilename` (never exposed, BR-30) or `removedById`
- * (not part of any documented response shape).
+ * The metadata shape shared by §4.2's `GET /api/attachments/:id` response
+ * and §4.4's `DELETE` response — the same 9 keys the `POST` `201` body uses
+ * (routes/tickets.ts), deliberately never including `storedFilename` (never
+ * exposed, BR-30) or `removedById` (not part of any documented response
+ * shape).
  */
 function attachmentToJson(attachment: {
   id: number;
@@ -165,6 +194,60 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
       return;
     }
     console.error('Error downloading attachment:', error);
+    internalError(res);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/attachments/:id (api-spec.md §4.4)
+// ---------------------------------------------------------------------------
+
+attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Response) => {
+  // Path-shape check first, same precedence as the other two routes and as
+  // routes/tickets.ts's POST /:id/attachments: a non-integer id is 404
+  // regardless of the request body (§1.4 — "the route matched, the resource
+  // did not" outranks a body-shape problem).
+  const attachmentId = parseAttachmentIdParam(String(req.params.id));
+  if (attachmentId === null) {
+    attachmentNotFound(res);
+    return;
+  }
+
+  // §1.4a: DELETE /api/attachments/:id requires Content-Type:
+  // application/json; anything else (or a non-object body) -> 400
+  // MALFORMED_BODY. Same guard as POST /api/tickets (routes/tickets.ts).
+  if (!isPlainRequestBody(req.body)) {
+    malformedBody(res);
+    return;
+  }
+
+  // Field validation before the ownership/already-removed lookup, matching
+  // POST /api/tickets's order (shape/validation errors precede existence
+  // checks) — and it also means a reason that fails validation never
+  // discloses anything about whether the id is owned, unknown, or removed.
+  const reasonResult = validateRemovalReason(req.body.reason);
+  if (!reasonResult.ok) {
+    validationFailed(res, [reasonResult.error]);
+    return;
+  }
+
+  try {
+    const updated = await removeAttachment({
+      attachmentId,
+      requesterId: req.requester!.id,
+      reason: reasonResult.value,
+    });
+    res.status(200).json(attachmentToJson(updated));
+  } catch (error) {
+    if (error instanceof AttachmentNotFoundError) {
+      attachmentNotFound(res);
+      return;
+    }
+    if (error instanceof AttachmentAlreadyRemovedError) {
+      alreadyRemoved(res);
+      return;
+    }
+    console.error('Error removing attachment:', error);
     internalError(res);
   }
 });
