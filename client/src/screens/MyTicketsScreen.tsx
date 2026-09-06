@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -412,17 +412,33 @@ export function MyTicketsScreen() {
       .catch(() => {});
   }, []);
 
+  // The last search value the debounce actually *committed*, normalized
+  // the same way hasActiveQuery/BR-16 treat "active" (trimmed). Seeded
+  // from the initial searchInput so this effect's mount-time run — it
+  // fires once on mount just like any other effect, with the search box
+  // still empty — reads as "unchanged" rather than a change into "".
+  const previousSearchRef = useRef(searchInput.trim());
+
   // Debounce the search box 300ms before it drives the `search` param
   // (ui-spec.md §9, AC-23): every keystroke restarts this timer, so only
   // the value that has stood still for the full delay is ever applied.
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchInput);
-      // A narrower/wider search can move the current page past the new
-      // result count (or simply mean something different at "page 3") —
-      // always land back on page 1 rather than risk stranding the user on
-      // an over-page/no-results state a fresh page 1 wouldn't have shown.
-      setPage(DEFAULT_PAGE);
+      const normalizedSearch = searchInput.trim();
+      // Reset the page only when the search term actually changed.
+      // Without this guard, the mount-time run above (searchInput is
+      // still "" then) would unconditionally bounce an already-paginated
+      // user back to page 1 moments after mount. A genuine change, on
+      // the other hand, can move the current page past the new result
+      // count (or simply mean something different at "page 3") — so that
+      // case still lands back on page 1 rather than risk stranding the
+      // user on an over-page/no-results state a fresh page 1 wouldn't
+      // have shown.
+      if (normalizedSearch !== previousSearchRef.current) {
+        setPage(DEFAULT_PAGE);
+      }
+      previousSearchRef.current = normalizedSearch;
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [searchInput]);

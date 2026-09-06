@@ -1004,6 +1004,39 @@ describe("Page resets to 1 on filter/search/sort/page-size change (bug guard, ui
     expect(params.has("categoryId")).toBe(false);
     expect(params.get("page")).toBe("1");
   });
+
+  it("does NOT reset an already-advanced page when the mount-time debounce settles on an unchanged (still empty) search (regression guard)", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(manyPagesHandler());
+    renderScreen();
+
+    // The search-debounce effect's 300ms timer starts ticking the instant
+    // this component mounts — it fires once on mount just like any other
+    // effect, even though the search box was never touched. Real time
+    // elapsed getting from mount through the initial page-1 load and a
+    // click to page 2 is a handful of milliseconds, well inside that
+    // still-pending window, so this reproduces "the user reaches page 3
+    // within 300ms of mount" without needing fake timers (this test never
+    // touches the search box, so there is nothing for fake-timer
+    // advancement to target).
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("page"),
+    ).toBe("2");
+
+    // Let the mount-time debounce timer actually elapse for real. The
+    // search box's value ("") hasn't changed since mount, so this must
+    // not bounce the page back to 1 or fire a spurious extra request.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(screen.getByRole("button", { name: "Page 2" })).toBeDisabled();
+  });
 });
 
 describe("Clear filters (ui-spec.md §9, supports C-23, no dedicated tests.md row)", () => {
