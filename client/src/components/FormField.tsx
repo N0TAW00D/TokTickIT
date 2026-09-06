@@ -33,7 +33,9 @@ export interface FormFieldProps {
  *   message — BR referenced in §5.2).
  * - Clones the single child control to inject `id`, `aria-required`,
  *   `aria-invalid`, and `aria-describedby` (pointing at helper and/or
- *   error ids).
+ *   error ids). Any `aria-describedby` already present on the child
+ *   (e.g. a caller-supplied description) is preserved and merged with
+ *   the helper/error ids rather than overwritten.
  * - The error message renders with `role="alert"` directly under the
  *   field.
  */
@@ -48,8 +50,22 @@ export function FormField({
 }: FormFieldProps) {
   const helperId = helperText ? `${id}-helper` : undefined;
   const errorId = error ? `${id}-error` : undefined;
+
+  // Preserve a caller-supplied aria-describedby on the wrapped control
+  // instead of clobbering it: merge it with the helper/error ids, in
+  // order, de-duplicating in case it already references one of them.
+  const existingDescribedBy = children.props["aria-describedby"];
+  const describedByIds = Array.from(
+    new Set(
+      [
+        ...(existingDescribedBy ? existingDescribedBy.split(/\s+/) : []),
+        helperId,
+        errorId,
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
   const describedBy =
-    [helperId, errorId].filter(Boolean).join(" ") || undefined;
+    describedByIds.length > 0 ? describedByIds.join(" ") : undefined;
 
   const control = cloneElement(children, {
     id,

@@ -96,6 +96,25 @@ describe("FormField required + error", () => {
     expect(describedBy).toContain(alert.id);
   });
 
+  it("merges a caller-supplied aria-describedby with the helper/error ids instead of overwriting it", () => {
+    render(
+      <FormField
+        id="summary"
+        label="Ticket Summary"
+        helperText="Keep it under 140 characters."
+        error="Summary is required."
+      >
+        <TextInput aria-describedby="external-note" />
+      </FormField>,
+    );
+
+    const input = screen.getByRole("textbox");
+    const describedBy = input.getAttribute("aria-describedby");
+
+    // The caller-supplied id survives alongside the helper and error ids.
+    expect(describedBy).toBe("external-note summary-helper summary-error");
+  });
+
   it("turns the character counter error-colored past the max", () => {
     const { rerender, container } = render(
       <FormField id="summary" label="Ticket Summary" counter={{ current: 12, max: 140 }}>
