@@ -1,0 +1,153 @@
+/*
+ * My Tickets screen (ui-spec.md §9). Desktop table vs. mobile card list is
+ * chosen in JS via useMediaQuery — this file only styles whichever markup
+ * is actually in the DOM, not a CSS-only show/hide of both.
+ */
+
+.zen-my-tickets__intro {
+  color: var(--zen-text-muted);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+/* Visually hidden but screen-reader reachable (ui-spec.md §12: the
+   row-level "View" affordance and per-row accessible names must stay
+   distinguishable without adding visible clutter). */
+.zen-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Desktop table ---- */
+
+/* Own scroll container, not the page (ui-spec.md §11: no horizontal page
+   scroll at any viewport) — a very wide table scrolls inside itself. */
+.zen-my-tickets__table-scroll {
+  overflow-x: auto;
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+}
+
+.zen-my-tickets__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-my-tickets__table th,
+.zen-my-tickets__table td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--zen-border);
+  white-space: nowrap;
+}
+
+.zen-my-tickets__table th {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text-muted);
+}
+
+.zen-my-tickets__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.zen-my-tickets__table tbody tr:hover {
+  background: var(--zen-pale);
+}
+
+/* Long summaries / related-system names truncate with an ellipsis, never
+   silently clip (ui-spec.md §9, §11) — the `title` attribute on the cell
+   carries the full text. */
+.zen-my-tickets__truncate {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Mobile cards ---- */
+
+.zen-my-tickets__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-field-gap);
+}
+
+.zen-my-tickets__card {
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-mobile);
+}
+
+.zen-my-tickets__card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-my-tickets__card-number {
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-my-tickets__card-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.zen-my-tickets__card-summary {
+  margin: 0 0 4px;
+  color: var(--zen-text);
+}
+
+.zen-my-tickets__card-classification {
+  margin: 0 0 4px;
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+}
+
+.zen-my-tickets__card .zen-my-tickets__truncate {
+  max-width: 100%;
+}
+
+.zen-my-tickets__card-timestamp {
+  margin: 0;
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+}
+
+.zen-my-tickets__card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zen-space-unit);
+  margin-top: 4px;
+}
+
+.zen-my-tickets__card-attachments {
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+  white-space: nowrap;
+}
+
+.zen-my-tickets__card-view {
+  display: inline-block;
+  margin-top: var(--zen-space-unit);
+}
