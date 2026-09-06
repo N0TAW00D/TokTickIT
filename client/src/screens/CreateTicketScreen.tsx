@@ -366,7 +366,7 @@ export function CreateTicketScreen() {
             {submitState.ticket.summary}
           </p>
           {submitState.failedAttachments.length > 0 && (
-            <div role="alert" className="zen-create-ticket__warning">
+            <div role="note" className="zen-create-ticket__warning">
               <span aria-hidden="true">⚠</span>{" "}
               {describeFailedAttachments(submitState.failedAttachments)}
             </div>

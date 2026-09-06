@@ -440,7 +440,7 @@ describe("C-16 partial attachment failure (AC-21, BR-27)", () => {
       ),
     ).not.toBeInTheDocument();
 
-    const warning = await screen.findByRole("alert");
+    const warning = await screen.findByRole("note");
     expect(warning).toHaveTextContent("screenshot.png");
     expect(warning).toHaveTextContent("could not be uploaded");
 
@@ -487,7 +487,7 @@ describe("C-16 partial attachment failure (AC-21, BR-27)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
 
-    const warning = await screen.findByRole("alert");
+    const warning = await screen.findByRole("note");
     expect(warning).toHaveTextContent("bad.png");
     expect(warning).not.toHaveTextContent("good.pdf");
 
