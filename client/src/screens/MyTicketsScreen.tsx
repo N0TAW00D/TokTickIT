@@ -6,6 +6,7 @@ import { SelectField, type SelectOption } from "../components/SelectField";
 import { TextInput } from "../components/TextInput";
 import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
+import { Pagination, type PageSizeValue } from "../components/Pagination";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -17,6 +18,7 @@ import {
   type RequestedPriority,
   type SortOrder,
   type TicketListItem,
+  type TicketListMeta,
   type TicketSortField,
 } from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
@@ -30,7 +32,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 type ListState =
   | { phase: "loading" }
-  | { phase: "loaded"; items: TicketListItem[] }
+  | { phase: "loaded"; items: TicketListItem[]; meta: TicketListMeta }
   | { phase: "error"; message: string };
 
 const PRIORITY_OPTIONS: SelectOption[] = [
@@ -60,6 +62,8 @@ const SORT_OPTIONS: SortSelectOption[] = [
 
 const DEFAULT_SORT: TicketSortField = "createdAt";
 const DEFAULT_ORDER: SortOrder = "desc";
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE: PageSizeValue = 10;
 
 /** The order a column header's first click applies, per field (ui-spec.md §9). */
 const HEADER_DEFAULT_ORDER: Record<TicketSortField, SortOrder> = {
@@ -330,9 +334,9 @@ function TicketsCards({ items }: TicketRowsProps) {
 
 /**
  * My Tickets screen (ui-spec.md §9, `/tickets`) — data fetch, list
- * rendering, controls (search/filter/sort/clear), and loading/failure
- * states. Pagination and the empty / no-results / over-page states belong
- * to the next slice (Issue #18 part 3).
+ * rendering, controls (search/filter/sort/clear), pagination, and
+ * loading/failure states. The empty / no-results / over-page states
+ * belong to the next commit in this slice.
  */
 export function MyTicketsScreen() {
   const navigate = useNavigate();
@@ -349,6 +353,8 @@ export function MyTicketsScreen() {
   const [status, setStatus] = useState("");
   const [sort, setSort] = useState<TicketSortField>(DEFAULT_SORT);
   const [order, setOrder] = useState<SortOrder>(DEFAULT_ORDER);
+  const [page, setPage] = useState(DEFAULT_PAGE);
+  const [pageSize, setPageSize] = useState<PageSizeValue>(DEFAULT_PAGE_SIZE);
 
   const isLoading = state.phase === "loading";
 
@@ -377,6 +383,11 @@ export function MyTicketsScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchInput);
+      // A narrower/wider search can move the current page past the new
+      // result count (or simply mean something different at "page 3") —
+      // always land back on page 1 rather than risk stranding the user on
+      // an over-page/no-results state a fresh page 1 wouldn't have shown.
+      setPage(DEFAULT_PAGE);
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [searchInput]);
@@ -394,9 +405,11 @@ export function MyTicketsScreen() {
       status: status || undefined,
       sort,
       order,
+      page,
+      pageSize,
     })
       .then((response) => {
-        setState({ phase: "loaded", items: response.items });
+        setState({ phase: "loaded", items: response.items, meta: response.meta });
       })
       .catch(() => {
         setState({
@@ -405,11 +418,29 @@ export function MyTicketsScreen() {
             "Could not load your tickets. Please check your connection and try again.",
         });
       });
-  }, [requesterId, debouncedSearch, categoryId, priority, status, sort, order]);
+  }, [
+    requesterId,
+    debouncedSearch,
+    categoryId,
+    priority,
+    status,
+    sort,
+    order,
+    page,
+    pageSize,
+  ]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Every handler below that changes search/filters/sort/page-size also
+  // resets to page 1 in the same call — not via a separate "watch for
+  // change, then reset" effect. Reacting to a filter change with a fetch
+  // fired against the *old* page before a follow-up effect corrects it
+  // would flash a wrong request (or a stray "no more tickets" message)
+  // between the two; batching both state updates into one handler means
+  // `load` only ever sees the two changes together, as a single request.
 
   function handleToggleSort(field: TicketSortField) {
     if (sort === field) {
@@ -418,6 +449,7 @@ export function MyTicketsScreen() {
       setSort(field);
       setOrder(HEADER_DEFAULT_ORDER[field]);
     }
+    setPage(DEFAULT_PAGE);
   }
 
   function handleSortSelectChange(value: string) {
@@ -425,6 +457,31 @@ export function MyTicketsScreen() {
     if (!option) return;
     setSort(option.sort);
     setOrder(option.order);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handleCategoryChange(value: string) {
+    setCategoryId(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handlePriorityChange(value: string) {
+    setPriority(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handleStatusChange(value: string) {
+    setStatus(value);
+    setPage(DEFAULT_PAGE);
+  }
+
+  function handlePageChange(nextPage: number) {
+    setPage(nextPage);
+  }
+
+  function handlePageSizeChange(nextPageSize: PageSizeValue) {
+    setPageSize(nextPageSize);
+    setPage(DEFAULT_PAGE);
   }
 
   function handleClearFilters() {
@@ -435,6 +492,7 @@ export function MyTicketsScreen() {
     setStatus("");
     setSort(DEFAULT_SORT);
     setOrder(DEFAULT_ORDER);
+    setPage(DEFAULT_PAGE);
   }
 
   const categoryOptions = useMemo<SelectOption[]>(
@@ -491,7 +549,7 @@ export function MyTicketsScreen() {
             id="my-tickets-category"
             label="Category"
             value={categoryId}
-            onChange={setCategoryId}
+            onChange={handleCategoryChange}
             placeholder="All Categories"
             disabled={isLoading}
             options={categoryOptions}
@@ -500,7 +558,7 @@ export function MyTicketsScreen() {
             id="my-tickets-priority"
             label="Priority"
             value={priority}
-            onChange={setPriority}
+            onChange={handlePriorityChange}
             placeholder="All Priorities"
             disabled={isLoading}
             options={PRIORITY_OPTIONS}
@@ -509,7 +567,7 @@ export function MyTicketsScreen() {
             id="my-tickets-status"
             label="Status"
             value={status}
-            onChange={setStatus}
+            onChange={handleStatusChange}
             placeholder="All Statuses"
             disabled={isLoading}
             options={STATUS_OPTIONS}
@@ -533,18 +591,30 @@ export function MyTicketsScreen() {
         <ErrorState message={state.message} onRetry={load} />
       )}
 
-      {state.phase === "loaded" &&
-        (isDesktop ? (
-          <TicketsTable
-            items={state.items}
-            sort={sort}
-            order={order}
-            onToggleSort={handleToggleSort}
+      {state.phase === "loaded" && (
+        <>
+          {isDesktop ? (
+            <TicketsTable
+              items={state.items}
+              sort={sort}
+              order={order}
+              onToggleSort={handleToggleSort}
+              disabled={isLoading}
+            />
+          ) : (
+            <TicketsCards items={state.items} />
+          )}
+          <Pagination
+            page={state.meta.page}
+            pageSize={state.meta.pageSize}
+            totalItems={state.meta.totalItems}
+            totalPages={state.meta.totalPages}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
             disabled={isLoading}
           />
-        ) : (
-          <TicketsCards items={state.items} />
-        ))}
+        </>
+      )}
     </AppShell>
   );
 }
