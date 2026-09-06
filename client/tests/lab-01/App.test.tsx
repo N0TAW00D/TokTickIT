@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import App from '../../src/App.tsx';
+import App from '../../src/lab01/SystemCheckPage.tsx';
 
 const API_BASE_URL = 'http://localhost:3000';
 const HEALTH_URL = `${API_BASE_URL}/api/health`;

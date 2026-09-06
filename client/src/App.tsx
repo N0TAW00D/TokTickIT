@@ -1,73 +1,48 @@
-import { useState } from "react";
-import "./App.css";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { RequesterProvider } from "./requester/RequesterContext";
+import { RequireRequester } from "./routes/RequireRequester";
+import { RequesterSelectionScreen } from "./screens/RequesterSelectionScreen";
+import { MyTicketsScreen } from "./screens/MyTicketsScreen";
+import { CreateTicketScreen } from "./screens/CreateTicketScreen";
+import { TicketDetailScreen } from "./screens/TicketDetailScreen";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
-
-type Category = {
-  id: number;
-  name: string;
-};
-
-type CheckState =
-  | { phase: "idle" }
-  | { phase: "loading" }
-  | { phase: "online"; categories: Category[] }
-  | { phase: "offline" };
-
+/**
+ * Client routing root (specification.md FR-01..FR-05). Requester-scoped
+ * routes are wrapped in the RequireRequester guard, which redirects to
+ * `/select-requester` when there is no valid current Requester.
+ */
 function App() {
-  const [state, setState] = useState<CheckState>({ phase: "idle" });
-
-  async function checkSystem() {
-    setState({ phase: "loading" });
-
-    try {
-      const healthRes = await fetch(`${API_BASE_URL}/api/health`);
-      if (!healthRes.ok) throw new Error("health check failed");
-
-      const categoriesRes = await fetch(`${API_BASE_URL}/api/categories`);
-      if (!categoriesRes.ok) throw new Error("categories request failed");
-      const categories: Category[] = await categoriesRes.json();
-
-      setState({ phase: "online", categories });
-    } catch {
-      setState({ phase: "offline" });
-    }
-  }
-
   return (
-    <div className="container py-4" style={{ textAlign: "left" }}>
-      <h1>TokTickIT IT Service Desk</h1>
-
-      <button className="btn btn-primary my-3" onClick={checkSystem}>
-        Check System
-      </button>
-
-      {state.phase === "loading" && <p role="status">⏳ Loading…</p>}
-
-      {state.phase === "online" && (
-        <div>
-          <p>
-            System Status: <strong>Online</strong>
-          </p>
-          <p className="mb-1">Supported Request Categories:</p>
-          <ul>
-            {state.categories.map((category) => (
-              <li key={category.id}>{category.name}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {state.phase === "offline" && (
-        <div role="alert">
-          <p>
-            System Status: <strong>Offline</strong>
-          </p>
-          <p>Unable to connect to TokTickIT API</p>
-        </div>
-      )}
-    </div>
+    <RequesterProvider>
+      <Routes>
+        <Route path="/" element={<Navigate to="/tickets" replace />} />
+        <Route path="/select-requester" element={<RequesterSelectionScreen />} />
+        <Route
+          path="/tickets"
+          element={
+            <RequireRequester>
+              <MyTicketsScreen />
+            </RequireRequester>
+          }
+        />
+        <Route
+          path="/tickets/new"
+          element={
+            <RequireRequester>
+              <CreateTicketScreen />
+            </RequireRequester>
+          }
+        />
+        <Route
+          path="/tickets/:id"
+          element={
+            <RequireRequester>
+              <TicketDetailScreen />
+            </RequireRequester>
+          }
+        />
+      </Routes>
+    </RequesterProvider>
   );
 }
 
