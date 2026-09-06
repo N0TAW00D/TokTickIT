@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response } from 'express';
 import cors from 'cors';
 import { categoriesRouter } from './routes/categories.ts';
+import { relatedSystemsRouter } from './routes/relatedSystems.ts';
 import { requestersRouter } from './routes/requesters.ts';
 
 const app: Express = express();
@@ -16,6 +17,8 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 app.use('/api/categories', categoriesRouter);
+
+app.use('/api/related-systems', relatedSystemsRouter);
 
 app.use('/api/requesters', requestersRouter);
 

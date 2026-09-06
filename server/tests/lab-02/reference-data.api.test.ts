@@ -38,3 +38,35 @@ describe('GET /api/categories', () => {
     expect(orderedIds).toEqual([...orderedIds].sort((a, b) => a - b));
   });
 });
+
+// Covers docs/lab-02/api-spec.md §2.2 (BR-35; AC-10, test API-02):
+// only active RelatedSystems, shaped {id,name}, ordered by name ascending,
+// at least 6 rows (the seed has 7). Same reasoning as the categories suite
+// above: the seed never creates an inactive RelatedSystem, so this suite
+// creates one itself to prove the isActive filter is real, then deletes it.
+describe('GET /api/related-systems', () => {
+  afterEach(async () => {
+    await prisma.relatedSystem.deleteMany({ where: { name: 'Decommissioned System' } });
+  });
+
+  it('API-02: returns only active RelatedSystems, ordered by name, with at least 6 rows', async () => {
+    const inactive = await prisma.relatedSystem.create({
+      data: { name: 'Decommissioned System', isActive: false },
+    });
+
+    const res = await request(app).get('/api/related-systems');
+
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThanOrEqual(6);
+
+    for (const system of res.body as Array<{ id: number; name: string }>) {
+      expect(Object.keys(system).sort()).toEqual(['id', 'name']);
+    }
+
+    const ids = (res.body as Array<{ id: number }>).map((s) => s.id);
+    expect(ids).not.toContain(inactive.id);
+
+    const names = (res.body as Array<{ name: string }>).map((s) => s.name);
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+  });
+});
