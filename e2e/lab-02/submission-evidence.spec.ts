@@ -38,6 +38,7 @@ const SUBMISSION_ROOT = path.resolve(
   "../../artifacts/lab-02/screenshots/submission",
 );
 const PART6_DIR = path.join(SUBMISSION_ROOT, "part-6-create-ticket");
+const PART7_DIR = path.join(SUBMISSION_ROOT, "part-7-my-tickets");
 
 // server/src/index.ts hardcodes port 3000 (see the SERVER_URL comment in
 // ../playwright.config.ts); duplicated here for the same reason
@@ -52,6 +53,7 @@ function shot(dir: string, name: string): string {
 
 test.beforeAll(() => {
   fs.mkdirSync(PART6_DIR, { recursive: true });
+  fs.mkdirSync(PART7_DIR, { recursive: true });
 });
 
 /**
@@ -79,6 +81,23 @@ async function clickSubmitTicket(page: Page): Promise<void> {
  */
 async function loginAs(page: Page, requesterName: string): Promise<void> {
   await page.goto("/select-requester");
+  await page
+    .getByLabel("Development Requester")
+    .selectOption({ label: requesterName });
+  await page.getByRole("button", { name: /Continue/ }).click();
+  await expect(page).toHaveURL(/\/tickets$/);
+}
+
+/**
+ * Switches the current Requester through the real "Change Requester" UI
+ * flow (ui-spec.md §4) — RequesterBadge menu -> `/select-requester` -> pick
+ * `requesterName` -> Continue -> back on `/tickets`. This is the same full
+ * reload AC-09 describes, never a direct localStorage/context poke.
+ */
+async function changeRequesterTo(page: Page, requesterName: string): Promise<void> {
+  await page.locator(".zen-requester-badge__trigger").click();
+  await page.getByRole("menuitem", { name: "Change Requester" }).click();
+  await expect(page).toHaveURL(/\/select-requester$/);
   await page
     .getByLabel("Development Requester")
     .selectOption({ label: requesterName });
@@ -511,6 +530,389 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     }
     await page.screenshot({
       path: shot(PART6_DIR, "13-demo2-desktop-reference-data-populated.png"),
+      fullPage: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Answer Part 7 — My Tickets screen (ui-spec.md §9, labsheet §8.4)
+// ---------------------------------------------------------------------------
+
+test.describe("Part 7 — My Tickets", () => {
+  // Requester roles for this Part, kept disjoint from Part 6's Jennifer
+  // Anderson and from each other so no test's fixtures contaminate
+  // another test's evidence:
+  //   - David Lee ("Requester A"): already owns a large number of tickets
+  //     accumulated across other Playwright specs sharing this same
+  //     toktickit_e2e database (responsive.spec.ts / harness.smoke.spec.ts
+  //     always log in as GET /api/requesters' first, alphabetically-first
+  //     active Requester — "David Lee"). Real pre-existing data, reused
+  //     rather than re-faked, per the task's "check the seed data before
+  //     inventing a new mechanism" guidance.
+  //   - Sarah Johnson ("Requester B"): seeded here with her OWN small,
+  //     distinct set of tickets, so the "switch to B" screenshot shows a
+  //     genuinely different non-empty list, not just an empty one.
+  //   - Michael Brown ("Requester Empty"): must own zero tickets — used
+  //     ONLY for the empty-state and cross-Requester-rejection tests. No
+  //     test in this file may ever create a ticket for him.
+  let davidId: number;
+  let sarahId: number;
+  let michaelId: number;
+  let davidReferenceTicket: {
+    id: number;
+    ticketNumber: string;
+    categoryName: string;
+    priority: "LOW" | "MEDIUM" | "HIGH";
+  };
+  const sarahTicketNumbers: string[] = [];
+
+  test.beforeAll(async () => {
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+
+    const requesters: Array<{ id: number; name: string }> = await (
+      await api.get("/api/requesters")
+    ).json();
+    function requesterIdByName(name: string): number {
+      const found = requesters.find((r) => r.name === name);
+      if (!found) {
+        throw new Error(
+          `Seeded active requester "${name}" not found via GET /api/requesters — check server/prisma/seed.ts.`,
+        );
+      }
+      return found.id;
+    }
+    davidId = requesterIdByName("David Lee");
+    sarahId = requesterIdByName("Sarah Johnson");
+    michaelId = requesterIdByName("Michael Brown");
+
+    // Precondition for the empty-state screenshot (ui-spec.md §9 "Empty —
+    // Requester owns zero tickets"): checked live, not assumed, since
+    // toktickit_e2e accumulates tickets across every worktree/agent run on
+    // this machine and is never reset to a clean slate between them.
+    const michaelTickets: { meta: { totalItems: number } } = await (
+      await api.get("/api/tickets", {
+        headers: { "X-Requester-Id": String(michaelId) },
+      })
+    ).json();
+    if (michaelTickets.meta.totalItems !== 0) {
+      throw new Error(
+        `Expected Michael Brown (id ${michaelId}) to own zero tickets for the ` +
+          `empty-state screenshot, but found ${michaelTickets.meta.totalItems}. ` +
+          "Pick a different genuinely-empty active Requester, or investigate " +
+          "what created tickets for him.",
+      );
+    }
+
+    // Precondition for the pagination screenshot: David Lee needs enough
+    // real tickets for a genuine page 2 to exist at the default page size
+    // (10).
+    const davidList: {
+      items: Array<{
+        id: number;
+        ticketNumber: string;
+        category: { name: string };
+        requestedPriority: "LOW" | "MEDIUM" | "HIGH";
+      }>;
+      meta: { totalItems: number };
+    } = await (
+      await api.get("/api/tickets", {
+        headers: { "X-Requester-Id": String(davidId) },
+      })
+    ).json();
+    if (davidList.meta.totalItems < 11) {
+      throw new Error(
+        `Expected David Lee (id ${davidId}) to already own at least 11 tickets ` +
+          "(for a real page-2 pagination shot) from prior harness/responsive " +
+          `spec runs against toktickit_e2e, but found ${davidList.meta.totalItems}.`,
+      );
+    }
+    const first = davidList.items[0];
+    davidReferenceTicket = {
+      id: first.id,
+      ticketNumber: first.ticketNumber,
+      categoryName: first.category.name,
+      priority: first.requestedPriority,
+    };
+
+    // Sarah Johnson (Requester B) gets her own real tickets through the
+    // real POST /api/tickets endpoint — never inserted directly.
+    const categories: Array<{ id: number; name: string }> = await (
+      await api.get("/api/categories")
+    ).json();
+    const relatedSystems: Array<{ id: number; name: string }> = await (
+      await api.get("/api/related-systems")
+    ).json();
+    const sarahFixtures = [
+      {
+        summary: "Sarah Johnson evidence ticket: mouse stopped working",
+        description:
+          "The wireless mouse disconnects randomly during the workday and needs a battery or driver check.",
+        priority: "LOW" as const,
+      },
+      {
+        summary: "Sarah Johnson evidence ticket: email sync delayed",
+        description:
+          "Incoming email is arriving with a delay of twenty to thirty minutes on the desktop client only.",
+        priority: "MEDIUM" as const,
+      },
+    ];
+    for (const [index, fixture] of sarahFixtures.entries()) {
+      const response = await api.post("/api/tickets", {
+        headers: { "X-Requester-Id": String(sarahId) },
+        data: {
+          categoryId: categories[index % categories.length].id,
+          relatedSystemId: relatedSystems[index % relatedSystems.length].id,
+          requestedPriority: fixture.priority,
+          summary: fixture.summary,
+          description: fixture.description,
+        },
+      });
+      if (response.status() !== 201) {
+        throw new Error(
+          `Seed POST /api/tickets for Sarah Johnson failed: ${response.status()} ${await response.text()}`,
+        );
+      }
+      const created: { ticketNumber: string } = await response.json();
+      sarahTicketNumbers.push(created.ticketNumber);
+    }
+
+    await api.dispose();
+  });
+
+  test("Requester A's ticket list, then switching to Requester B makes A's ticket disappear", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+
+    const rows = page.locator(".zen-my-tickets__table tbody tr");
+    await expect(rows.first()).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART7_DIR, "01-requesterA-ticket-list.png"),
+      fullPage: true,
+    });
+
+    await changeRequesterTo(page, "Sarah Johnson");
+    await expect(rows.first()).toBeVisible();
+    for (const ticketNumber of sarahTicketNumbers) {
+      await expect(
+        page.getByRole("link", { name: ticketNumber, exact: true }),
+      ).toBeVisible();
+    }
+    // The core evidence: David's ticket is genuinely gone from Sarah's list.
+    await expect(
+      page.getByRole("link", {
+        name: davidReferenceTicket.ticketNumber,
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await page.screenshot({
+      path: shot(PART7_DIR, "02-after-switch-requesterB-ticket-list.png"),
+      fullPage: true,
+    });
+  });
+
+  test("search in use, with a matching result", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+    await expect(
+      page.locator(".zen-my-tickets__table tbody tr").first(),
+    ).toBeVisible();
+
+    await page
+      .getByPlaceholder("Search by ticket number or summary")
+      .fill(davidReferenceTicket.ticketNumber);
+
+    const rows = page.locator(".zen-my-tickets__table tbody tr");
+    await expect.poll(() => rows.count()).toBe(1);
+    await expect(
+      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART7_DIR, "03-search-matching-result.png"),
+      fullPage: true,
+    });
+  });
+
+  test("filters applied: category, priority, and status", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+    await expect(
+      page.locator(".zen-my-tickets__table tbody tr").first(),
+    ).toBeVisible();
+
+    const priorityLabel: Record<"LOW" | "MEDIUM" | "HIGH", string> = {
+      LOW: "Low",
+      MEDIUM: "Medium",
+      HIGH: "High",
+    };
+    await page
+      .getByLabel("Category")
+      .selectOption({ label: davidReferenceTicket.categoryName });
+    await page
+      .getByLabel("Priority")
+      .selectOption({ label: priorityLabel[davidReferenceTicket.priority] });
+    await page.getByLabel("Status").selectOption({ label: "New" });
+
+    const rows = page.locator(".zen-my-tickets__table tbody tr");
+    await expect.poll(() => rows.count()).toBeGreaterThan(0);
+    // Every visible row genuinely matches the chosen Category (independent
+    // check against the rendered DOM, not a second parallel API call).
+    const rowCount = await rows.count();
+    for (let i = 0; i < rowCount; i++) {
+      await expect(rows.nth(i).locator("td").nth(3)).toHaveText(
+        davidReferenceTicket.categoryName,
+      );
+    }
+    // The reference ticket itself — which necessarily matches all three
+    // filters — is genuinely among the results.
+    await expect(
+      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART7_DIR, "04-filters-applied.png"),
+      fullPage: true,
+    });
+  });
+
+  test("sorting applied: a non-default sort visibly active", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+
+    const firstNumberCell = page
+      .locator(".zen-my-tickets__table tbody tr")
+      .first()
+      .locator("td")
+      .first();
+    await expect(firstNumberCell).toBeVisible();
+    const defaultTopTicketNumber = (await firstNumberCell.textContent())?.trim();
+
+    await page
+      .getByLabel("Sort", { exact: true })
+      .selectOption({ label: "Ticket number (A→Z)" });
+
+    // Wait for the reload to genuinely change the top row before reading
+    // further — proves the sort actually took effect, not just that the
+    // <select>'s own value changed.
+    await expect
+      .poll(async () => (await firstNumberCell.textContent())?.trim())
+      .not.toBe(defaultTopTicketNumber);
+
+    const rows = page.locator(".zen-my-tickets__table tbody tr");
+    const sampleSize = Math.min(await rows.count(), 5);
+    const ticketNumbers: string[] = [];
+    for (let i = 0; i < sampleSize; i++) {
+      const text = await rows.nth(i).locator("td").first().textContent();
+      ticketNumbers.push((text ?? "").trim());
+    }
+    // Independently computed expectation (plain string sort on the
+    // rendered values themselves) rather than a second call to the
+    // endpoint under test.
+    const expectedAscending = [...ticketNumbers].sort((a, b) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    expect(ticketNumbers).toEqual(expectedAscending);
+
+    await page.screenshot({
+      path: shot(PART7_DIR, "05-sorting-applied.png"),
+      fullPage: true,
+    });
+  });
+
+  test("pagination: page 2 with the range indicator visible", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+
+    const summary = page.locator(".zen-pagination__summary");
+    await expect(summary).toBeVisible();
+    const initialText = (await summary.textContent()) ?? "";
+    const match = initialText.match(/Showing 1–10 of (\d+)/);
+    expect(match).not.toBeNull();
+    const total = Number(match![1]);
+    expect(total).toBeGreaterThanOrEqual(11);
+
+    await page.getByRole("button", { name: "Page 2" }).click();
+    await expect(summary).toHaveText(
+      `Showing 11–${Math.min(20, total)} of ${total}`,
+    );
+    await expect(page.getByRole("button", { name: "Page 2" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await page.screenshot({
+      path: shot(PART7_DIR, "06-pagination-page2.png"),
+      fullPage: true,
+    });
+  });
+
+  test("empty state: a Requester who owns zero tickets", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Michael Brown");
+
+    await expect(
+      page.getByRole("heading", { name: "You haven't created any tickets yet." }),
+    ).toBeVisible();
+    // AC-29: the search/filter bar is hidden entirely in the true-empty
+    // state — distinct from the no-results state below, where it stays
+    // visible and populated.
+    await expect(page.locator("#my-tickets-search")).toHaveCount(0);
+    await page.screenshot({
+      path: shot(PART7_DIR, "07-empty-state.png"),
+      fullPage: true,
+    });
+  });
+
+  test("no-results state: an active query matching nothing (distinct from empty)", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "David Lee");
+    await expect(
+      page.locator(".zen-my-tickets__table tbody tr").first(),
+    ).toBeVisible();
+
+    await page
+      .getByPlaceholder("Search by ticket number or summary")
+      .fill("zzz-no-such-ticket-matches-this-zzz");
+
+    await expect(
+      page.getByText("No tickets match your search or filters."),
+    ).toBeVisible();
+    // Distinct from the empty-state wording/structure above: the search
+    // bar (and the rest of the controls) stays visible and populated here.
+    await expect(page.locator("#my-tickets-search")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "You haven't created any tickets yet." }),
+    ).toHaveCount(0);
+    await page.screenshot({
+      path: shot(PART7_DIR, "08-no-results-state.png"),
+      fullPage: true,
+    });
+  });
+
+  test("cross-requester access rejected: Requester B visiting Requester A's ticket detail", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Michael Brown");
+
+    await page.goto(`/tickets/${davidReferenceTicket.id}`);
+    await expect(
+      page.getByRole("heading", { name: "Ticket not found" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "This ticket doesn't exist or isn't associated with the current development requester.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART7_DIR, "09-cross-requester-access-rejected.png"),
       fullPage: true,
     });
   });
