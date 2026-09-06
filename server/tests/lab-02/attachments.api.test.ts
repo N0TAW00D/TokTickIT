@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -53,6 +53,19 @@ beforeAll(async () => {
   activeRelatedSystemId = relatedSystem.id;
   requesterAId = requesters[0]!.id;
   requesterBId = requesters[1]!.id;
+});
+
+afterEach(() => {
+  // tests.md §1.3: "Uploaded files during tests go to a temp directory
+  // cleared in `afterEach`." Clear the directory's *contents* here — the
+  // directory itself stays put (and gets removed once, in the afterAll
+  // below) so every test in this file can keep pointing ATTACHMENTS_DIR at
+  // the same path. This runs between tests, so a test that uploads a file
+  // and then reads it back from `tempUploadsDir` within its own body is
+  // unaffected.
+  for (const entry of readdirSync(tempUploadsDir)) {
+    rmSync(path.join(tempUploadsDir, entry), { recursive: true, force: true });
+  }
 });
 
 afterAll(() => {
