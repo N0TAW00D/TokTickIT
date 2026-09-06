@@ -10,7 +10,9 @@
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx prisma db seed",
-    "db:generate": "npx prisma generate"
+    "db:generate": "npx prisma generate",
+    "db:test:reset": "tsx scripts/test-db-reset.ts",
+    "db:test": "npm run db:test:reset"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +22,7 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.22.0"
   },

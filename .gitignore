@@ -1,3 +1,5 @@
 memory
 server/uploads
 .env*
+!.env.example
+!.env.test.example
