@@ -147,3 +147,92 @@ export function safeOriginalFilename(rawFilename: string): string {
   const basename = segments[segments.length - 1] ?? '';
   return basename.slice(0, ORIGINAL_FILENAME_MAX_LENGTH);
 }
+
+/**
+ * Percent-encodes `value` per RFC 5987's `attr-char` (used by the `filename*`
+ * parameter, RFC 6266 §5): everything `encodeURIComponent` already escapes,
+ * plus `'`, `(`, `)`, and `*`, which `encodeURIComponent` leaves bare but
+ * `attr-char` does not permit. This is the standard workaround for that gap
+ * (documented on MDN's `encodeURIComponent` page) rather than a hand-rolled
+ * character class.
+ */
+function encodeRfc5987ValueChars(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+}
+
+/**
+ * ASCII-safe stand-in for `originalFilename` inside a `Content-Disposition`
+ * quoted-string (RFC 6266 `filename=`). `originalFilename` only ever passes
+ * through `safeOriginalFilename` before reaching here — path separators are
+ * gone, but quotes, backslashes, control characters (including CR/LF), and
+ * arbitrary Unicode all survive — so this still has real sanitizing to do:
+ *
+ * - C0/C1 control characters (0x00-0x1F, 0x7F-0x9F), which includes CR and
+ *   LF, are **stripped outright**, not substituted. They are not merely
+ *   awkward, they are illegal in an HTTP header value at all — Node's
+ *   `http` module throws `ERR_INVALID_CHAR` if one reaches `res.setHeader`,
+ *   which is exactly how the reported bug turns a successful download into
+ *   an uncaught `500`. A control character also carries no meaningful
+ *   filename content worth preserving as a placeholder.
+ * - `"` and `\` are legal header bytes but are the quoted-string's own
+ *   escape mechanism: an unescaped `"` closes the string early (the
+ *   reported mangled-filename bug) and `\` would need paired escaping to
+ *   use safely. Both are **substituted** with `_` rather than
+ *   backslash-escaped, trading a one-character cosmetic loss in the ASCII
+ *   fallback for a fallback that stays trivially well-formed.
+ * - Any remaining non-ASCII character is also **substituted** with `_`:
+ *   RFC 6266 leaves `filename`'s charset undefined for non-ASCII text and
+ *   directs implementers to `filename*` for that case instead — which is
+ *   exactly what `contentDispositionFilename` below adds, carrying the
+ *   exact original name losslessly for clients that support it.
+ *
+ * This never touches the *stored* `originalFilename` (DB row or disk) —
+ * only the bytes written into this one response header — so BR-29/BR-30
+ * are unaffected; an ordinary filename (the only kind BR-29 mentions) is
+ * unchanged by this function, character for character.
+ */
+function asciiFallbackFilename(filename: string): string {
+  let result = '';
+  for (const char of filename) {
+    const codePoint = char.codePointAt(0)!;
+    if (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)) {
+      continue;
+    }
+    if (char === '"' || char === '\\' || codePoint > 0x7e) {
+      result += '_';
+      continue;
+    }
+    result += char;
+  }
+  // Every character stripped (e.g. a filename made entirely of control
+  // characters) would otherwise leave `filename=""`, which is well-formed
+  // but useless — fall back to a generic name instead.
+  return result.length > 0 ? result : 'download';
+}
+
+/**
+ * Builds the full `Content-Disposition: attachment; ...` header value for
+ * an attachment download (api-spec.md §4.3). Lives next to the other
+ * filename helpers, rather than inline in `routes/attachments.ts`, so
+ * anything else that ever needs to serve `originalFilename` back to a
+ * browser (Ticket Detail's own download links) reuses the same escaping
+ * instead of re-deriving it.
+ *
+ * Emits both parameters per RFC 6266 §5 / RFC 5987:
+ * - `filename="<asciiFallbackFilename>"` — for ordinary filenames (the only
+ *   kind api-spec.md §4.3 documents) this is byte-for-byte
+ *   `filename="<originalFilename>"`, exactly as before; only quotes,
+ *   backslashes, control characters, and non-ASCII text change it.
+ * - `filename*=UTF-8''<percent-encoded originalFilename>` — the exact
+ *   original name, for the many clients (all evergreen browsers) that
+ *   understand the newer parameter; a client that doesn't simply ignores
+ *   it and uses `filename` instead.
+ */
+export function contentDispositionFilename(originalFilename: string): string {
+  const fallback = asciiFallbackFilename(originalFilename);
+  const extended = encodeRfc5987ValueChars(originalFilename);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${extended}`;
+}
