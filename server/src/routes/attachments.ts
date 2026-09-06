@@ -1,15 +1,20 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Router, type Request, type Response } from 'express';
 import { requesterContext } from '../middleware/requesterContext.ts';
+import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
 
 // GET /api/attachments/:id — api-spec.md §4.2 (BR-14; AC-36).
+// GET /api/attachments/:id/download — api-spec.md §4.3 (BR-30, BR-33;
+// AC-33, AC-34, AC-37).
 //
 // Mounted at /api/attachments (app.ts), separate from ticketsRouter — these
 // are attachment-scoped, not ticket-scoped, even though ownership is always
 // resolved through the attachment's parent ticket (§4 preamble, BR-14).
 //
-// GET /api/attachments/:id/download and DELETE /api/attachments/:id are
-// added on top of this router by the next two slice-9b commits.
+// DELETE /api/attachments/:id is added on top of this router by the next
+// slice-9b commit.
 export const attachmentsRouter: Router = Router();
 
 /** Largest value Postgres `int4` (and therefore Prisma `Int`) can hold. */
@@ -39,6 +44,13 @@ function attachmentNotFound(res: Response): void {
   res.status(404).json({
     error: 'NOT_FOUND',
     message: 'Attachment not found.',
+  });
+}
+
+function attachmentRemoved(res: Response): void {
+  res.status(410).json({
+    error: 'ATTACHMENT_REMOVED',
+    message: 'This attachment has been removed.',
   });
 }
 
@@ -98,6 +110,61 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
       return;
     }
     console.error('Error fetching attachment:', error);
+    internalError(res);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/attachments/:id/download (api-spec.md §4.3)
+// ---------------------------------------------------------------------------
+
+attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, res: Response) => {
+  const attachmentId = parseAttachmentIdParam(String(req.params.id));
+  if (attachmentId === null) {
+    attachmentNotFound(res);
+    return;
+  }
+
+  try {
+    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+
+    // BR-33: a soft-removed attachment's download endpoint returns 410, not
+    // the file — checked only after ownership is confirmed, so a stranger
+    // probing a removed attachment id still sees 404, never 410 (410 would
+    // disclose that the attachment exists).
+    if (attachment.isRemoved) {
+      attachmentRemoved(res);
+      return;
+    }
+
+    // storedFilename is server-generated (attachmentStorage.ts) and never
+    // derived from client input — reusing getUploadsDir's path resolution
+    // here, not rebuilding it, keeps that guarantee intact.
+    const absolutePath = path.join(getUploadsDir(), attachment.storedFilename);
+
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(absolutePath);
+    } catch (fsError) {
+      // §4.3: the metadata row proves the resource exists and is owned, so
+      // a missing file on disk is deliberately a server fault (500), never
+      // a 404.
+      console.error(`Attachment file missing on disk for attachment ${attachmentId}:`, fsError);
+      internalError(res);
+      return;
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', attachment.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.originalFilename}"`);
+    res.setHeader('Content-Length', String(attachment.fileSize));
+    res.send(buffer);
+  } catch (error) {
+    if (error instanceof AttachmentNotFoundError) {
+      attachmentNotFound(res);
+      return;
+    }
+    console.error('Error downloading attachment:', error);
     internalError(res);
   }
 });

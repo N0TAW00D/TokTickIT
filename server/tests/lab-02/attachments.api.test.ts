@@ -7,14 +7,15 @@ import { fileURLToPath } from 'node:url';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 
-// Covers docs/lab-02/api-spec.md §4.1-4.2 (attachment upload and metadata)
-// and tests.md API-22, API-23, API-25, the 6th-upload half of API-24, and
-// the upload/read halves of API-26.
+// Covers docs/lab-02/api-spec.md §4.1-4.3 (attachment upload, metadata, and
+// download) and tests.md API-22, API-23, API-25, the 6th-upload half of
+// API-24, the upload/read/download halves of API-26, API-27, and API-28.
 //
-// NOT covered here (slice 9b, #17's next commits — GET download and DELETE
-// on /api/attachments/:id do not exist yet):
+// NOT covered here (slice 9b, #17's last commit — DELETE
+// /api/attachments/:id does not exist yet):
 //   - API-24's "after removing one, upload succeeds" half — needs DELETE.
-//   - API-26's download/delete-ownership halves — needs those routes.
+//   - API-26's delete-ownership half — needs DELETE.
+//   - API-29, API-30, API-31 — all need DELETE.
 //
 // This suite points ATTACHMENTS_DIR at a throwaway temp directory (rather
 // than the real, git-ignored server/uploads/) so test runs never write to
@@ -342,7 +343,7 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
   });
 
-  describe('API-26: attachment ownership (AC-37, BR-14) — upload/read halves only', () => {
+  describe('API-26: attachment ownership (AC-37, BR-14) — upload/read/download halves only', () => {
     it("B uploading to A's ticket returns 404, byte-identical to uploading to an unknown ticket id", async () => {
       const ticketId = await createTicket(requesterAId);
 
@@ -389,8 +390,28 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(notOwnedRes.body.error).toBe('NOT_FOUND');
     });
 
-    // download/delete-ownership halves need those routes, which land in
-    // later slice-9b commits — not built yet.
+    it("B downloading A's attachment returns 404, byte-identical to downloading an unknown attachment id", async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+        filename: 'photo.jpg',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const notOwnedRes = await request(app)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterBId));
+      const unknownRes = await request(app)
+        .get('/api/attachments/999999/download')
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(notOwnedRes.status).toBe(404);
+      expect(unknownRes.status).toBe(404);
+      expect(notOwnedRes.body).toEqual(unknownRes.body);
+      expect(notOwnedRes.body.error).toBe('NOT_FOUND');
+    });
+
+    // delete-ownership half needs DELETE, which lands in the next
+    // slice-9b commit — not built yet.
   });
 
   // api-spec.md §1.4a: "POST /api/tickets/:id/attachments requires
@@ -528,6 +549,97 @@ describe('GET /api/attachments/:id', () => {
         .set('X-Requester-Id', '999999');
       expect(invalid.status).toBe(400);
       expect(invalid.body.error).toBe('INVALID_REQUESTER');
+    });
+  });
+});
+
+describe('GET /api/attachments/:id/download', () => {
+  describe('API-27: download of an active attachment (AC-33, FR-20)', () => {
+    it('returns 200 with the correct headers and bytes identical to the uploaded file', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const originalBytes = pdfBuffer(12_345);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', originalBytes, {
+        filename: 'battery-report.pdf',
+      });
+      expect(uploadRes.status).toBe(201);
+      const attachmentId = uploadRes.body.id as number;
+
+      const res = await request(app)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterAId))
+        .buffer(true)
+        .parse((response, callback) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('end', () => callback(null, Buffer.concat(chunks)));
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toBe('attachment; filename="battery-report.pdf"');
+      expect(res.headers['content-length']).toBe(String(originalBytes.length));
+
+      // The load-bearing assertion: the downloaded bytes match what was
+      // uploaded, byte for byte — not merely that the status is 200.
+      const downloadedBytes = res.body as Buffer;
+      expect(Buffer.isBuffer(downloadedBytes)).toBe(true);
+      expect(downloadedBytes.length).toBe(originalBytes.length);
+      expect(downloadedBytes.equals(originalBytes)).toBe(true);
+    });
+  });
+
+  describe('API-28: download of a removed attachment (AC-34, BR-33)', () => {
+    it('returns 410 ATTACHMENT_REMOVED after the attachment is soft-removed', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const beforeRemoval = await request(app)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterAId));
+      expect(beforeRemoval.status).toBe(200);
+
+      // Soft-removed directly (DELETE /api/attachments/:id lands in the
+      // next slice-9b commit) — this test is about the download route's
+      // gate on `isRemoved`, not about how the row came to be removed.
+      // API-29 covers DELETE's own correctness end-to-end once it exists.
+      await prisma.attachment.update({
+        where: { id: attachmentId },
+        data: { isRemoved: true, removedAt: new Date(), removedReason: 'Wrong file uploaded' },
+      });
+
+      const afterRemoval = await request(app)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(afterRemoval.status).toBe(410);
+      expect(afterRemoval.body.error).toBe('ATTACHMENT_REMOVED');
+      expect('fields' in afterRemoval.body).toBe(false);
+    });
+  });
+
+  describe('file missing on disk (api-spec.md §4.3) — no tests.md API-xx row', () => {
+    it('returns 500 INTERNAL, not 404, when the metadata row exists but the file does not', async () => {
+      const ticketId = await createTicket(requesterAId);
+      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      const filePath = path.join(tempUploadsDir, row.storedFilename);
+      expect(existsSync(filePath)).toBe(true);
+      rmSync(filePath);
+      expect(existsSync(filePath)).toBe(false);
+
+      const res = await request(app)
+        .get(`/api/attachments/${attachmentId}/download`)
+        .set('X-Requester-Id', String(requesterAId));
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('INTERNAL');
     });
   });
 });
