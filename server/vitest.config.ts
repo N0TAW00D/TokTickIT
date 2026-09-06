@@ -11,5 +11,12 @@ export default defineConfig({
     // for this worker, then truncates Ticket/Attachment/TicketCounter
     // before each test for isolation (docs/lab-02/tests.md §1.3).
     setupFiles: ['./tests/setup/load-test-env.ts', './tests/setup/reset-db.ts'],
+    // Every test file shares the one `toktickit_test` database, and
+    // reset-db.ts truncates Ticket/Attachment/TicketCounter before each
+    // test. Running files in parallel therefore lets one worker wipe rows
+    // another worker is mid-way through asserting on. Serialising test
+    // files keeps that truncation a real isolation boundary instead of a
+    // race — required before #16-#19 add four more ticket-writing suites.
+    fileParallelism: false,
   },
 });
