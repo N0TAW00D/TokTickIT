@@ -108,6 +108,37 @@ describe("C-06 stale stored requester", () => {
   });
 });
 
+// ui-spec.md §5.4: loading regions use role="status", not a blank
+// container. This is a spec-conformance gap in the route guard rather than
+// a numbered C-row, so it's named descriptively instead of given a new
+// C-xx id (docs/lab-02/tests.md owns those).
+describe("route guard while validating a stored id", () => {
+  it('renders a role="status" loading affordance instead of a blank screen while GET /api/requesters is pending', async () => {
+    window.localStorage.setItem(REQUESTER_STORAGE_KEY, "1");
+
+    let resolveFetch!: (requesters: typeof ACTIVE_REQUESTERS) => void;
+    const pending = new Promise<typeof ACTIVE_REQUESTERS>((resolve) => {
+      resolveFetch = resolve;
+    });
+    mockRequestersFetch(() => pending.then((body) => jsonResponse(200, body)));
+
+    render(
+      <MemoryRouter initialEntries={["/tickets"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "My Tickets" }),
+    ).not.toBeInTheDocument();
+
+    // Resolve so the fetch doesn't leak into later tests.
+    resolveFetch(ACTIVE_REQUESTERS);
+    await screen.findByRole("heading", { name: "My Tickets" });
+  });
+});
+
 describe("C-02 selection loading", () => {
   it('shows a role="status" loading indicator and disables Continue while requesters are pending', () => {
     mockRequestersFetch(() => new Promise(() => {})); // never resolves

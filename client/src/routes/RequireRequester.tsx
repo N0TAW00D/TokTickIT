@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { fetchRequesters } from "../requester/api";
 import { useRequester } from "../requester/RequesterContext";
+import { LoadingState } from "../components/LoadingState";
 
 type GuardStatus = "checking" | "valid" | "invalid" | "no-selection";
 
@@ -87,7 +88,11 @@ export function RequireRequester({ children }: { children: ReactNode }) {
   }, [requesterId, requesterName, selectRequester, clearRequester]);
 
   if (status === "checking") {
-    return null;
+    // ui-spec.md §5.4: loading regions use LoadingState (role="status")
+    // rather than a blank container, so a reload of a guarded route with a
+    // stored id has a visible + screen-reader-announced affordance while
+    // the stored id is being re-validated against GET /api/requesters.
+    return <LoadingState />;
   }
 
   if (status === "invalid") {
