@@ -67,3 +67,7 @@
   color: var(--zen-error);
   margin: 0;
 }
+
+.zen-error-state__icon {
+  margin-right: 4px;
+}

@@ -221,4 +221,19 @@ describe("ErrorState", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("pairs the message with a decorative warning glyph (ui-spec.md §12: color is never the sole signal)", () => {
+    const { container } = render(<ErrorState message="Could not load tickets." />);
+
+    const icon = container.querySelector(".zen-error-state__icon");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon).toHaveTextContent("⚠");
+
+    // The glyph is visible alongside the message, but hidden from assistive
+    // tech so the role="alert" region announces only the message text.
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("⚠");
+    expect(alert.textContent).toContain("Could not load tickets.");
+  });
 });
