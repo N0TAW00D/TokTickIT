@@ -8,11 +8,16 @@ import { TextInput } from "../components/TextInput";
 import { TextArea } from "../components/TextArea";
 import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
+import {
+  AttachmentUploader,
+  type QueuedAttachment,
+} from "../components/AttachmentUploader";
 import { useRequester } from "../requester/RequesterContext";
 import {
   createTicket,
   fetchCategories,
   fetchRelatedSystems,
+  uploadAttachment,
   CreateTicketValidationError,
   type CreateTicketResponse,
   type ReferenceOption,
@@ -80,8 +85,48 @@ type ReferenceState =
 type SubmitState =
   | { phase: "idle" }
   | { phase: "submitting" }
-  | { phase: "success"; ticket: CreateTicketResponse }
+  | {
+      phase: "success";
+      ticket: CreateTicketResponse;
+      /**
+       * Names of queued files whose upload failed after the ticket was
+       * created (BR-27, AC-21). Empty when every queued file uploaded, or
+       * none were queued.
+       */
+      failedAttachments: string[];
+    }
   | { phase: "error"; message: string };
+
+/**
+ * Uploads every queued file to the just-created ticket, sequentially and
+ * independently (BR-27: "each attachment is uploaded in a separate
+ * request" — one failure must not abort the rest). Never rejects; a
+ * failed upload is reported by name in the returned array instead, so the
+ * caller can still show the success panel (AC-21).
+ */
+async function uploadQueuedAttachments(
+  requesterId: number,
+  ticketId: number,
+  queue: QueuedAttachment[],
+): Promise<string[]> {
+  const failedNames: string[] = [];
+  for (const item of queue) {
+    try {
+      await uploadAttachment(requesterId, ticketId, item.file);
+    } catch {
+      failedNames.push(item.file.name);
+    }
+  }
+  return failedNames;
+}
+
+/** ui-spec.md §8 "Success with a failed attachment" callout wording. */
+function describeFailedAttachments(names: string[]): string {
+  if (names.length === 1) {
+    return `1 attachment could not be uploaded: ${names[0]}. You can retry it from the ticket.`;
+  }
+  return `${names.length} attachments could not be uploaded: ${names.join(", ")}. You can retry them from the ticket.`;
+}
 
 const PRIORITY_VALUES: RequestedPriority[] = ["LOW", "MEDIUM", "HIGH"];
 
@@ -128,9 +173,9 @@ function validateAll(values: FormValues): FieldErrors {
 }
 
 /**
- * Create Ticket screen (ui-spec.md §8, `/tickets/new`). Attachments are a
- * placeholder here — the real `AttachmentUploader` and its tests (C-15,
- * C-16, C-17) belong to Issue #17.
+ * Create Ticket screen (ui-spec.md §8, `/tickets/new`). Attachments are
+ * queued client-side via `AttachmentUploader`, then uploaded sequentially
+ * once the ticket exists (BR-27, A-07) — see `uploadQueuedAttachments`.
  */
 export function CreateTicketScreen() {
   const navigate = useNavigate();
@@ -142,6 +187,12 @@ export function CreateTicketScreen() {
   const [values, setValues] = useState<FormValues>(INITIAL_VALUES);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitState, setSubmitState] = useState<SubmitState>({ phase: "idle" });
+  // Attachments queued before the ticket exists (ui-spec.md §8). Owned here,
+  // not by AttachmentUploader, so a failed create preserves the pending
+  // list verbatim (BR-26) instead of it resetting with the component.
+  const [queuedAttachments, setQueuedAttachments] = useState<
+    QueuedAttachment[]
+  >([]);
 
   // A ref, not just `submitState`, guards against a second submit fired
   // before React has re-rendered the (by-then disabled) Submit button —
@@ -211,8 +262,18 @@ export function CreateTicketScreen() {
       summary: values.summary.trim(),
       description: values.description.trim(),
     })
-      .then((ticket) => {
-        setSubmitState({ phase: "success", ticket });
+      .then(async (ticket) => {
+        // BR-27/A-07: the ticket is created first; attachments upload as
+        // separate, sequential requests afterward. A per-file failure here
+        // never rejects (see uploadQueuedAttachments) so it can't be
+        // mistaken for the ticket creation itself failing (AC-21).
+        const failedAttachments = await uploadQueuedAttachments(
+          requesterId,
+          ticket.id,
+          queuedAttachments,
+        );
+        setQueuedAttachments([]);
+        setSubmitState({ phase: "success", ticket, failedAttachments });
       })
       .catch((error: unknown) => {
         if (error instanceof CreateTicketValidationError) {
@@ -274,6 +335,7 @@ export function CreateTicketScreen() {
     setValues(INITIAL_VALUES);
     setFieldErrors({});
     setSubmitState({ phase: "idle" });
+    setQueuedAttachments([]);
   }
 
   function handleViewTicket() {
@@ -303,6 +365,12 @@ export function CreateTicketScreen() {
           <p className="zen-create-ticket__success-summary">
             {submitState.ticket.summary}
           </p>
+          {submitState.failedAttachments.length > 0 && (
+            <div role="alert" className="zen-create-ticket__warning">
+              <span aria-hidden="true">⚠</span>{" "}
+              {describeFailedAttachments(submitState.failedAttachments)}
+            </div>
+          )}
           <div className="zen-create-ticket__actions">
             <Button variant="secondary" onClick={handleCreateAnother}>
               Create another
@@ -424,10 +492,14 @@ export function CreateTicketScreen() {
             </section>
 
             <section className="zen-create-ticket__section">
-              <h2>Attachments (0/5)</h2>
-              <p className="zen-create-ticket__attachments-placeholder">
-                Attachments are added after the ticket is created.
-              </p>
+              <h2>Attachments ({queuedAttachments.length}/5)</h2>
+              <AttachmentUploader
+                idPrefix="create-ticket-attachments"
+                queued={queuedAttachments}
+                onQueuedChange={setQueuedAttachments}
+                activeCount={0}
+                disabled={submitState.phase === "submitting"}
+              />
             </section>
 
             {submitState.phase === "error" && (
