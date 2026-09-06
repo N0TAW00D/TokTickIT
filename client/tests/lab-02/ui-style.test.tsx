@@ -523,3 +523,110 @@ describe("S-06 badge consistency across list, card, and detail (ui-spec.md §7, 
   });
 });
 
+describe("S-07 icon-only controls are labelled (ui-spec.md §12, AC-40)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("gives every sortable column header an aria-label and a title, matching for each", async () => {
+    mockS06Fetch();
+    renderMyTickets(true);
+    await screen.findByRole("table");
+
+    // All three sortable columns ui-spec.md §9 lists (Ticket No., Created,
+    // Last Updated) — not just one sample (see MyTicketsScreen.tsx's
+    // SortableHeader/sortToggleLabel). Expected strings are hardcoded here,
+    // never derived by calling sortToggleLabel itself.
+    const initialExpectations: [string, string][] = [
+      ["Ticket No.", "Sort by Ticket No."],
+      // createdAt is the default sort field, already descending on mount.
+      ["Created", "Sort by Created, descending"],
+      ["Last Updated", "Sort by Last Updated"],
+    ];
+
+    for (const [visibleLabel, expected] of initialExpectations) {
+      const button = screen.getByRole("button", { name: expected });
+      expect(button).toHaveTextContent(visibleLabel);
+      expect(button).toHaveAttribute("aria-label", expected);
+      expect(button).toHaveAttribute("title", expected);
+    }
+
+    // Clicking a column actually changes its label/title (proves the
+    // control is wired, not a static string) — exercised for each of the
+    // three controls in turn, not just the one that started active.
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Ticket No." }));
+    // Toggling sort re-fetches (loading state briefly unmounts the table),
+    // so the next assertion waits for the table to come back.
+    await screen.findByRole("table");
+    const ticketNoButton = screen.getByRole("button", {
+      name: "Sort by Ticket No., ascending",
+    });
+    expect(ticketNoButton).toHaveAttribute(
+      "aria-label",
+      "Sort by Ticket No., ascending",
+    );
+    expect(ticketNoButton).toHaveAttribute(
+      "title",
+      "Sort by Ticket No., ascending",
+    );
+    // Created, no longer the active sort, drops its order suffix.
+    const createdButton = screen.getByRole("button", { name: "Sort by Created" });
+    expect(createdButton).toHaveAttribute("aria-label", "Sort by Created");
+    expect(createdButton).toHaveAttribute("title", "Sort by Created");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sort by Last Updated" }),
+    );
+    await screen.findByRole("table");
+    const updatedButton = screen.getByRole("button", {
+      name: "Sort by Last Updated, descending",
+    });
+    expect(updatedButton).toHaveAttribute(
+      "aria-label",
+      "Sort by Last Updated, descending",
+    );
+    expect(updatedButton).toHaveAttribute(
+      "title",
+      "Sort by Last Updated, descending",
+    );
+  });
+
+  it("gives the mobile paperclip attachment indicator an aria-label and a title", async () => {
+    const fetchMock = vi.fn((input: string) => {
+      if (input.startsWith(`${API_BASE_URL}/api/tickets`)) {
+        return s06JsonResponse(200, {
+          items: [{ ...S06_LIST_ITEM, activeAttachmentCount: 2 }],
+          meta: {
+            page: 1,
+            pageSize: 10,
+            totalItems: 1,
+            totalPages: 1,
+            sort: "createdAt",
+            order: "desc",
+          },
+        });
+      }
+      if (input.startsWith(`${API_BASE_URL}/api/categories`)) {
+        return s06JsonResponse(200, [CATEGORY]);
+      }
+      return s06JsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderMyTickets(false);
+    await screen.findByRole("list");
+
+    const paperclip = screen.getByText("📎 2");
+    // Hardcoded against ui-spec.md §12's rule, not derived from the
+    // component's own label-building logic.
+    expect(paperclip).toHaveAttribute("aria-label", "2 attachments");
+    expect(paperclip).toHaveAttribute("title", "2 attachments");
+  });
+});
