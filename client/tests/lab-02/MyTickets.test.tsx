@@ -60,6 +60,38 @@ const TICKETS_RESPONSE = {
   },
 };
 
+// Long enough that ellipsis truncation (ui-spec.md §11, `max-width: 240px`
+// on desktop / 100% on mobile) is the realistic case, not an edge case.
+const LONG_SUMMARY =
+  "Users in the north building report the VPN client disconnecting every few minutes during video calls, which never happened before last week's firmware update";
+const LONG_RELATED_SYSTEM_NAME =
+  "Corporate Virtual Private Network Concentrator Appliance Cluster (Primary Data Center)";
+
+const TICKET_WITH_LONG_TEXT = {
+  id: 99,
+  ticketNumber: "TKT-2026-000099",
+  summary: LONG_SUMMARY,
+  category: { id: 4, name: "Network" },
+  relatedSystem: { id: 5, name: LONG_RELATED_SYSTEM_NAME },
+  requestedPriority: "LOW",
+  status: "NEW",
+  createdAt: "2026-09-01T02:08:00.000Z",
+  updatedAt: "2026-09-01T02:08:00.000Z",
+  activeAttachmentCount: 0,
+};
+
+const LONG_TEXT_RESPONSE = {
+  items: [TICKET_WITH_LONG_TEXT],
+  meta: {
+    page: 1,
+    pageSize: 10,
+    totalItems: 1,
+    totalPages: 1,
+    sort: "createdAt",
+    order: "desc",
+  },
+};
+
 function jsonResponse(status: number, body: unknown): Promise<Response> {
   return Promise.resolve({
     ok: status >= 200 && status < 300,
@@ -313,5 +345,45 @@ describe("My Tickets loading state (supports C-22/C-28, no dedicated row)", () =
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+// Supports C-22 (part of ui-spec.md §9's field list is meaningless if it
+// silently clips) and §11: "Long text truncates with ellipsis and a
+// title, never silently clips" — at every viewport. jsdom applies no CSS,
+// so these assert the `title` attribute directly rather than measuring
+// overflow; that attribute is what a real browser's tooltip reads from.
+describe("Truncated fields carry a title with the full text (ui-spec.md §11)", () => {
+  it("desktop: the summary and related-system cells carry a title equal to the full untruncated text", async () => {
+    stubMatchMedia(true);
+    mockFetch(() => jsonResponse(200, LONG_TEXT_RESPONSE));
+    renderScreen();
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByTitle(LONG_SUMMARY)).toHaveTextContent(
+      LONG_SUMMARY,
+    );
+    expect(
+      within(table).getByTitle(LONG_RELATED_SYSTEM_NAME),
+    ).toHaveTextContent(LONG_RELATED_SYSTEM_NAME);
+  });
+
+  it("mobile: the summary and related-system fields carry a title equal to the full untruncated text", async () => {
+    stubMatchMedia(false);
+    mockFetch(() => jsonResponse(200, LONG_TEXT_RESPONSE));
+    renderScreen();
+
+    const [card] = await screen.findAllByRole("listitem");
+    expect(within(card).getByTitle(LONG_SUMMARY)).toHaveTextContent(
+      LONG_SUMMARY,
+    );
+
+    // The related-system name renders combined with Category on one line
+    // ("Category · Related System", ui-spec.md §9); its title is the full
+    // combined text, which carries the related-system name in full.
+    const combinedTitle = `${TICKET_WITH_LONG_TEXT.category.name} · ${LONG_RELATED_SYSTEM_NAME}`;
+    expect(within(card).getByTitle(combinedTitle)).toHaveTextContent(
+      combinedTitle,
+    );
   });
 });
