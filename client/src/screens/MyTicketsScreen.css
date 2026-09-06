@@ -64,6 +64,31 @@
   background: var(--zen-pale);
 }
 
+/* Whole-row-clickable via the "stretched link" pattern (ui-spec.md §9:
+   "whole row clickable + an explicit View affordance"), rather than a
+   row-level onClick (which the row's real <a>/<Link> elements already
+   satisfy for keyboard/SR per §12, and which would risk nested
+   interactive elements) or a second overlapping anchor. `position:
+   relative` on the row gives the identity link's `::after` a containing
+   block that covers the entire row; confirmed against real Chromium via
+   `elementFromPoint`, since jsdom applies no CSS and can't verify this. */
+.zen-my-tickets__table tbody tr {
+  position: relative;
+}
+
+.zen-my-tickets__row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* Stays clickable/keyboard-focusable above the stretched overlay, which
+   would otherwise paint on top of it as a later positioned sibling. */
+.zen-my-tickets__view-link {
+  position: relative;
+  z-index: 1;
+}
+
 /* Long summaries / related-system names truncate with an ellipsis, never
    silently clip (ui-spec.md §9, §11) — the `title` attribute on the cell
    carries the full text. */
@@ -86,6 +111,9 @@
 }
 
 .zen-my-tickets__card {
+  /* Containing block for the identity link's stretched ::after — same
+     pattern and rationale as the desktop row above. */
+  position: relative;
   background: var(--zen-surface);
   border: 1px solid var(--zen-border);
   border-radius: var(--zen-radius-card);

@@ -27,6 +27,15 @@ interface TicketRowsProps {
  * Desktop table (ui-spec.md §9): exactly the eight columns the spec's
  * "Columns / card fields decision" lists — no attachment-count column
  * (that field is mobile-only).
+ *
+ * The whole row is a click target (§9's "whole row clickable + an
+ * explicit View affordance") via the stretched-link pattern: the ticket
+ * number's `zen-my-tickets__row-link` gets a `::after` stretched over the
+ * row (MyTicketsScreen.css), rather than a row-level `onClick` — which
+ * §12 would still require a real anchor underneath for keyboard/SR, so it
+ * would add nothing but risk of nested interactive elements. This keeps
+ * exactly two real links per row (the number and the explicit "View"),
+ * never a third overlapping one.
  */
 function TicketsTable({ items }: TicketRowsProps) {
   return (
@@ -51,7 +60,12 @@ function TicketsTable({ items }: TicketRowsProps) {
           {items.map((ticket) => (
             <tr key={ticket.id}>
               <td>
-                <Link to={`/tickets/${ticket.id}`}>{ticket.ticketNumber}</Link>
+                <Link
+                  to={`/tickets/${ticket.id}`}
+                  className="zen-my-tickets__row-link"
+                >
+                  {ticket.ticketNumber}
+                </Link>
               </td>
               <td>{formatDateTime(ticket.createdAt)}</td>
               <td
@@ -80,7 +94,10 @@ function TicketsTable({ items }: TicketRowsProps) {
               </td>
               <td>{formatDateTime(ticket.updatedAt)}</td>
               <td>
-                <Link to={`/tickets/${ticket.id}`}>
+                <Link
+                  to={`/tickets/${ticket.id}`}
+                  className="zen-my-tickets__view-link"
+                >
                   {"View "}
                   <span className="zen-visually-hidden">
                     ticket {ticket.ticketNumber}
@@ -99,6 +116,9 @@ function TicketsTable({ items }: TicketRowsProps) {
  * Mobile cards (ui-spec.md §9): the same fields as the desktop row, plus
  * the 📎 attachment count — the one field that is mobile-only — shown when
  * it is greater than zero. No FR-30 field is dropped at this viewport.
+ *
+ * The whole card is a click target via the same stretched-link pattern as
+ * the desktop table (see TicketsTable above).
  */
 function TicketsCards({ items }: TicketRowsProps) {
   return (
@@ -108,7 +128,7 @@ function TicketsCards({ items }: TicketRowsProps) {
           <div className="zen-my-tickets__card-header">
             <Link
               to={`/tickets/${ticket.id}`}
-              className="zen-my-tickets__card-number"
+              className="zen-my-tickets__card-number zen-my-tickets__row-link"
             >
               {ticket.ticketNumber}
             </Link>
@@ -149,7 +169,7 @@ function TicketsCards({ items }: TicketRowsProps) {
 
           <Link
             to={`/tickets/${ticket.id}`}
-            className="zen-my-tickets__card-view"
+            className="zen-my-tickets__card-view zen-my-tickets__view-link"
           >
             {"View "}
             <span className="zen-visually-hidden">

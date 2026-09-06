@@ -387,3 +387,50 @@ describe("Truncated fields carry a title with the full text (ui-spec.md §11)", 
     );
   });
 });
+
+// The "whole row clickable" requirement (ui-spec.md §9's Loaded-with-rows
+// state, §12) is implemented as a stretched link (the identity link's
+// ::after covers the row/card — see MyTicketsScreen.css) rather than a
+// second overlapping anchor. These lock that invariant: exactly one
+// identity link plus the one explicit "View" link, never a third anchor
+// added to literally cover the row.
+describe("Whole-row-clickable pattern does not duplicate anchors (ui-spec.md §9, §12)", () => {
+  it("desktop: each row exposes exactly one identity link besides the View link", async () => {
+    stubMatchMedia(true);
+    mockFetch();
+    renderScreen();
+
+    const table = await screen.findByRole("table");
+    const dataRows = within(table).getAllByRole("row").slice(1);
+    expect(dataRows).toHaveLength(2);
+
+    for (const row of dataRows) {
+      const links = within(row).getAllByRole("link");
+      expect(links).toHaveLength(2);
+      const [identityLink, viewLink] = links;
+      expect(viewLink).toHaveAccessibleName(/^view ticket /i);
+      expect(identityLink.getAttribute("href")).toBe(
+        viewLink.getAttribute("href"),
+      );
+    }
+  });
+
+  it("mobile: each card exposes exactly one identity link besides the View link", async () => {
+    stubMatchMedia(false);
+    mockFetch();
+    renderScreen();
+
+    const cards = await screen.findAllByRole("listitem");
+    expect(cards).toHaveLength(2);
+
+    for (const card of cards) {
+      const links = within(card).getAllByRole("link");
+      expect(links).toHaveLength(2);
+      const [identityLink, viewLink] = links;
+      expect(viewLink).toHaveAccessibleName(/^view ticket /i);
+      expect(identityLink.getAttribute("href")).toBe(
+        viewLink.getAttribute("href"),
+      );
+    }
+  });
+});
