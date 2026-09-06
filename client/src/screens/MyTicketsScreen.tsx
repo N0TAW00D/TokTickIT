@@ -107,6 +107,17 @@ const COLUMN_LABEL: Record<TicketSortField, string> = {
 };
 
 /**
+ * Accessible name for the mobile-only 📎 attachment-count indicator
+ * (ui-spec.md §12 names the paperclip explicitly alongside sort carets as
+ * an icon-only control that needs an `aria-label` + `title`). The visible
+ * "📎 2" text is a glyph plus a bare number — neither says what is being
+ * counted for assistive tech or on hover, so this is the string that does.
+ */
+function attachmentCountLabel(count: number): string {
+  return `${count} attachment${count === 1 ? "" : "s"}`;
+}
+
+/**
  * Accessible name for a sortable column header's toggle button (ui-spec.md
  * §12: "icon-only controls (e.g. sort carets) get an aria-label + title" —
  * the visual caret itself is pure CSS (`::after`, see MyTicketsScreen.css)
@@ -339,7 +350,11 @@ function TicketsCards({ items }: TicketRowsProps) {
               Updated {formatDateTime(ticket.updatedAt)}
             </p>
             {ticket.activeAttachmentCount > 0 && (
-              <span className="zen-my-tickets__card-attachments">
+              <span
+                className="zen-my-tickets__card-attachments"
+                aria-label={attachmentCountLabel(ticket.activeAttachmentCount)}
+                title={attachmentCountLabel(ticket.activeAttachmentCount)}
+              >
                 📎 {ticket.activeAttachmentCount}
               </span>
             )}
