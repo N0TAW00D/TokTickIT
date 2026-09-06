@@ -397,9 +397,15 @@ export function MyTicketsScreen() {
   // Drives the empty vs. no-results split (BR-37): only a search/filter
   // counts as an active "query" here — sort and page never do, since
   // reordering or paging an otherwise-empty owner's list can't be what
-  // produced zero results.
+  // produced zero results. debouncedSearch is trimmed before the check so
+  // a whitespace-only search — which api.ts already drops rather than
+  // sending as a `search` param (BR-16) — counts as inactive here too,
+  // matching what the server actually saw.
   const hasActiveQuery =
-    debouncedSearch !== "" || categoryId !== "" || priority !== "" || status !== "";
+    debouncedSearch.trim() !== "" ||
+    categoryId !== "" ||
+    priority !== "" ||
+    status !== "";
 
   // Reference data for the Category filter (ui-spec.md §9, `GET
   // /api/categories`) — not Requester-scoped, loaded once. A failure here

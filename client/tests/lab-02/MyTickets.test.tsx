@@ -771,6 +771,74 @@ describe("C-26 My Tickets no-results state", () => {
   });
 });
 
+describe("Whitespace-only search counts as inactive (bug guard, api.ts BR-16 / ui-spec.md §9 BR-37)", () => {
+  it("keeps the true-empty state (not no-results) once a whitespace-only search commits, for a Requester who owns zero tickets", async () => {
+    stubMatchMedia(true);
+    // Every /api/tickets call reports zero tickets, regardless of query
+    // params — api.ts itself already trims and drops a whitespace-only
+    // `search` before it ever reaches the request (never sent as a
+    // param), so this handler doesn't need to branch on the query string
+    // to be a faithful stand-in for the real API.
+    mockFetch(() =>
+      jsonResponse(200, {
+        items: [],
+        meta: {
+          page: 1,
+          pageSize: 10,
+          totalItems: 0,
+          totalPages: 0,
+          sort: "createdAt",
+          order: "desc",
+        },
+      }),
+    );
+    renderScreen();
+
+    // The controls bar (including Search) renders from the very first
+    // paint — `variant` is hard-coded to "rows" (hideControls: false)
+    // until `state.phase` becomes "loaded" — so the box is there to type
+    // into immediately, before the in-flight request has told the screen
+    // this Requester owns zero tickets.
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "   " },
+    });
+
+    // The initial load lands with zero tickets and no committed query yet
+    // (the debounce hasn't fired): C-25's true-empty presentation.
+    await screen.findByRole("heading", {
+      name: "You haven't created any tickets yet.",
+    });
+
+    // Let the 300ms debounce actually commit the whitespace-only value
+    // (real timers throughout this test, so a real wait is what settles
+    // it — see the mount-debounce regression test above for the same
+    // technique).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    // BR-16: a whitespace-only search is not an active query. The
+    // Requester still owns zero tickets, so this must stay the true-empty
+    // state — not flip to "no tickets match your search or filters".
+    expect(
+      screen.getByRole("heading", {
+        name: "You haven't created any tickets yet.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create your first ticket/i }),
+    ).toBeInTheDocument();
+    // Not the no-results presentation (that text is NoResultsState's own
+    // marker — ui-spec.md §9, BR-37, C-26). The header-level "Clear
+    // filters" button is a separate control keyed off the raw field
+    // values rather than this empty/no-results split, so it isn't a
+    // signal for this assertion either way.
+    expect(
+      screen.queryByText("No tickets match your search or filters."),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("C-27 My Tickets last/over page", () => {
   it("shows 'No more tickets on this page.' with a Back to page 1 action when the requested page is past the end — not an error", async () => {
     stubMatchMedia(true);
