@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { useTestServer } from '../setup/http-server.js';
 
 // Covers docs/lab-02/api-spec.md §3.1 (POST /api/tickets) and
 // tests.md API-05..API-09, API-32. reset-db.ts (tests/setup/reset-db.ts)
@@ -9,6 +10,12 @@ import { prisma } from '../../src/lib/prisma.js';
 // (and every other file sharing the test DB), so each test starts from an
 // empty Ticket table and a fresh per-year counter — the sequence assertions
 // below (e.g. "000001") rely on that.
+//
+// All requests below go through one shared, already-listening server
+// (tests/setup/http-server.ts) rather than `request(app)` — see that file
+// for why. This is the file where it matters most: API-09 fires 15
+// requests concurrently via Promise.all.
+const testServer = useTestServer(app);
 
 let activeCategoryId: number;
 let activeCategoryName: string;
@@ -44,7 +51,7 @@ function validBody(overrides: Record<string, unknown> = {}) {
 
 describe('POST /api/tickets', () => {
   it('API-05: happy path returns 201 with the full ticket shape', async () => {
-    const res = await request(app)
+    const res = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', String(activeRequesterId))
       .send(validBody());
@@ -85,7 +92,7 @@ describe('POST /api/tickets', () => {
     ];
 
     for (const [label, overrides] of cases) {
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .send(validBody(overrides));
@@ -108,14 +115,14 @@ describe('POST /api/tickets', () => {
     const before = await prisma.ticket.count();
     const unknownId = 999_999;
 
-    const unknownCategoryRes = await request(app)
+    const unknownCategoryRes = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', String(activeRequesterId))
       .send(validBody({ categoryId: unknownId }));
     expect(unknownCategoryRes.status).toBe(404);
     expect(unknownCategoryRes.body.error).toBe('NOT_FOUND');
 
-    const unknownRelatedSystemRes = await request(app)
+    const unknownRelatedSystemRes = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', String(activeRequesterId))
       .send(validBody({ relatedSystemId: unknownId }));
@@ -130,7 +137,7 @@ describe('POST /api/tickets', () => {
       data: { name: '__api-07-temp-inactive-category__', isActive: false },
     });
     try {
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .send(validBody({ categoryId: inactiveCategory.id }));
@@ -144,7 +151,7 @@ describe('POST /api/tickets', () => {
       data: { name: '__api-07-temp-inactive-related-system__', isActive: false },
     });
     try {
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .send(validBody({ relatedSystemId: inactiveRelatedSystem.id }));
@@ -159,25 +166,25 @@ describe('POST /api/tickets', () => {
   });
 
   it('API-08: requester header rules; a requesterId in the body is ignored (A-01)', async () => {
-    const missingHeaderRes = await request(app).post('/api/tickets').send(validBody());
+    const missingHeaderRes = await request(testServer.server).post('/api/tickets').send(validBody());
     expect(missingHeaderRes.status).toBe(400);
     expect(missingHeaderRes.body.error).toBe('MISSING_REQUESTER');
 
-    const unknownHeaderRes = await request(app)
+    const unknownHeaderRes = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', '999999')
       .send(validBody());
     expect(unknownHeaderRes.status).toBe(400);
     expect(unknownHeaderRes.body.error).toBe('INVALID_REQUESTER');
 
-    const inactiveHeaderRes = await request(app)
+    const inactiveHeaderRes = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', String(inactiveRequesterId))
       .send(validBody());
     expect(inactiveHeaderRes.status).toBe(400);
     expect(inactiveHeaderRes.body.error).toBe('INVALID_REQUESTER');
 
-    const ignoredBodyRequesterRes = await request(app)
+    const ignoredBodyRequesterRes = await request(testServer.server)
       .post('/api/tickets')
       .set('X-Requester-Id', String(activeRequesterId))
       .send(validBody({ requesterId: inactiveRequesterId }));
@@ -188,7 +195,7 @@ describe('POST /api/tickets', () => {
   it('API-09: 15 parallel creates yield 15 unique ticket numbers with a contiguous sequence', async () => {
     const responses = await Promise.all(
       Array.from({ length: 15 }, () =>
-        request(app)
+        request(testServer.server)
           .post('/api/tickets')
           .set('X-Requester-Id', String(activeRequesterId))
           .send(validBody())
@@ -226,7 +233,7 @@ describe('POST /api/tickets', () => {
       );
 
     try {
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .send(validBody());
@@ -258,7 +265,7 @@ describe('POST /api/tickets', () => {
     it('invalid JSON syntax with Content-Type: application/json returns 400 MALFORMED_BODY (app.ts parse-error handler)', async () => {
       const before = await prisma.ticket.count();
 
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .set('Content-Type', 'application/json')
@@ -277,7 +284,7 @@ describe('POST /api/tickets', () => {
     it('a valid JSON array body returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
       const before = await prisma.ticket.count();
 
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .set('Content-Type', 'application/json')
@@ -296,7 +303,7 @@ describe('POST /api/tickets', () => {
     it('a bare JSON primitive body returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
       const before = await prisma.ticket.count();
 
-      const res = await request(app)
+      const res = await request(testServer.server)
         .post('/api/tickets')
         .set('X-Requester-Id', String(activeRequesterId))
         .set('Content-Type', 'application/json')
@@ -315,7 +322,7 @@ describe('POST /api/tickets', () => {
     it('no body and no Content-Type returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
       const before = await prisma.ticket.count();
 
-      const res = await request(app).post('/api/tickets').set('X-Requester-Id', String(activeRequesterId));
+      const res = await request(testServer.server).post('/api/tickets').set('X-Requester-Id', String(activeRequesterId));
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('MALFORMED_BODY');

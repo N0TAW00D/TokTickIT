@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-import express, { type Express, type Request, type Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 import { requesterContext } from '../../src/middleware/requesterContext.js';
+import { useTestServer } from '../setup/http-server.js';
+
+// See tests/setup/http-server.ts for why requests go through one shared,
+// already-listening server rather than `request(app)`.
+const testServer = useTestServer(app);
 
 // Covers docs/lab-02/api-spec.md §2.3 (BR-08, BR-35; AC-05, AC-06, AC-42):
 // only active Development Requesters, shaped {id,name,email}, ordered by
@@ -13,7 +18,7 @@ import { requesterContext } from '../../src/middleware/requesterContext.js';
 // createdAt, updatedAt) leaks through, since toEqual rejects unexpected keys.
 describe('GET /api/requesters', () => {
   it('returns only active Requesters, ordered by name, shaped as {id,name,email}', async () => {
-    const res = await request(app).get('/api/requesters');
+    const res = await request(testServer.server).get('/api/requesters');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
@@ -25,7 +30,7 @@ describe('GET /api/requesters', () => {
   });
 
   it('never returns the inactive seed Requester (Robert Wilson)', async () => {
-    const res = await request(app).get('/api/requesters');
+    const res = await request(testServer.server).get('/api/requesters');
 
     const names = (res.body as Array<{ name: string }>).map((r) => r.name);
     expect(names).not.toContain('Robert Wilson');
@@ -38,11 +43,11 @@ describe('GET /api/requesters', () => {
   });
 
   it('ignores the X-Requester-Id header — this endpoint is not Requester-scoped', async () => {
-    const withoutHeader = await request(app).get('/api/requesters');
-    const withBogusHeader = await request(app)
+    const withoutHeader = await request(testServer.server).get('/api/requesters');
+    const withBogusHeader = await request(testServer.server)
       .get('/api/requesters')
       .set('X-Requester-Id', '999999');
-    const withInactiveHeader = await request(app)
+    const withInactiveHeader = await request(testServer.server)
       .get('/api/requesters')
       .set('X-Requester-Id', '0');
 
@@ -68,7 +73,7 @@ describe('API-04: GET /api/requesters failure/empty shape', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(prisma.requesterUser, 'findMany').mockRejectedValue(new Error('boom'));
 
-    const res = await request(app).get('/api/requesters');
+    const res = await request(testServer.server).get('/api/requesters');
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('INTERNAL');
@@ -81,7 +86,7 @@ describe('API-04: GET /api/requesters failure/empty shape', () => {
   it('empty table: returns 200 []', async () => {
     vi.spyOn(prisma.requesterUser, 'findMany').mockResolvedValue([]);
 
-    const res = await request(app).get('/api/requesters');
+    const res = await request(testServer.server).get('/api/requesters');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
@@ -93,16 +98,19 @@ describe('API-04: GET /api/requesters failure/empty shape', () => {
 // (that lands with #16/#18/#19), so it is proven here on a test-only route
 // that echoes back whatever `req.requester` the middleware attaches.
 describe('requesterContext middleware', () => {
-  function buildTestApp(): Express {
-    const testApp = express();
-    testApp.get('/__test/protected', requesterContext, (req: Request, res: Response) => {
-      res.status(200).json({ requester: req.requester });
-    });
-    return testApp;
-  }
+  // A second, test-only app (distinct from src/app.js) exercising the
+  // middleware in isolation on a stub route. It needs its own shared,
+  // already-listening server too — see tests/setup/http-server.ts — so it
+  // is built once here rather than per-request via a `buildTestApp()`
+  // factory.
+  const testApp = express();
+  testApp.get('/__test/protected', requesterContext, (req: Request, res: Response) => {
+    res.status(200).json({ requester: req.requester });
+  });
+  const testAppServer = useTestServer(testApp);
 
   it('rejects a missing header with 400 MISSING_REQUESTER', async () => {
-    const res = await request(buildTestApp()).get('/__test/protected');
+    const res = await request(testAppServer.server).get('/__test/protected');
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('MISSING_REQUESTER');
@@ -111,7 +119,7 @@ describe('requesterContext middleware', () => {
   });
 
   it('rejects an empty header with 400 MISSING_REQUESTER', async () => {
-    const res = await request(buildTestApp())
+    const res = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', '');
 
@@ -120,7 +128,7 @@ describe('requesterContext middleware', () => {
   });
 
   it('rejects a non-numeric header with 400 MISSING_REQUESTER', async () => {
-    const res = await request(buildTestApp())
+    const res = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', 'abc');
 
@@ -129,10 +137,10 @@ describe('requesterContext middleware', () => {
   });
 
   it('rejects a zero or negative header with 400 MISSING_REQUESTER', async () => {
-    const zero = await request(buildTestApp())
+    const zero = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', '0');
-    const negative = await request(buildTestApp())
+    const negative = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', '-1');
 
@@ -143,7 +151,7 @@ describe('requesterContext middleware', () => {
   });
 
   it('rejects a header for a Requester that does not exist with 400 INVALID_REQUESTER', async () => {
-    const res = await request(buildTestApp())
+    const res = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', '999999');
 
@@ -158,7 +166,7 @@ describe('requesterContext middleware', () => {
     // Passing it to Prisma raises "out of range", which would leak as a 500
     // for what is really bad client input (BR-41 / §1.3).
     for (const id of ['2147483648', '3000000000', '99999999999999999999']) {
-      const res = await request(buildTestApp())
+      const res = await request(testAppServer.server)
         .get('/__test/protected')
         .set('X-Requester-Id', id);
 
@@ -173,7 +181,7 @@ describe('requesterContext middleware', () => {
       where: { isActive: false },
     });
 
-    const res = await request(buildTestApp())
+    const res = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', String(inactive.id));
 
@@ -186,7 +194,7 @@ describe('requesterContext middleware', () => {
       where: { isActive: true },
     });
 
-    const res = await request(buildTestApp())
+    const res = await request(testAppServer.server)
       .get('/__test/protected')
       .set('X-Requester-Id', String(active.id));
 

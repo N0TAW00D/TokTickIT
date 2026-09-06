@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { useTestServer } from '../setup/http-server.js';
+
+// See tests/setup/http-server.ts for why requests go through one shared,
+// already-listening server rather than `request(app)`.
+const testServer = useTestServer(app);
 
 // Covers docs/lab-02/api-spec.md §2.1 (BR-35; AC-10, test API-01):
 // only active Categories, shaped {id,name}, ordered by id ascending — the
@@ -21,7 +26,7 @@ describe('GET /api/categories', () => {
       data: { name: 'Discontinued Category', isActive: false },
     });
 
-    const res = await request(app).get('/api/categories');
+    const res = await request(testServer.server).get('/api/categories');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
@@ -54,7 +59,7 @@ describe('GET /api/related-systems', () => {
       data: { name: 'Decommissioned System', isActive: false },
     });
 
-    const res = await request(app).get('/api/related-systems');
+    const res = await request(testServer.server).get('/api/related-systems');
 
     expect(res.status).toBe(200);
     expect(res.body.length).toBeGreaterThanOrEqual(6);
@@ -87,7 +92,7 @@ describe('GET /api/categories and /api/related-systems — 500 path', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(prisma.category, 'findMany').mockRejectedValue(new Error('boom'));
 
-    const res = await request(app).get('/api/categories');
+    const res = await request(testServer.server).get('/api/categories');
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('INTERNAL');
@@ -101,7 +106,7 @@ describe('GET /api/categories and /api/related-systems — 500 path', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(prisma.relatedSystem, 'findMany').mockRejectedValue(new Error('boom'));
 
-    const res = await request(app).get('/api/related-systems');
+    const res = await request(testServer.server).get('/api/related-systems');
 
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('INTERNAL');

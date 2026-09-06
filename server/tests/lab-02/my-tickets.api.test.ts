@@ -4,6 +4,11 @@ import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 import type { Priority } from '../../src/validation/ticketFields.js';
+import { useTestServer } from '../setup/http-server.js';
+
+// See tests/setup/http-server.ts for why requests go through one shared,
+// already-listening server rather than `request(app)`.
+const testServer = useTestServer(app);
 
 // Covers docs/lab-02/api-spec.md §3.2 (GET /api/tickets) and tests.md
 // API-10..API-18. reset-db.ts (tests/setup/reset-db.ts) truncates
@@ -109,7 +114,7 @@ async function seedAttachment(ticketId: number, overrides: { isRemoved?: boolean
 
 function listTickets(requesterId: number, query: Record<string, string> = {}) {
   const qs = new URLSearchParams(query).toString();
-  return request(app)
+  return request(testServer.server)
     .get(`/api/tickets${qs ? `?${qs}` : ''}`)
     .set('X-Requester-Id', String(requesterId));
 }
@@ -409,7 +414,7 @@ describe('GET /api/tickets', () => {
     expect(blankSearch.status).toBe(200);
     expect(idsOf(blankSearch.body.items)).toEqual([ticket.id]);
 
-    const noParams = await request(app).get('/api/tickets').set('X-Requester-Id', String(requesterAId));
+    const noParams = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', String(requesterAId));
     expect(noParams.status).toBe(200);
     expect(noParams.body.meta).toEqual(
       expect.objectContaining({ sort: 'createdAt', order: 'desc', page: 1, pageSize: 10 })
@@ -417,16 +422,16 @@ describe('GET /api/tickets', () => {
   });
 
   it('API-18: missing/unknown/inactive X-Requester-Id returns 400', async () => {
-    const missing = await request(app).get('/api/tickets');
+    const missing = await request(testServer.server).get('/api/tickets');
     expect(missing.status).toBe(400);
     expect(missing.body.error).toBe('MISSING_REQUESTER');
     expect('fields' in missing.body).toBe(false);
 
-    const unknown = await request(app).get('/api/tickets').set('X-Requester-Id', '999999');
+    const unknown = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', '999999');
     expect(unknown.status).toBe(400);
     expect(unknown.body.error).toBe('INVALID_REQUESTER');
 
-    const inactive = await request(app).get('/api/tickets').set('X-Requester-Id', String(inactiveRequesterId));
+    const inactive = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', String(inactiveRequesterId));
     expect(inactive.status).toBe(400);
     expect(inactive.body.error).toBe('INVALID_REQUESTER');
   });
