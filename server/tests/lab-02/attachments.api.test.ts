@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import type { Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,11 +28,31 @@ let requesterBId: number;
 let activeCategoryId: number;
 let activeRelatedSystemId: number;
 
+// supertest spins up a brand-new ephemeral `app.listen(0)` server for every
+// single `request(app)` call unless it's handed an already-listening
+// server (lib/test.js: `serverAddress` only calls `.listen(0)` when
+// `app.address()` is still null). This file makes dozens of requests per
+// run, some in `Promise.all` batches of 3 — that many listen/close cycles
+// in quick succession let the OS hand out the same ephemeral port to a new
+// server before Node has fully torn down the previous one's sockets, so a
+// pooled keep-alive connection from an old, already-closed server can get
+// reused against the new one. That produces exactly the two failure modes
+// observed here: a connection torn down mid-request ("socket hang up"), or
+// a stale response race that a new connection reads out of order
+// ("Parse Error: Expected HTTP/, RTSP/ or ICE/"). Binding one real server
+// once for the whole file and reusing it for every request (`request(server)`
+// below, never `request(app)`) removes the churn entirely.
+let server: Server;
+
 beforeAll(async () => {
   realUploadsDirFilesBefore = existsSync(REAL_UPLOADS_DIR) ? readdirSync(REAL_UPLOADS_DIR) : [];
 
   tempUploadsDir = mkdtempSync(path.join(os.tmpdir(), 'toktickit-attachments-'));
   process.env.ATTACHMENTS_DIR = tempUploadsDir;
+
+  server = await new Promise<Server>((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
 
   const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
@@ -60,7 +81,7 @@ afterEach(() => {
   }
 });
 
-afterAll(() => {
+afterAll(async () => {
   // Prove no file ever landed in the real, git-ignored uploads dir.
   const realUploadsDirFilesAfter = existsSync(REAL_UPLOADS_DIR) ? readdirSync(REAL_UPLOADS_DIR) : [];
   expect(realUploadsDirFilesAfter).toEqual(realUploadsDirFilesBefore);
@@ -70,10 +91,14 @@ afterAll(() => {
   expect(existsSync(tempUploadsDir)).toBe(false);
 
   delete process.env.ATTACHMENTS_DIR;
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
 });
 
 async function createTicket(requesterId: number): Promise<number> {
-  const res = await request(app)
+  const res = await request(server)
     .post('/api/tickets')
     .set('X-Requester-Id', String(requesterId))
     .send({
@@ -119,7 +144,7 @@ function padded(header: Buffer, size: number): Buffer {
 }
 
 function upload(ticketId: number, requesterId: number) {
-  return request(app)
+  return request(server)
     .post(`/api/tickets/${ticketId}/attachments`)
     .set('X-Requester-Id', String(requesterId));
 }
@@ -206,7 +231,7 @@ describe('POST /api/tickets/:id/attachments', () => {
 
       // "after removing one, upload succeeds" — the other half of API-24,
       // now that DELETE /api/attachments/:id (slice 9b) exists.
-      const removeRes = await request(app)
+      const removeRes = await request(server)
         .delete(`/api/attachments/${uploadedIds[0]}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -383,10 +408,10 @@ describe('POST /api/tickets/:id/attachments', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const notOwnedRes = await request(app)
+      const notOwnedRes = await request(server)
         .get(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterBId));
-      const unknownRes = await request(app)
+      const unknownRes = await request(server)
         .get('/api/attachments/999999')
         .set('X-Requester-Id', String(requesterAId));
 
@@ -403,10 +428,10 @@ describe('POST /api/tickets/:id/attachments', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const notOwnedRes = await request(app)
+      const notOwnedRes = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
         .set('X-Requester-Id', String(requesterBId));
-      const unknownRes = await request(app)
+      const unknownRes = await request(server)
         .get('/api/attachments/999999/download')
         .set('X-Requester-Id', String(requesterAId));
 
@@ -423,12 +448,12 @@ describe('POST /api/tickets/:id/attachments', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const notOwnedRes = await request(app)
+      const notOwnedRes = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterBId))
         .set('Content-Type', 'application/json')
         .send({ reason: "B trying to remove A's attachment" });
-      const unknownRes = await request(app)
+      const unknownRes = await request(server)
         .delete('/api/attachments/999999')
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -452,7 +477,7 @@ describe('POST /api/tickets/:id/attachments', () => {
   describe('missing/wrong content type and missing file part (§1.4a) — no tests.md API-xx row', () => {
     it('a JSON body (not multipart/form-data) returns 400 NO_FILE', async () => {
       const ticketId = await createTicket(requesterAId);
-      const res = await request(app)
+      const res = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -484,13 +509,13 @@ describe('POST /api/tickets/:id/attachments', () => {
     it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
       const ticketId = await createTicket(requesterAId);
 
-      const missing = await request(app)
+      const missing = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
         .attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
       expect(missing.status).toBe(400);
       expect(missing.body.error).toBe('MISSING_REQUESTER');
 
-      const invalid = await request(app)
+      const invalid = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
         .set('X-Requester-Id', '999999')
         .attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
@@ -512,7 +537,7 @@ describe('GET /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId));
 
@@ -547,7 +572,7 @@ describe('GET /api/attachments/:id', () => {
         data: { isRemoved: true, removedAt: new Date(), removedReason: 'Uploaded the wrong file by mistake' },
       });
 
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId));
 
@@ -558,7 +583,7 @@ describe('GET /api/attachments/:id', () => {
     });
 
     it('a non-integer attachment id is treated as not found, not a 400 (api-spec.md §1.4)', async () => {
-      const res = await request(app).get('/api/attachments/abc').set('X-Requester-Id', String(requesterAId));
+      const res = await request(server).get('/api/attachments/abc').set('X-Requester-Id', String(requesterAId));
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
@@ -570,11 +595,11 @@ describe('GET /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const missing = await request(app).get(`/api/attachments/${attachmentId}`);
+      const missing = await request(server).get(`/api/attachments/${attachmentId}`);
       expect(missing.status).toBe(400);
       expect(missing.body.error).toBe('MISSING_REQUESTER');
 
-      const invalid = await request(app)
+      const invalid = await request(server)
         .get(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', '999999');
       expect(invalid.status).toBe(400);
@@ -594,7 +619,7 @@ describe('GET /api/attachments/:id/download', () => {
       expect(uploadRes.status).toBe(201);
       const attachmentId = uploadRes.body.id as number;
 
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
         .set('X-Requester-Id', String(requesterAId))
         .buffer(true)
@@ -626,7 +651,7 @@ describe('GET /api/attachments/:id/download', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const beforeRemoval = await request(app)
+      const beforeRemoval = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
         .set('X-Requester-Id', String(requesterAId));
       expect(beforeRemoval.status).toBe(200);
@@ -640,7 +665,7 @@ describe('GET /api/attachments/:id/download', () => {
         data: { isRemoved: true, removedAt: new Date(), removedReason: 'Wrong file uploaded' },
       });
 
-      const afterRemoval = await request(app)
+      const afterRemoval = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
         .set('X-Requester-Id', String(requesterAId));
 
@@ -664,7 +689,7 @@ describe('GET /api/attachments/:id/download', () => {
       rmSync(filePath);
       expect(existsSync(filePath)).toBe(false);
 
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
         .set('X-Requester-Id', String(requesterAId));
 
@@ -686,7 +711,7 @@ describe('DELETE /api/attachments/:id', () => {
       const ticketBefore = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
       await new Promise((resolve) => setTimeout(resolve, 10)); // ensure a distinguishable timestamp
 
-      const res = await request(app)
+      const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -725,7 +750,7 @@ describe('DELETE /api/attachments/:id', () => {
       const attachmentId = uploadRes.body.id as number;
 
       const body = reason === undefined ? {} : { reason };
-      const res = await request(app)
+      const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -747,7 +772,7 @@ describe('DELETE /api/attachments/:id', () => {
       const shortReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
         filename: 'a.pdf',
       });
-      const shortRes = await request(app)
+      const shortRes = await request(server)
         .delete(`/api/attachments/${shortReasonUpload.body.id}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -757,7 +782,7 @@ describe('DELETE /api/attachments/:id', () => {
       const longReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
         filename: 'b.pdf',
       });
-      const longRes = await request(app)
+      const longRes = await request(server)
         .delete(`/api/attachments/${longReasonUpload.body.id}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -772,7 +797,7 @@ describe('DELETE /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const res = await request(app)
+      const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId))
         .send('reason=whatever');
@@ -793,14 +818,14 @@ describe('DELETE /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const first = await request(app)
+      const first = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
         .send({ reason: 'First removal' });
       expect(first.status).toBe(200);
 
-      const second = await request(app)
+      const second = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -831,7 +856,7 @@ describe('DELETE /api/attachments/:id', () => {
       const reasons = Array.from({ length: raceSize }, (_, i) => `Concurrent removal attempt ${i}`);
       const responses = await Promise.all(
         reasons.map((reason) =>
-          request(app)
+          request(server)
             .delete(`/api/attachments/${attachmentId}`)
             .set('X-Requester-Id', String(requesterAId))
             .set('Content-Type', 'application/json')
@@ -873,7 +898,7 @@ describe('DELETE /api/attachments/:id', () => {
 
   describe('a non-integer attachment id and missing/invalid header (api-spec.md §1.4, §1.2) — no tests.md API-xx row', () => {
     it('a non-integer attachment id is treated as not found, not a 400', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .delete('/api/attachments/abc')
         .set('X-Requester-Id', String(requesterAId))
         .set('Content-Type', 'application/json')
@@ -889,14 +914,14 @@ describe('DELETE /api/attachments/:id', () => {
       });
       const attachmentId = uploadRes.body.id as number;
 
-      const missing = await request(app)
+      const missing = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Does not matter' });
       expect(missing.status).toBe(400);
       expect(missing.body.error).toBe('MISSING_REQUESTER');
 
-      const invalid = await request(app)
+      const invalid = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
         .set('X-Requester-Id', '999999')
         .set('Content-Type', 'application/json')
