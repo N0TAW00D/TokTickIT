@@ -166,6 +166,65 @@ describe("C-15 attachment client validation", () => {
     );
   });
 
+  it("rejects a .exe carrying an allowed MIME type — extension is checked independently of MIME (ui-spec.md §8)", () => {
+    render(<Harness />);
+
+    // The MIME type alone is one of the allowed four; only the extension
+    // makes this file invalid. The `accept` attribute is a picker hint
+    // only, so this must be caught by validateFile itself.
+    const disguised = makeFile("virus.exe", 1024, "image/png");
+    fireEvent.change(getFileInput(), { target: { files: [disguised] } });
+
+    expect(screen.getByText("virus.exe")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unsupported file type",
+    );
+    expect(
+      screen.queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("accepts an uppercase extension — the extension check is case-insensitive", () => {
+    render(<Harness />);
+
+    const shouting = makeFile("PHOTO.PNG", 1024, "image/png");
+    fireEvent.change(getFileInput(), { target: { files: [shouting] } });
+
+    expect(screen.getByText("PHOTO.PNG")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /remove/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects a file with no extension at all, even with an allowed MIME type", () => {
+    render(<Harness />);
+
+    const noExt = makeFile("unknown", 1024, "application/pdf");
+    fireEvent.change(getFileInput(), { target: { files: [noExt] } });
+
+    expect(screen.getByText("unknown")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unsupported file type",
+    );
+    expect(
+      screen.queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("accepts a multi-dot filename using its last segment as the extension", () => {
+    render(<Harness />);
+
+    const multiDot = makeFile("report.final.pdf", 1024, "application/pdf");
+    fireEvent.change(getFileInput(), { target: { files: [multiDot] } });
+
+    expect(screen.getByText("report.final.pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /remove/i }),
+    ).toBeInTheDocument();
+  });
+
   it("removes a queued file when its Remove button is clicked", () => {
     render(<Harness />);
 

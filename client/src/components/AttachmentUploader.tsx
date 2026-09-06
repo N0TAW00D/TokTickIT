@@ -10,6 +10,33 @@ const ALLOWED_MIME_TYPES: ReadonlySet<string> = new Set([
   "application/pdf",
 ]);
 
+/**
+ * Allowed extensions, matching the `accept` attribute below exactly
+ * (ui-spec.md §8: `accept=".jpg,.jpeg,.png,.webp,.pdf"` ... "validated
+ * client-side (extension, size, running count ≤ 5)"). `accept` is only a
+ * file-picker hint — it does not constrain drag-and-drop or a
+ * programmatic File — so the extension must also be checked here.
+ */
+const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".pdf",
+]);
+
+/**
+ * Lowercased extension of `filename`, including the leading dot, or ""
+ * if there isn't one. Uses the LAST dot, so `report.final.pdf` yields
+ * `.pdf`; a name with no dot (or a dot only as the first character, e.g.
+ * a hidden file) yields "".
+ */
+function getFileExtension(filename: string): string {
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot <= 0) return "";
+  return filename.slice(lastDot).toLowerCase();
+}
+
 /** Maximum attachment size in bytes — 5 MB exactly is allowed (BR-22). */
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -52,6 +79,9 @@ interface RejectedFile {
 
 function validateFile(file: File): string | undefined {
   if (!ALLOWED_MIME_TYPES.has(file.type)) {
+    return "Unsupported file type — not added.";
+  }
+  if (!ALLOWED_EXTENSIONS.has(getFileExtension(file.name))) {
     return "Unsupported file type — not added.";
   }
   if (file.size > MAX_FILE_SIZE_BYTES) {
