@@ -1,0 +1,42 @@
+.zen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--zen-space-field-gap);
+  font-family: var(--zen-font-family);
+}
+
+.zen-field__label {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text);
+}
+
+.zen-field__required {
+  color: var(--zen-error);
+  margin-left: 2px;
+}
+
+.zen-field__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--zen-font-size-helper);
+  font-weight: var(--zen-font-weight-helper);
+  color: var(--zen-text-muted);
+}
+
+.zen-field__counter {
+  white-space: nowrap;
+}
+
+.zen-field__counter--error {
+  color: var(--zen-error);
+}
+
+.zen-field__error {
+  font-size: var(--zen-font-size-error);
+  font-weight: var(--zen-font-weight-error);
+  color: var(--zen-error);
+}
