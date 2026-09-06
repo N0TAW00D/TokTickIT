@@ -1,8 +1,16 @@
+import multer, { MulterError } from 'multer';
 import { Router, type Request, type Response } from 'express';
 import { requesterContext } from '../middleware/requesterContext.ts';
 import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError } from '../services/createTicket.ts';
+import { validateAttachmentType, safeOriginalFilename, sniffMimeType } from '../validation/attachmentFile.ts';
+import {
+  AttachmentLimitError,
+  MAX_ATTACHMENT_SIZE_BYTES,
+  TicketNotFoundError,
+  uploadAttachment,
+} from '../services/uploadAttachment.ts';
 import { prisma } from '../lib/prisma.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
@@ -11,6 +19,9 @@ import type { Prisma } from '../generated/prisma/client.ts';
 //
 // GET /api/tickets — api-spec.md §3.2 (BR-15..BR-20, FR-24..FR-31; AC-03,
 // AC-09, AC-22..AC-31).
+//
+// POST /api/tickets/:id/attachments — api-spec.md §4.1 (BR-14, BR-21..23,
+// BR-27, BR-29, BR-30; AC-18..21).
 export const ticketsRouter: Router = Router();
 
 /** Largest value Postgres `int4` (and therefore Prisma `Int`) can hold. */
@@ -280,6 +291,189 @@ ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => 
     });
   } catch (error) {
     console.error('Error listing tickets:', error);
+    internalError(res);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/tickets/:id/attachments (api-spec.md §4.1)
+// ---------------------------------------------------------------------------
+
+// Memory storage, not disk storage: BR-27 requires the file to be written
+// under its final, server-generated `<uuidv4>.<ext>` name only after every
+// other check (ownership, type, count) has passed, so multer must not pick
+// the destination or the filename itself — this route calls
+// `storeAttachmentFile` explicitly, once, after those checks. Buffering in
+// memory is bounded by `limits.fileSize` below, so a client can't force an
+// unbounded amount of memory use by streaming an enormous file.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_SIZE_BYTES },
+});
+
+/** Runs `multer`'s single-file parse as a Promise so the route can `await` and `catch` it directly. */
+function parseUploadedFile(req: Request, res: Response): Promise<void> {
+  return new Promise((resolve, reject) => {
+    upload.single('file')(req, res, (error: unknown) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+/**
+ * Shape-validates the `:id` path param for an attachment-scoped route.
+ *
+ * api-spec.md §1.4: "A non-integer path parameter ... is treated as a
+ * resource that does not exist -> 404 NOT_FOUND ... (no 400 — the route
+ * matched, the resource did not)." So unlike `categoryId`/`relatedSystemId`
+ * in the request body (§3.1, folded into 400 VALIDATION_FAILED), a
+ * malformed `:id` here returns `null` and the caller maps that straight to
+ * 404, never 400.
+ */
+function parseTicketIdParam(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) {
+    return null;
+  }
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0 || id > PG_INT4_MAX) {
+    return null;
+  }
+  return id;
+}
+
+function noFile(res: Response): void {
+  res.status(400).json({
+    error: 'NO_FILE',
+    message: 'A single non-empty "file" part is required (multipart/form-data).',
+  });
+}
+
+function fileTooLarge(res: Response): void {
+  res.status(413).json({
+    error: 'FILE_TOO_LARGE',
+    message: 'Attachment exceeds the 5 MB size limit.',
+  });
+}
+
+function unsupportedType(res: Response): void {
+  res.status(415).json({
+    error: 'UNSUPPORTED_TYPE',
+    message: 'File type must be JPEG, PNG, WEBP, or PDF, and its extension must match its content.',
+  });
+}
+
+function attachmentLimit(res: Response): void {
+  res.status(409).json({
+    error: 'ATTACHMENT_LIMIT',
+    message: 'This ticket already has the maximum number of active attachments.',
+  });
+}
+
+function ticketNotFound(res: Response): void {
+  // Byte-identical whether the ticket is unknown or simply not owned by the
+  // caller (BR-14, api-spec.md §1.4) — this single function is the only
+  // place this route ever sends a 404, so there is no way for the two cases
+  // to drift apart.
+  res.status(404).json({
+    error: 'NOT_FOUND',
+    message: 'Ticket not found.',
+  });
+}
+
+ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, res: Response) => {
+  const ticketId = parseTicketIdParam(String(req.params.id));
+  if (ticketId === null) {
+    ticketNotFound(res);
+    return;
+  }
+
+  // Ownership is checked before the multipart body is ever parsed: BR-14
+  // says existence of a not-owned resource must never be disclosed, and
+  // that shouldn't depend on whether the request body happens to be
+  // well-formed multipart data. This also avoids buffering a stranger's
+  // upload into memory before finding out it was never going anywhere.
+  let ownerId: number | null;
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { requesterId: true } });
+    ownerId = ticket?.requesterId ?? null;
+  } catch (error) {
+    console.error('Error looking up ticket for attachment upload:', error);
+    internalError(res);
+    return;
+  }
+  if (ownerId === null || ownerId !== req.requester!.id) {
+    ticketNotFound(res);
+    return;
+  }
+
+  try {
+    await parseUploadedFile(req, res);
+  } catch (error) {
+    if (error instanceof MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      fileTooLarge(res);
+      return;
+    }
+    // Any other multer/busboy failure — no boundary because Content-Type
+    // wasn't multipart/form-data at all, a malformed multipart body, more
+    // than one file under the "file" field, etc. — is reported as the
+    // simple "no usable file part" case §1.4a asks for, rather than a 500.
+    noFile(res);
+    return;
+  }
+
+  const file = req.file;
+  if (!file || file.buffer.length === 0) {
+    noFile(res);
+    return;
+  }
+
+  const sniffedMimeType = sniffMimeType(file.buffer);
+  const typeResult = validateAttachmentType(file.originalname, sniffedMimeType ?? '');
+  if (!typeResult.ok) {
+    unsupportedType(res);
+    return;
+  }
+
+  const originalFilename = safeOriginalFilename(file.originalname);
+
+  try {
+    const attachment = await uploadAttachment({
+      ticketId,
+      requesterId: req.requester!.id,
+      buffer: file.buffer,
+      mimeType: typeResult.value.mimeType,
+      extension: typeResult.value.extension,
+      originalFilename,
+    });
+
+    res.status(201).json({
+      id: attachment.id,
+      ticketId: attachment.ticketId,
+      originalFilename: attachment.originalFilename,
+      mimeType: attachment.mimeType,
+      fileSize: attachment.fileSize,
+      isRemoved: attachment.isRemoved,
+      removedAt: attachment.removedAt,
+      removedReason: attachment.removedReason,
+      createdAt: attachment.createdAt,
+    });
+  } catch (error) {
+    if (error instanceof TicketNotFoundError) {
+      // Can only happen if the ticket was deleted/reassigned in the window
+      // between the ownership check above and this call — treat it the
+      // same as never having found it.
+      ticketNotFound(res);
+      return;
+    }
+    if (error instanceof AttachmentLimitError) {
+      attachmentLimit(res);
+      return;
+    }
+    console.error('Error uploading attachment:', error);
     internalError(res);
   }
 });
