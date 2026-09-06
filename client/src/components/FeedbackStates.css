@@ -13,6 +13,7 @@
 
 .zen-loading {
   flex-direction: row;
+  justify-content: center;
   color: var(--zen-text-muted);
 }
 
