@@ -246,4 +246,85 @@ describe('POST /api/tickets', () => {
     const after = await prisma.ticket.count();
     expect(after).toBe(before);
   });
+
+  // api-spec.md §1.4a/§3.1 list 400 MALFORMED_BODY for "Body is not valid
+  // JSON / not an object", but tests.md has no API-xx row for it, so none of
+  // the above cover it. These four cases are implemented in two places —
+  // the JSON parse-error handler in src/app.ts (invalid JSON syntax) and the
+  // isPlainRequestBody guard in src/routes/tickets.ts (valid JSON that isn't
+  // a plain object, or no body at all) — and are added here to close that
+  // gap without inventing a new API-xx id.
+  describe('malformed request body (§1.3, §1.4a) — no tests.md API-xx row', () => {
+    it('invalid JSON syntax with Content-Type: application/json returns 400 MALFORMED_BODY (app.ts parse-error handler)', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(app)
+        .post('/api/tickets')
+        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Content-Type', 'application/json')
+        .send('{"summary": ');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+      expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+
+    it('a valid JSON array body returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(app)
+        .post('/api/tickets')
+        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Content-Type', 'application/json')
+        .send('[1,2,3]');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+      expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+
+    it('a bare JSON primitive body returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(app)
+        .post('/api/tickets')
+        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Content-Type', 'application/json')
+        .send('42');
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+      expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+
+    it('no body and no Content-Type returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(app).post('/api/tickets').set('X-Requester-Id', String(activeRequesterId));
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+      expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+  });
 });
