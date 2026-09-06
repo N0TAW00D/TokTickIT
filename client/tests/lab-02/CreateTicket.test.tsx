@@ -426,3 +426,174 @@ describe("C-14 create API failure", () => {
     ).toBeEnabled();
   });
 });
+
+// Covers the PR #29 review fix: createTicket() used to discard the response
+// body on failure, so a 400 VALIDATION_FAILED (api-spec.md §1.3, §3.1) was
+// indistinguishable from a dead backend. No tests.md row owns this path —
+// names below are descriptive rather than a new C-xx id.
+describe("create API failure — server-side VALIDATION_FAILED (fields[])", () => {
+  it("renders the server's field messages under the named fields, focuses the first one, hides the generic ErrorState, preserves values, and re-enables Submit", async () => {
+    const fetchMock = mockFetch({
+      createTicket: () =>
+        jsonResponse(400, {
+          error: "VALIDATION_FAILED",
+          message: "One or more fields are invalid.",
+          fields: [
+            {
+              field: "summary",
+              message: "Summary must be between 5 and 140 characters.",
+            },
+            {
+              field: "description",
+              message: "Description must be between 20 and 5000 characters.",
+            },
+          ],
+        }),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    expect(
+      await screen.findByText("Summary must be between 5 and 140 characters."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Description must be between 20 and 5000 characters."),
+    ).toBeInTheDocument();
+
+    expect(document.activeElement).toBe(
+      screen.getByLabelText(/ticket summary/i),
+    );
+
+    // Field-level errors also render with role="alert" (FormField), so the
+    // generic ErrorState's absence is checked by its own text, not by role.
+    expect(
+      screen.queryByText(
+        "Could not create the ticket. Please check your connection and try again.",
+      ),
+    ).not.toBeInTheDocument();
+
+    expect(screen.getByLabelText(/category/i)).toHaveValue("1");
+    expect(screen.getByLabelText(/related system/i)).toHaveValue("10");
+    expect(screen.getByLabelText(/ticket summary/i)).toHaveValue(
+      SUMMARY_TEXT,
+    );
+    expect(screen.getByLabelText(/^description/i)).toHaveValue(
+      DESCRIPTION_TEXT,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /submit ticket/i }),
+    ).toBeEnabled();
+    expect(postCallCount(fetchMock)).toBe(1);
+  });
+
+  it("surfaces a server field name with no matching form field in the generic error area instead of dropping it", async () => {
+    mockFetch({
+      createTicket: () =>
+        jsonResponse(400, {
+          error: "VALIDATION_FAILED",
+          message: "One or more fields are invalid.",
+          fields: [
+            { field: "somethingUnexpected", message: "Unexpected server field." },
+          ],
+        }),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Unexpected server field.");
+
+    expect(screen.getByLabelText(/ticket summary/i)).toHaveValue(
+      SUMMARY_TEXT,
+    );
+    expect(
+      screen.getByRole("button", { name: /submit ticket/i }),
+    ).toBeEnabled();
+  });
+});
+
+describe("create API failure — generic path is unaffected", () => {
+  it("shows the generic ErrorState with no field messages on a 500", async () => {
+    mockFetch({
+      createTicket: () =>
+        jsonResponse(500, { error: "INTERNAL", message: "Something broke." }),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not create the ticket. Please check your connection and try again.",
+    );
+    expect(screen.queryByText(/must be between/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the generic ErrorState with no field messages on a network rejection", async () => {
+    mockFetch({
+      createTicket: () => Promise.reject(new Error("network down")),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not create the ticket. Please check your connection and try again.",
+    );
+    expect(screen.queryByText(/must be between/i)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the generic error, without throwing, when a 400 body is not valid JSON", async () => {
+    mockFetch({
+      createTicket: () =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.reject(new Error("not json")),
+        } as unknown as Response),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not create the ticket. Please check your connection and try again.",
+    );
+    expect(screen.getByLabelText(/ticket summary/i)).toHaveValue(
+      SUMMARY_TEXT,
+    );
+    expect(
+      screen.getByRole("button", { name: /submit ticket/i }),
+    ).toBeEnabled();
+  });
+
+  it("falls back to the generic error when a 400 body has no fields[] (e.g. MISSING_REQUESTER)", async () => {
+    mockFetch({
+      createTicket: () =>
+        jsonResponse(400, {
+          error: "MISSING_REQUESTER",
+          message: "X-Requester-Id is required.",
+        }),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not create the ticket. Please check your connection and try again.",
+    );
+    expect(screen.queryByText(/must be between/i)).not.toBeInTheDocument();
+  });
+});

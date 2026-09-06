@@ -13,6 +13,7 @@ import {
   createTicket,
   fetchCategories,
   fetchRelatedSystems,
+  CreateTicketValidationError,
   type CreateTicketResponse,
   type ReferenceOption,
   type RequestedPriority,
@@ -56,6 +57,12 @@ const FIELD_ORDER: FieldName[] = [
 ];
 
 type FieldErrors = Partial<Record<FieldName, string>>;
+
+const FIELD_NAME_SET: ReadonlySet<string> = new Set(FIELD_ORDER);
+
+function isFieldName(name: string): name is FieldName {
+  return FIELD_NAME_SET.has(name);
+}
 
 const FIELD_IDS: Record<FieldName, string> = {
   categoryId: "create-ticket-category",
@@ -207,7 +214,47 @@ export function CreateTicketScreen() {
       .then((ticket) => {
         setSubmitState({ phase: "success", ticket });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof CreateTicketValidationError) {
+          // BR-25/§4-fields: the server is the source of truth. Map its
+          // `fields[]` onto the same per-field error state the client-side
+          // validator uses (AC-11's "focus first error" applies here too).
+          // A server field name with no matching form field is surfaced in
+          // the generic error area rather than silently dropped.
+          const mapped: FieldErrors = {};
+          const unmatchedMessages: string[] = [];
+          for (const fieldError of error.fields) {
+            if (isFieldName(fieldError.field)) {
+              mapped[fieldError.field] = fieldError.message;
+            } else {
+              unmatchedMessages.push(fieldError.message);
+            }
+          }
+
+          if (Object.keys(mapped).length === 0 && unmatchedMessages.length === 0) {
+            // Defensive fallback: a VALIDATION_FAILED body with no usable
+            // field entries carries no information to show — treat it like
+            // the generic failure path (AC-17, BR-26).
+            setSubmitState({
+              phase: "error",
+              message:
+                "Could not create the ticket. Please check your connection and try again.",
+            });
+            return;
+          }
+
+          setFieldErrors(mapped);
+          const firstInvalid = FIELD_ORDER.find((name) => mapped[name]);
+          if (firstInvalid) focusField(firstInvalid);
+
+          setSubmitState(
+            unmatchedMessages.length > 0
+              ? { phase: "error", message: unmatchedMessages.join(" ") }
+              : { phase: "idle" },
+          );
+          return;
+        }
+
         setSubmitState({
           phase: "error",
           message:
