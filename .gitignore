@@ -1,3 +1,4 @@
 memory
 server/uploads
-.env*
+.env
+.env.test
