@@ -68,10 +68,55 @@ npm run dev           # starts the app on http://localhost:5173
 npm test              # runs the Vitest suite
 ```
 
+### 4. End-to-end (Playwright)
+
+E2E and responsive tests run against a third dedicated database, `toktickit_e2e` — separate from
+both `localdb` and `toktickit_test`, so the E2E suite can never touch either. One-time setup:
+
+```bash
+cd e2e
+cp .env.e2e.example .env.e2e   # points DATABASE_URL at toktickit_e2e, VITE_API_BASE_URL at the server
+npm install
+npx playwright install chromium
+```
+
+Then, from `e2e/`:
+
+```bash
+npm run test:e2e
+```
+
+`test:e2e` first runs `db:e2e:reset` (its `pretest:e2e` hook — see `e2e/scripts/reset-e2e-db.ts`),
+which creates `toktickit_e2e` if needed, applies all Prisma migrations, and seeds it, then runs
+Playwright. Playwright's `webServer` config (`e2e/playwright.config.ts`) boots the real API (`tsx
+src/index.ts`, `DATABASE_URL` pointed at `toktickit_e2e`) and the real client (`vite dev`,
+`VITE_API_BASE_URL` pointed at the API) itself — nothing needs to be started by hand first, and
+`reuseExistingServer` is disabled in CI so a stale server can never mask a broken one.
+
+Only one spec exists so far, `e2e/lab-02/harness.smoke.spec.ts`: it proves the harness boots the
+whole stack by asserting the Requester Selection screen lists the seeded active Requesters (and
+not the inactive one) — data that can only come from a real API call against the real database.
+The full E2E and responsive suites (`e2e/lab-02/requester-ticket-flow.spec.ts`,
+`e2e/lab-02/responsive.spec.ts`) are added by later Lab 2 slices (see `docs/lab-02/tests.md`).
+
+### 5. Full suite
+
+From the repository root:
+
+```bash
+npm run test:all      # server unit/API tests, then client tests, then the e2e suite
+```
+
+Runs `test:server` (`cd server && npm test`), `test:client` (`cd client && npm test`), and
+`test:e2e` (`cd e2e && npm run test:e2e`) in that order, stopping at the first failure. This
+assumes each workspace's `npm install` (and, for `e2e`, `npx playwright install chromium`) has
+already been run at least once, per the steps above.
+
 ## Project structure
 
 ```
 client/   React + TypeScript + Vite frontend
 server/   Express + TypeScript + Prisma backend
+e2e/      Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
 docs/     Lab notes and reference material
 ```
