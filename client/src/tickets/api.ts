@@ -193,6 +193,53 @@ export async function fetchMyTickets(
 }
 
 /**
+ * `GET /api/tickets/:id` (api-spec.md §3.3) response: same shape as the
+ * `POST /api/tickets` `201` body, plus a populated `attachments` array. The
+ * Requester Ticket Detail screen (ui-spec.md §10) ignores `attachments` —
+ * that section belongs to a later slice.
+ */
+export type TicketDetailResponse = CreateTicketResponse;
+
+/**
+ * Thrown by `fetchTicketDetail` on a `404` (api-spec.md §3.3). An unknown
+ * `id` and a ticket owned by another Requester are answered identically
+ * (BR-14, BR-42) — this error carries no detail beyond "not found" so
+ * callers can't accidentally leak the distinction.
+ */
+export class TicketNotFoundError extends Error {
+  constructor() {
+    super("Ticket not found.");
+    this.name = "TicketNotFoundError";
+  }
+}
+
+/**
+ * `GET /api/tickets/:id` (api-spec.md §3.3): one ticket owned by the
+ * calling Requester, identified via the `X-Requester-Id` header (§1.2)
+ * exactly like `createTicket`/`fetchMyTickets`.
+ *
+ * A `404` raises `TicketNotFoundError`; every other failure (network error,
+ * 400, 500) raises a generic `Error`.
+ */
+export async function fetchTicketDetail(
+  requesterId: number,
+  ticketId: number,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}`, {
+    headers: {
+      "X-Requester-Id": String(requesterId),
+    },
+  });
+  if (response.status === 404) {
+    throw new TicketNotFoundError();
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load ticket (status ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
  * `POST /api/tickets` (api-spec.md §3.1): create one ticket for the current
  * Requester, identified via the `X-Requester-Id` header (§1.2) rather than
  * the request body.
