@@ -1,0 +1,317 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
+import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
+import { formatDateTime } from "../../src/tickets/formatDateTime.ts";
+import {
+  RequesterProvider,
+  useRequester,
+} from "../../src/requester/RequesterContext.tsx";
+
+// Covers docs/lab-02/tests.md rows C-22 and C-28. Search/filter/sort
+// (C-23), pagination (C-24), and the empty / no-results / over-page states
+// (C-25, C-26, C-27) belong to the next slice.
+
+const API_BASE_URL = "http://localhost:3000";
+const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
+
+const TICKET_WITH_ATTACHMENTS = {
+  id: 12,
+  ticketNumber: "TKT-2026-000012",
+  summary: "Cannot connect to VPN",
+  category: { id: 4, name: "Network" },
+  relatedSystem: { id: 3, name: "VPN" },
+  requestedPriority: "HIGH",
+  status: "NEW",
+  createdAt: "2026-09-01T02:08:00.000Z",
+  updatedAt: "2026-09-01T02:45:00.000Z",
+  activeAttachmentCount: 2,
+};
+
+const TICKET_WITHOUT_ATTACHMENTS = {
+  id: 11,
+  ticketNumber: "TKT-2026-000011",
+  summary: "Laptop battery drains quickly",
+  category: { id: 2, name: "Hardware" },
+  relatedSystem: { id: 7, name: "Corporate Laptop" },
+  requestedPriority: "MEDIUM",
+  status: "NEW",
+  createdAt: "2026-09-01T02:14:00.000Z",
+  updatedAt: "2026-09-01T02:14:00.000Z",
+  activeAttachmentCount: 0,
+};
+
+const TICKETS_RESPONSE = {
+  items: [TICKET_WITH_ATTACHMENTS, TICKET_WITHOUT_ATTACHMENTS],
+  meta: {
+    page: 1,
+    pageSize: 10,
+    totalItems: 2,
+    totalPages: 1,
+    sort: "createdAt",
+    order: "desc",
+  },
+};
+
+function jsonResponse(status: number, body: unknown): Promise<Response> {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as Response);
+}
+
+type TicketsHandler = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
+
+function mockFetch(ticketsHandler?: TicketsHandler) {
+  const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    if (input.startsWith(TICKETS_URL)) {
+      return (
+        ticketsHandler ?? (() => jsonResponse(200, TICKETS_RESPONSE))
+      )(input, init);
+    }
+    return jsonResponse(404, {});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/**
+ * jsdom has no `window.matchMedia` implementation. This stub is fixed for
+ * the lifetime of one test — MyTicketsScreen reads it once at mount via
+ * useMediaQuery — so a "desktop" test and a "mobile" test each drive the
+ * hook to a different, real viewport rather than both only ever exercising
+ * the same branch.
+ */
+function stubMatchMedia(matches: boolean) {
+  const mediaQueryList = {
+    matches,
+    media: "",
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as unknown as MediaQueryList;
+
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockReturnValue(mediaQueryList),
+  );
+}
+
+/**
+ * Seeds RequesterContext the same way a real Continue click / route guard
+ * pass would (mirrors CreateTicket.test.tsx's identical helper), so
+ * MyTicketsScreen can be rendered directly without RequireRequester.
+ */
+function Bootstrap({ children }: { children: ReactNode }) {
+  const { requesterName, selectRequester } = useRequester();
+
+  useEffect(() => {
+    if (requesterName === null) {
+      selectRequester({ id: 1, name: "Jennifer Anderson" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (requesterName === null) return null;
+
+  return <>{children}</>;
+}
+
+function renderScreen() {
+  return render(
+    <RequesterProvider>
+      <Bootstrap>
+        <MemoryRouter initialEntries={["/tickets"]}>
+          <Routes>
+            <Route path="/tickets" element={<MyTicketsScreen />} />
+            <Route path="/tickets/:id" element={<h1>Ticket Details</h1>} />
+          </Routes>
+        </MemoryRouter>
+      </Bootstrap>
+    </RequesterProvider>,
+  );
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.localStorage.clear();
+});
+
+describe("C-22 My Tickets list render", () => {
+  it("desktop (>=768px): table shows the eight FR-30 columns, badges, and a keyboard-reachable View link, with no attachment column", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    const table = await screen.findByRole("table");
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+
+    expect(headers).toEqual([
+      "Ticket No.",
+      "Created",
+      "Summary",
+      "Category",
+      "Related System",
+      "Priority",
+      "Status",
+      "Last Updated",
+      "Actions",
+    ]);
+    expect(headers.join(" ")).not.toMatch(/attachment|📎/i);
+    expect(screen.queryByText(/📎/)).not.toBeInTheDocument();
+
+    // No card list is also in the DOM (exactly one layout renders).
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(3); // header + 2 data rows
+
+    expect(
+      screen.getByRole("link", { name: "TKT-2026-000012" }),
+    ).toHaveAttribute("href", "/tickets/12");
+    expect(screen.getByText("Cannot connect to VPN")).toBeInTheDocument();
+    expect(screen.getByText("Network")).toBeInTheDocument();
+    expect(screen.getByText("VPN")).toBeInTheDocument();
+    expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getAllByText("New")).toHaveLength(2);
+    expect(
+      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)),
+    ).toBeInTheDocument();
+
+    // Explicit, keyboard-reachable "View" affordance distinct from the
+    // ticket-number link (ui-spec.md §12).
+    const viewLink = screen.getByRole("link", {
+      name: /view ticket tkt-2026-000012/i,
+    });
+    expect(viewLink.tagName).toBe("A");
+    expect(viewLink).toHaveAttribute("href", "/tickets/12");
+
+    fireEvent.click(viewLink);
+    expect(
+      await screen.findByRole("heading", { name: /ticket details/i }),
+    ).toBeInTheDocument();
+
+    // Requester-scoped per api-spec.md §1.2/§3.2.
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({ "X-Requester-Id": "1" });
+  });
+
+  it("mobile (<768px): cards show the same fields as desktop, plus a 📎 count only when > 0, with a View link to /tickets/:id", async () => {
+    stubMatchMedia(false);
+    mockFetch();
+    renderScreen();
+
+    await screen.findByRole("list");
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+
+    // No table is also in the DOM (exactly one layout renders).
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    const [cardWithAttachments, cardWithoutAttachments] = items;
+
+    expect(
+      within(cardWithAttachments).getByRole("link", {
+        name: "TKT-2026-000012",
+      }),
+    ).toHaveAttribute("href", "/tickets/12");
+    expect(
+      within(cardWithAttachments).getByText("Cannot connect to VPN"),
+    ).toBeInTheDocument();
+    expect(
+      within(cardWithAttachments).getByText("Network · VPN"),
+    ).toBeInTheDocument();
+    expect(
+      within(cardWithAttachments).getByText(
+        `Created ${formatDateTime(TICKET_WITH_ATTACHMENTS.createdAt)}`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(cardWithAttachments).getByText(
+        `Updated ${formatDateTime(TICKET_WITH_ATTACHMENTS.updatedAt)}`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(cardWithAttachments).getByText("High")).toBeInTheDocument();
+    expect(within(cardWithAttachments).getByText("New")).toBeInTheDocument();
+    // The one mobile-only field: 📎 count shown because it is > 0.
+    expect(
+      within(cardWithAttachments).getByText("📎 2"),
+    ).toBeInTheDocument();
+
+    const viewLink = within(cardWithAttachments).getByRole("link", {
+      name: /view ticket tkt-2026-000012/i,
+    });
+    expect(viewLink).toHaveAttribute("href", "/tickets/12");
+
+    // activeAttachmentCount === 0 ⇒ no paperclip at all (ui-spec.md §9).
+    expect(
+      within(cardWithoutAttachments).queryByText(/📎/),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("C-28 My Tickets failure state", () => {
+  it("shows role=alert with Retry when the list fetch rejects; Retry re-fetches and recovers", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch(() => Promise.reject(new Error("network down")));
+    renderScreen();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not load your tickets. Please check your connection and try again.",
+    );
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    const retryButton = screen.getByRole("button", { name: /retry/i });
+
+    fetchMock.mockImplementation((input: string) => {
+      if (input.startsWith(TICKETS_URL)) {
+        return jsonResponse(200, TICKETS_RESPONSE);
+      }
+      return jsonResponse(404, {});
+    });
+
+    fireEvent.click(retryButton);
+
+    await screen.findByRole("table");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("My Tickets loading state (supports C-22/C-28, no dedicated row)", () => {
+  it("shows a polite status region while the request is in flight", () => {
+    stubMatchMedia(true);
+    mockFetch(() => new Promise(() => {}));
+    renderScreen();
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
