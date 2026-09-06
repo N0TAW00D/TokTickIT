@@ -157,12 +157,17 @@ describe("C-07 app shell", () => {
 
 describe("C-08 requester switch", () => {
   // AC-09/BR-11 also require My Tickets to reload its data for the new
-  // Requester. That half is Issue #18 scope (My Tickets doesn't fetch or
-  // hold any ticket data yet — it's still a placeholder heading) and is
-  // deliberately NOT asserted or faked here. What this test does verify is
-  // the part that exists now: switching Requesters replaces the
-  // requester-scoped context (id + name) rather than merging with the old
-  // one, and the old Requester's identity is fully gone afterward.
+  // Requester. My Tickets is real now (MyTicketsScreen, ui-spec.md §9) and
+  // that reload half is covered where the real screen lives — see the
+  // "AC-09 My Tickets resets on Requester switch" describe block in
+  // MyTickets.test.tsx, which drives a non-default search/filter/sort
+  // through an actual Change Requester → Continue round trip and asserts
+  // the resulting request is scoped to the new Requester with everything
+  // back at its default. This test still only covers the part that lives
+  // in AppShell/RequesterContext regardless of which screen is mounted:
+  // switching Requesters replaces the requester-scoped context (id + name)
+  // rather than merging with the old one, and the old Requester's identity
+  // is fully gone afterward.
   it("replaces the requester-scoped context id/name when a different requester is chosen", async () => {
     mockRequestersFetch();
     renderHarness();

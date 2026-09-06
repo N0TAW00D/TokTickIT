@@ -10,19 +10,23 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
+import { RequesterSelectionScreen } from "../../src/screens/RequesterSelectionScreen.tsx";
 import { formatDateTime } from "../../src/tickets/formatDateTime.ts";
 import {
   RequesterProvider,
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-22, C-23, and C-28. Pagination (C-24)
+// Covers docs/lab-02/tests.md rows C-22, C-23, and C-28, plus AC-09 (the
+// My-Tickets-side half of the Requester-switch reset; tests.md files C-08
+// under AppShell.test.tsx for the id/name-context half). Pagination (C-24)
 // and the empty / no-results / over-page states (C-25, C-26, C-27) belong
 // to the next slice.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
 const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
+const REQUESTERS_URL = `${API_BASE_URL}/api/requesters`;
 
 // Category filter options (ui-spec.md §9's controls bar fetches these via
 // `GET /api/categories` on mount, independent of the tickets fetch). Named
@@ -31,6 +35,14 @@ const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
 const CATEGORIES = [
   { id: 4, name: "Network" },
   { id: 2, name: "Hardware" },
+];
+
+// Development Requesters for the AC-09 switch test: id 1 matches
+// `Bootstrap`'s initial seed below, so "Change Requester → id 2" is a real
+// switch, not a no-op.
+const ACTIVE_REQUESTERS = [
+  { id: 1, name: "Jennifer Anderson", email: "jennifer.anderson@example.edu" },
+  { id: 2, name: "Michael Brown", email: "michael.brown@example.edu" },
 ];
 
 const TICKET_WITH_ATTACHMENTS = {
@@ -126,6 +138,9 @@ function mockFetch(ticketsHandler?: TicketsHandler) {
     if (input.startsWith(CATEGORIES_URL)) {
       return jsonResponse(200, CATEGORIES);
     }
+    if (input.startsWith(REQUESTERS_URL)) {
+      return jsonResponse(200, ACTIVE_REQUESTERS);
+    }
     return jsonResponse(404, {});
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -204,6 +219,12 @@ function renderScreen() {
           <Routes>
             <Route path="/tickets" element={<MyTicketsScreen />} />
             <Route path="/tickets/:id" element={<h1>Ticket Details</h1>} />
+            {/* Only exercised by the AC-09 Requester-switch test below —
+                RequesterBadge's "Change Requester" navigates here for real. */}
+            <Route
+              path="/select-requester"
+              element={<RequesterSelectionScreen />}
+            />
           </Routes>
         </MemoryRouter>
       </Bootstrap>
@@ -487,6 +508,105 @@ describe("C-23 My Tickets controls fire correct query", () => {
     params = new URL(ticketsCall(fetchMock, 4)[0]).searchParams;
     expect(params.get("sort")).toBe("updatedAt");
     expect(params.get("order")).toBe("asc");
+  });
+});
+
+describe("AC-09 My Tickets resets on Requester switch (tests.md C-08 covers the id/name-context half in AppShell.test.tsx)", () => {
+  it("switching Requesters via Change Requester resets search/filters/sort to defaults and reloads for the new Requester with no filter params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Drive every control away from its default for the original Requester
+    // (1). The search half needs the real 300ms debounce to actually land
+    // as a fired request — fake timers here, same technique as the C-23
+    // debounce test — before switching back to real timers for the
+    // multi-screen navigation below (`findByRole` polling needs real
+    // timers).
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "vpn" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("search"),
+    ).toBe("vpn");
+    vi.useRealTimers();
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    await screen.findByRole("table");
+
+    const callsBeforeSwitch = ticketsCallCount(fetchMock);
+    expect(callsBeforeSwitch).toBe(4); // initial + search + category + sort
+
+    // The last request for Requester 1 really does carry the non-default
+    // state — the baseline the reset below has to actually undo.
+    const beforeSwitchParams = new URL(
+      ticketsCall(fetchMock, callsBeforeSwitch)[0],
+    ).searchParams;
+    expect(beforeSwitchParams.get("search")).toBe("vpn");
+    expect(beforeSwitchParams.get("categoryId")).toBe(
+      String(CATEGORIES[0].id),
+    );
+    expect(beforeSwitchParams.get("sort")).toBe("ticketNumber");
+
+    // Change Requester → pick Requester 2 → Continue (the real flow:
+    // RequesterBadge navigates to /select-requester, which is a different
+    // route than /tickets, so MyTicketsScreen unmounts here and remounts
+    // fresh when Continue routes back).
+    fireEvent.click(
+      screen.getByRole("button", { name: /jennifer anderson/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Change Requester" }),
+    );
+
+    const requesterSelect = await screen.findByLabelText(
+      /development requester/i,
+    );
+    fireEvent.change(requesterSelect, { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    const table = await screen.findByRole("table");
+    expect(screen.getByText("Michael Brown")).toBeInTheDocument();
+
+    // Exactly one new /api/tickets call for the fresh mount, scoped to the
+    // new Requester, with none of the old filters/search/sort carried over.
+    expect(ticketsCallCount(fetchMock)).toBe(callsBeforeSwitch + 1);
+    const [afterSwitchUrl, afterSwitchInit] = ticketsCall(
+      fetchMock,
+      callsBeforeSwitch + 1,
+    );
+    expect(afterSwitchInit?.headers).toMatchObject({ "X-Requester-Id": "2" });
+    const afterSwitchParams = new URL(afterSwitchUrl).searchParams;
+    expect(afterSwitchParams.has("search")).toBe(false);
+    expect(afterSwitchParams.has("categoryId")).toBe(false);
+    expect(afterSwitchParams.get("sort")).toBe("createdAt");
+    expect(afterSwitchParams.get("order")).toBe("desc");
+
+    // The controls themselves read back at default, and Clear filters is
+    // gone again.
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    expect(screen.getByLabelText("Sort")).toHaveValue("createdAt-desc");
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+
+    // A fresh table, not a stale one left over from before the switch.
+    expect(within(table).getAllByRole("row").length).toBeGreaterThan(0);
   });
 });
 
