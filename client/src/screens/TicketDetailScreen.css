@@ -1,0 +1,108 @@
+/* Requester Ticket Detail screen (ui-spec.md §10). */
+
+.zen-ticket-detail__breadcrumb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-ticket-detail__breadcrumb {
+  font-size: var(--zen-font-size-body);
+  color: var(--zen-text-muted);
+}
+
+.zen-ticket-detail__breadcrumb a {
+  color: var(--zen-secondary);
+}
+
+.zen-ticket-detail__card {
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .zen-ticket-detail__card {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+}
+
+/* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive": Ticket No., Ticket
+   Date, Category, Requester, Requested Priority, Current Status, Related
+   System all flow through this one grid, in that order (matches the §10
+   mockup layout exactly). */
+.zen-ticket-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+@media (max-width: 991px) {
+  .zen-ticket-detail__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .zen-ticket-detail__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zen-ticket-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0; /* lets the ellipsis rule below actually apply in a grid/flex item */
+}
+
+.zen-ticket-detail__field--full {
+  margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-ticket-detail__field-label {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text);
+}
+
+/* Read-only presentation (ui-spec.md §5.3): same --zen-readonly-bg /
+   --zen-readonly-text look as a readonly input, but a plain <div> — this
+   screen has no <input>/<textarea> at all (tests.md C-29). */
+.zen-ticket-detail__field-value {
+  box-sizing: border-box;
+  min-height: var(--zen-control-height);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--zen-readonly-bg);
+  color: var(--zen-readonly-text);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-ticket-detail__field-value--badge {
+  overflow: visible;
+}
+
+/* Summary/Description: wrap in full rather than truncate (ui-spec.md §11 —
+   this is the one screen meant to show them completely). */
+.zen-ticket-detail__field-value--multiline {
+  display: block;
+  height: auto;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: visible;
+  text-overflow: clip;
+}
