@@ -135,7 +135,7 @@ function normalizeHost(hostname: string): string {
   return LOOPBACK_HOSTNAMES.has(lower) ? "localhost" : lower;
 }
 
-interface DatabaseIdentity {
+export interface DatabaseIdentity {
   host: string;
   port: number;
   database: string;
@@ -145,11 +145,13 @@ interface DatabaseIdentity {
  * Parses a Postgres connection string down to the (host, port, database)
  * triple that actually identifies *which database* it points at, ignoring
  * incidentals like credentials, query-string options (e.g. `?schema=public`)
- * or trailing slashes that don't change the target. Throws if the URL can't
- * be parsed or has no database name — an ambiguous URL must never be
+ * or leading/trailing/doubled slashes in the path that don't change the
+ * target (`.../toktickit_test`, `.../toktickit_test/` and
+ * `.../toktickit_test//` all name the same database). Throws if the URL
+ * can't be parsed or has no database name — an ambiguous URL must never be
  * treated as "safely different" from another one.
  */
-function parseDatabaseIdentity(rawUrl: string): DatabaseIdentity {
+export function parseDatabaseIdentity(rawUrl: string): DatabaseIdentity {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -157,7 +159,15 @@ function parseDatabaseIdentity(rawUrl: string): DatabaseIdentity {
     throw new Error(`Could not parse database URL "${rawUrl}".`);
   }
 
-  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  // Collapse any run of slashes to one, then strip a leading and/or
+  // trailing slash. Stripping only the leading slash (as a prior version of
+  // this function did) left "/toktickit_test/" as "toktickit_test/" — a
+  // string that no longer equals the no-slash spelling, so two URLs naming
+  // the same database could be judged "different" and bypass the dev/test
+  // safety check below.
+  const database = decodeURIComponent(
+    parsed.pathname.replace(/\/+/g, "/").replace(/^\/|\/$/g, "")
+  );
   if (!database) {
     throw new Error(`Database URL "${rawUrl}" has no database name.`);
   }
@@ -169,7 +179,7 @@ function parseDatabaseIdentity(rawUrl: string): DatabaseIdentity {
   };
 }
 
-function sameDatabase(a: DatabaseIdentity, b: DatabaseIdentity): boolean {
+export function sameDatabase(a: DatabaseIdentity, b: DatabaseIdentity): boolean {
   return a.host === b.host && a.port === b.port && a.database === b.database;
 }
 
@@ -223,8 +233,11 @@ export function resolveTestDatabaseUrl(): string {
 }
 
 async function ensureDatabaseExists(testDatabaseUrl: string): Promise<void> {
-  const target = new URL(testDatabaseUrl);
-  const dbName = target.pathname.replace(/^\//, "");
+  // Reuse the same slash-normalising parse as the dev/test safety check
+  // (parseDatabaseIdentity) instead of re-deriving the database name with
+  // its own ad hoc regex, so there is exactly one place that decides what a
+  // URL's path segment means.
+  const dbName = parseDatabaseIdentity(testDatabaseUrl).database;
 
   const adminUrl = new URL(testDatabaseUrl);
   adminUrl.pathname = "/postgres";
