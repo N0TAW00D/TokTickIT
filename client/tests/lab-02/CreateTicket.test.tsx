@@ -597,3 +597,28 @@ describe("create API failure — generic path is unaffected", () => {
     expect(screen.queryByText(/must be between/i)).not.toBeInTheDocument();
   });
 });
+
+// api-spec.md §1.2/§3.1: POST /api/tickets is Requester-scoped via
+// X-Requester-Id, not the request body. No tests.md row asserts this
+// header directly — without it every create would 400 MISSING_REQUESTER
+// server-side, a failure this suite would otherwise never catch.
+describe("createTicket sends X-Requester-Id (api-spec.md §1.2, §3.1)", () => {
+  it("includes the caller's Requester id header on POST /api/tickets", async () => {
+    const fetchMock = mockFetch({
+      createTicket: () => jsonResponse(201, SUCCESS_TICKET),
+    });
+    renderScreen();
+    await fillValidForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+    await screen.findByRole("status");
+
+    const postCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === TICKETS_URL && init?.method === "POST",
+    );
+    expect(postCall).toBeDefined();
+    const [, init] = postCall as [string, RequestInit];
+    expect(init.headers).toMatchObject({ "X-Requester-Id": "1" });
+  });
+});
