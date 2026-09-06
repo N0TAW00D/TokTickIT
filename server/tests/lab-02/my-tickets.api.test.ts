@@ -171,6 +171,66 @@ describe('GET /api/tickets', () => {
     });
   });
 
+  // BR-18's `{ id: 'desc' }` secondary sort has no dedicated tests.md
+  // API-xx row (API-11 covers the default-sort tie-break, but with an
+  // insert-only fixture whose physical/ctid row order happens to coincide
+  // with id order — so it would still pass even if the secondary sort were
+  // deleted from the route). These tests decouple physical row order from
+  // id order to prove the tie-break is actually load-bearing.
+  describe('BR-18: id desc tie-break is load-bearing, not incidental to physical row order', () => {
+    it('breaks a tied createdAt by id desc even when the lower-id row is physically newer than the higher-id one', async () => {
+      const oldest = await seedTicket({ createdAt: new Date('2026-05-01T00:00:00.000Z') });
+      const middle = await seedTicket({ createdAt: new Date('2026-05-02T00:00:00.000Z') });
+      const tieInstant = new Date('2026-05-03T00:00:00.000Z');
+      const tieLower = await seedTicket({ createdAt: tieInstant });
+      const tieHigher = await seedTicket({ createdAt: tieInstant });
+      expect(tieHigher.id).toBeGreaterThan(tieLower.id);
+
+      // Re-index the LOWER-id tied row *after* the higher-id row's tied
+      // index entry already exists, by genuinely changing its createdAt
+      // away and then back to the tied instant. A no-op UPDATE (writing the
+      // same value it already has) doesn't do this — Postgres treats it as
+      // HOT-eligible and reuses the existing index entry in place, leaving
+      // this row's position among the tied duplicates unchanged. Actually
+      // changing the value (even temporarily) forces a real, non-HOT
+      // re-index, so tieLower's entry among the `createdAt` duplicates ends
+      // up physically *after* tieHigher's — the opposite of what a straight
+      // insert-only fixture (like API-11's) produces, where insertion order
+      // and id order coincide. Confirmed via EXPLAIN ANALYZE against this
+      // route's exact query shape: it plans an `Index Scan Backward` over
+      // `Ticket_requesterId_createdAt_idx`, and without `{ id: 'desc' }`
+      // this decoupling makes that backward scan yield tieLower before
+      // tieHigher — the wrong order, which the assertion below catches.
+      const detourInstant = new Date('2020-01-01T00:00:00.000Z');
+      await prisma.$executeRaw`UPDATE "Ticket" SET "createdAt" = ${detourInstant} WHERE id = ${tieLower.id}`;
+      await prisma.$executeRaw`UPDATE "Ticket" SET "createdAt" = ${tieInstant} WHERE id = ${tieLower.id}`;
+
+      const res = await listTickets(requesterAId);
+
+      expect(res.status).toBe(200);
+      expect(idsOf(res.body.items)).toEqual([tieHigher.id, tieLower.id, middle.id, oldest.id]);
+    });
+
+    it('breaks a tied updatedAt by id desc under sort=updatedAt, with the same physical-order decoupling', async () => {
+      const tieInstant = new Date('2026-06-01T00:00:00.000Z');
+      const tieLower = await seedTicket({ updatedAt: tieInstant });
+      const tieHigher = await seedTicket({ updatedAt: tieInstant });
+      expect(tieHigher.id).toBeGreaterThan(tieLower.id);
+
+      // Same change-away-then-back trick as above (a same-value UPDATE
+      // would be HOT-eligible and not actually move tieLower's position
+      // among the tied `updatedAt` duplicates), applied to updatedAt.
+      const detourInstant = new Date('2020-01-01T00:00:00.000Z');
+      await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = ${detourInstant} WHERE id = ${tieLower.id}`;
+      await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = ${tieInstant} WHERE id = ${tieLower.id}`;
+
+      const res = await listTickets(requesterAId, { sort: 'updatedAt', order: 'desc' });
+
+      expect(res.status).toBe(200);
+      expect(idsOf(res.body.items)).toEqual([tieHigher.id, tieLower.id]);
+    });
+  });
+
   it('API-12: search matches ticketNumber OR summary, case-insensitive; blank/whitespace search is ignored', async () => {
     const byNumber = await seedTicket({ ticketNumber: 'TKT-2026-000777', summary: 'Something unrelated' });
     const bySummary = await seedTicket({ ticketNumber: 'TKT-2026-000001', summary: 'Cannot connect to VPN' });
