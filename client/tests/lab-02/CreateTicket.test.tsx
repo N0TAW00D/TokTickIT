@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
@@ -8,15 +8,16 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 
-// Covers docs/lab-02/tests.md rows C-09 through C-14. This slice adds C-09
-// (form load + reference data); validation (C-10, C-11) and submit
-// handling (C-12, C-13, C-14) land in the next two slices. Attachments
-// (C-15, C-16, C-17) belong to the AttachmentUploader built in Issue #17 —
-// this screen only renders the placeholder section from ui-spec.md §8.
+// Covers docs/lab-02/tests.md rows C-09 through C-14. This slice adds C-10
+// and C-11 (client validation); submit handling (C-12, C-13, C-14) lands in
+// the next slice. Attachments (C-15, C-16, C-17) belong to the
+// AttachmentUploader built in Issue #17 — this screen only renders the
+// placeholder section from ui-spec.md §8.
 
 const API_BASE_URL = "http://localhost:3000";
 const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
 const RELATED_SYSTEMS_URL = `${API_BASE_URL}/api/related-systems`;
+const TICKETS_URL = `${API_BASE_URL}/api/tickets`;
 
 const CATEGORIES = [
   { id: 1, name: "Hardware" },
@@ -27,6 +28,9 @@ const RELATED_SYSTEMS = [
   { id: 10, name: "Email" },
   { id: 20, name: "Campus Wi-Fi" },
 ];
+
+const DESCRIPTION_TEXT =
+  "The laptop battery drains far faster than it used to, even when idle.";
 
 function jsonResponse(status: number, body: unknown): Promise<Response> {
   return Promise.resolve({
@@ -158,5 +162,81 @@ describe("C-09 create form loads reference data", () => {
     expect(
       screen.getByRole("button", { name: /submit ticket/i }),
     ).toBeEnabled();
+  });
+});
+
+describe("C-10 create validation — empty summary", () => {
+  it("shows a field message under Summary, focuses it, and sends no create request", async () => {
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByLabelText(/category/i);
+    fireEvent.change(screen.getByLabelText(/category/i), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByLabelText(/related system/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/^description/i), {
+      target: { value: DESCRIPTION_TEXT },
+    });
+    // Summary left empty.
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    expect(
+      await screen.findByText("Summary must be between 5 and 140 characters."),
+    ).toBeInTheDocument();
+    expect(document.activeElement).toBe(
+      screen.getByLabelText(/ticket summary/i),
+    );
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === TICKETS_URL),
+    ).toHaveLength(0);
+  });
+});
+
+describe("C-11 create validation — lengths", () => {
+  it("shows length messages for Summary 4/141 and Description 19, and sends no create request", async () => {
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByLabelText(/category/i);
+    fireEvent.change(screen.getByLabelText(/category/i), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByLabelText(/related system/i), {
+      target: { value: "10" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/ticket summary/i), {
+      target: { value: "Abcd" }, // 4 chars
+    });
+    fireEvent.change(screen.getByLabelText(/^description/i), {
+      target: { value: "1234567890123456789" }, // 19 chars
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    expect(
+      await screen.findByText("Summary must be between 5 and 140 characters."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Description must be between 20 and 5000 characters."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/ticket summary/i), {
+      target: { value: "a".repeat(141) }, // 141 chars
+    });
+    fireEvent.click(screen.getByRole("button", { name: /submit ticket/i }));
+
+    expect(
+      await screen.findByText("Summary must be between 5 and 140 characters."),
+    ).toBeInTheDocument();
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === TICKETS_URL),
+    ).toHaveLength(0);
   });
 });

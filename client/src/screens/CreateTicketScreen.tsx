@@ -44,6 +44,17 @@ const INITIAL_VALUES: FormValues = {
 
 type FieldName = keyof FormValues;
 
+// DOM order, used to find "the first errored field" on submit (AC-11).
+const FIELD_ORDER: FieldName[] = [
+  "categoryId",
+  "relatedSystemId",
+  "requestedPriority",
+  "summary",
+  "description",
+];
+
+type FieldErrors = Partial<Record<FieldName, string>>;
+
 const FIELD_IDS: Record<FieldName, string> = {
   categoryId: "create-ticket-category",
   relatedSystemId: "create-ticket-related-system",
@@ -57,12 +68,56 @@ type ReferenceState =
   | { phase: "loaded"; categories: ReferenceOption[]; relatedSystems: ReferenceOption[] }
   | { phase: "error"; message: string };
 
+const PRIORITY_VALUES: RequestedPriority[] = ["LOW", "MEDIUM", "HIGH"];
+
 /**
- * Create Ticket screen (ui-spec.md §8, `/tickets/new`). This slice adds the
- * layout, the read-only "Ticket information" block, and the Classification
- * selects backed by live reference data (C-09). Client validation and
- * submit handling land in the next two slices; attachments are a
- * placeholder here — the real `AttachmentUploader` belongs to Issue #17.
+ * Field-level validation (specification.md §4-fields). Wording for Summary,
+ * Description, and Requested Priority matches the server validators
+ * verbatim (§4-fields "Client and server error messages use the same
+ * wording where practical").
+ */
+function validateField(name: FieldName, values: FormValues): string | undefined {
+  switch (name) {
+    case "categoryId":
+      return values.categoryId ? undefined : "Category is required.";
+    case "relatedSystemId":
+      return values.relatedSystemId ? undefined : "Related System is required.";
+    case "requestedPriority":
+      return PRIORITY_VALUES.includes(values.requestedPriority)
+        ? undefined
+        : "Requested Priority must be one of LOW, MEDIUM, HIGH.";
+    case "summary": {
+      const length = values.summary.trim().length;
+      return length >= 5 && length <= 140
+        ? undefined
+        : "Summary must be between 5 and 140 characters.";
+    }
+    case "description": {
+      const length = values.description.trim().length;
+      return length >= 20 && length <= 5000
+        ? undefined
+        : "Description must be between 20 and 5000 characters.";
+    }
+    default:
+      return undefined;
+  }
+}
+
+function validateAll(values: FormValues): FieldErrors {
+  const errors: FieldErrors = {};
+  for (const name of FIELD_ORDER) {
+    const message = validateField(name, values);
+    if (message) errors[name] = message;
+  }
+  return errors;
+}
+
+/**
+ * Create Ticket screen (ui-spec.md §8, `/tickets/new`). This slice adds
+ * client validation on blur and on submit (specification.md §4-fields,
+ * AC-11–AC-13): per-field messages, and focus moving to the first invalid
+ * field. The actual POST and its busy/success/failure states land in the
+ * next slice; submit currently just runs validation.
  */
 export function CreateTicketScreen() {
   const navigate = useNavigate();
@@ -72,6 +127,7 @@ export function CreateTicketScreen() {
     phase: "loading",
   });
   const [values, setValues] = useState<FormValues>(INITIAL_VALUES);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const loadReferenceData = useCallback(() => {
     setReferenceState({ phase: "loading" });
@@ -96,9 +152,32 @@ export function CreateTicketScreen() {
     setValues((current) => ({ ...current, [name]: value }));
   }
 
+  function handleBlur(name: FieldName) {
+    return () => {
+      const message = validateField(name, values);
+      setFieldErrors((current) => ({ ...current, [name]: message }));
+    };
+  }
+
+  function focusField(name: FieldName) {
+    document.getElementById(FIELD_IDS[name])?.focus();
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    // Client validation and the actual POST are added in later slices.
     event.preventDefault();
+
+    if (referenceState.phase !== "loaded") return;
+
+    const errors = validateAll(values);
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      const firstInvalid = FIELD_ORDER.find((name) => errors[name]);
+      if (firstInvalid) focusField(firstInvalid);
+      return;
+    }
+
+    setFieldErrors({});
+    // The actual create request is added in the next slice.
   }
 
   function handleCancel() {
@@ -157,6 +236,8 @@ export function CreateTicketScreen() {
                   placeholder="Select…"
                   value={values.categoryId}
                   onChange={(value) => setValue("categoryId", value)}
+                  onBlur={handleBlur("categoryId")}
+                  error={fieldErrors.categoryId}
                   options={referenceState.categories.map((category) => ({
                     value: String(category.id),
                     label: category.name,
@@ -169,6 +250,8 @@ export function CreateTicketScreen() {
                   placeholder="Select…"
                   value={values.relatedSystemId}
                   onChange={(value) => setValue("relatedSystemId", value)}
+                  onBlur={handleBlur("relatedSystemId")}
+                  error={fieldErrors.relatedSystemId}
                   options={referenceState.relatedSystems.map((system) => ({
                     value: String(system.id),
                     label: system.name,
@@ -182,6 +265,8 @@ export function CreateTicketScreen() {
                   onChange={(value) =>
                     setValue("requestedPriority", value as RequestedPriority)
                   }
+                  onBlur={handleBlur("requestedPriority")}
+                  error={fieldErrors.requestedPriority}
                   options={PRIORITY_OPTIONS}
                 />
               </div>
@@ -194,17 +279,20 @@ export function CreateTicketScreen() {
               id={FIELD_IDS.summary}
               label="Ticket Summary"
               required
+              error={fieldErrors.summary}
               counter={{ current: values.summary.length, max: SUMMARY_MAX }}
             >
               <TextInput
                 value={values.summary}
                 onChange={(event) => setValue("summary", event.target.value)}
+                onBlur={handleBlur("summary")}
               />
             </FormField>
             <FormField
               id={FIELD_IDS.description}
               label="Description"
               required
+              error={fieldErrors.description}
               counter={{
                 current: values.description.length,
                 max: DESCRIPTION_MAX,
@@ -215,6 +303,7 @@ export function CreateTicketScreen() {
                 onChange={(event) =>
                   setValue("description", event.target.value)
                 }
+                onBlur={handleBlur("description")}
               />
             </FormField>
           </section>
