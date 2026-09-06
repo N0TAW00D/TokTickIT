@@ -120,7 +120,17 @@ async function uploadQueuedAttachments(
   return failedNames;
 }
 
-/** ui-spec.md §8 "Success with a failed attachment" callout wording. */
+/**
+ * ui-spec.md §8 "Success with a failed attachment" callout wording.
+ * Only the singular sentence below is a frozen-contract literal (it
+ * matches ui-spec.md §8 verbatim). The plural branch is NOT specified
+ * anywhere in docs/lab-02/*.md — specification.md FR-17 only says the
+ * UI "reports which files failed and lets the user retry them", which
+ * is prose about behavior, not callout copy — so the plural sentence
+ * here is an implementation choice (the singular pattern naturally
+ * pluralized), not something this file is contractually bound to keep
+ * word-for-word.
+ */
 function describeFailedAttachments(names: string[]): string {
   if (names.length === 1) {
     return `1 attachment could not be uploaded: ${names[0]}. You can retry it from the ticket.`;
