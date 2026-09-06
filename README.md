@@ -42,7 +42,8 @@ cd server
 cp .env.test.example .env.test   # points DATABASE_URL at the toktickit_test database
 ```
 
-That's it — `npm test` takes care of the rest automatically every run: it creates the
+That's it — `npm test` takes care of the rest automatically every run, including on a fresh
+checkout that has never run `npm run db:generate`: it (re)generates the Prisma Client, creates the
 `toktickit_test` database if it doesn't exist yet, applies all migrations, and seeds it, before
 any test runs (see `server/tests/setup/global-setup.ts`). Each test also truncates `Ticket`,
 `Attachment`, and `TicketCounter` beforehand for isolation, while the seeded reference data

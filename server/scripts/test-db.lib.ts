@@ -179,6 +179,14 @@ export async function resetTestDatabase(): Promise<string> {
 
   const childEnv = { ...process.env, DATABASE_URL: testDatabaseUrl };
 
+  // On a fresh checkout, `src/generated/prisma` doesn't exist yet — it's
+  // git-ignored, and `npm install` alone never creates it. `prisma migrate
+  // deploy` (unlike `migrate dev`) does not regenerate the client either, so
+  // without this the seed script below, and every test file that imports
+  // `src/lib/prisma.ts`, would fail with ERR_MODULE_NOT_FOUND. Running it
+  // here means `npm test` alone is sufficient on a clean checkout.
+  runNpx(["prisma", "generate"], { cwd: serverRoot, env: childEnv });
+
   runNpx(["prisma", "migrate", "deploy"], { cwd: serverRoot, env: childEnv });
 
   runNpx(["tsx", "prisma/seed.ts"], { cwd: serverRoot, env: childEnv });
