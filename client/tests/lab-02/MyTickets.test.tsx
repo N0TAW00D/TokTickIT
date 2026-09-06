@@ -511,6 +511,105 @@ describe("C-23 My Tickets controls fire correct query", () => {
   });
 });
 
+describe("Clear filters (ui-spec.md §9, supports C-23, no dedicated tests.md row)", () => {
+  it("is absent at defaults, appears once a filter is non-default, and clicking it resets every control and re-fetches with no filter params", async () => {
+    stubMatchMedia(true);
+    const fetchMock = mockFetch();
+    renderScreen();
+
+    await screen.findByRole("table");
+    expect(ticketsCallCount(fetchMock)).toBe(1);
+
+    // Absent while every control is still at its default.
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+
+    // Drive every control the button claims to reset away from its
+    // default — not just Category — so the post-clear assertions below
+    // are load-bearing for each one individually, not just coincidentally
+    // true because that control was never touched. Search needs the real
+    // 300ms debounce to actually land as a fired request (same fake-timer
+    // technique as the C-23 debounce test); the rest fire immediately.
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "vpn" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(ticketsCallCount(fetchMock)).toBe(2);
+    expect(
+      new URL(ticketsCall(fetchMock, 2)[0]).searchParams.get("search"),
+    ).toBe("vpn");
+    vi.useRealTimers();
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: String(CATEGORIES[0].id) },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "NEW" },
+    });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Sort"), {
+      target: { value: "ticketNumber-asc" },
+    });
+    await screen.findByRole("table");
+
+    // Sanity check every one of them actually took effect — otherwise the
+    // "resets" assertions below wouldn't prove anything for that control.
+    const callsBeforeClear = ticketsCallCount(fetchMock);
+    expect(callsBeforeClear).toBe(6); // initial + search + category + priority + status + sort
+    const beforeClearParams = new URL(
+      ticketsCall(fetchMock, callsBeforeClear)[0],
+    ).searchParams;
+    expect(beforeClearParams.get("search")).toBe("vpn");
+    expect(beforeClearParams.get("categoryId")).toBe(
+      String(CATEGORIES[0].id),
+    );
+    expect(beforeClearParams.get("priority")).toBe("HIGH");
+    expect(beforeClearParams.get("status")).toBe("NEW");
+    expect(beforeClearParams.get("sort")).toBe("ticketNumber");
+    expect(beforeClearParams.get("order")).toBe("asc");
+
+    // Appears once something is non-default.
+    const clearButton = await screen.findByRole("button", {
+      name: /clear filters/i,
+    });
+
+    fireEvent.click(clearButton);
+    await screen.findByRole("table");
+
+    // Disappears again — every control read back at default.
+    expect(
+      screen.queryByRole("button", { name: /clear filters/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    expect(screen.getByLabelText("Priority")).toHaveValue("");
+    expect(screen.getByLabelText("Status")).toHaveValue("");
+    expect(screen.getByLabelText("Sort")).toHaveValue("createdAt-desc");
+
+    // The re-fetch it triggers carries none of the filter params, and the
+    // default sort.
+    expect(ticketsCallCount(fetchMock)).toBe(callsBeforeClear + 1);
+    const finalParams = new URL(
+      ticketsCall(fetchMock, callsBeforeClear + 1)[0],
+    ).searchParams;
+    expect(finalParams.has("search")).toBe(false);
+    expect(finalParams.has("categoryId")).toBe(false);
+    expect(finalParams.has("priority")).toBe(false);
+    expect(finalParams.has("status")).toBe(false);
+    expect(finalParams.get("sort")).toBe("createdAt");
+    expect(finalParams.get("order")).toBe("desc");
+  });
+});
+
 describe("AC-09 My Tickets resets on Requester switch (tests.md C-08 covers the id/name-context half in AppShell.test.tsx)", () => {
   it("switching Requesters via Change Requester resets search/filters/sort to defaults and reloads for the new Requester with no filter params", async () => {
     stubMatchMedia(true);
