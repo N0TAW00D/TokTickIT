@@ -51,7 +51,15 @@ function readDatabaseUrl(envFileName: string): string | undefined {
 // DATABASE_URLs that differ only by which of these they use still point at
 // the exact same server, so the dev/test safety check below must treat them
 // as identical rather than as "different hosts".
-const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+// Note the bracketed form: the WHATWG `URL` parser reports an IPv6 host as
+// "[::1]", brackets included, so the bare "::1" spelling would never match
+// anything and the alias would slip through the dev/test check below.
+const LOOPBACK_HOSTNAMES = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+]);
 
 function normalizeHost(hostname: string): string {
   const lower = hostname.toLowerCase();
