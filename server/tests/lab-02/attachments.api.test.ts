@@ -201,6 +201,62 @@ describe('POST /api/tickets/:id/attachments', () => {
       // needs DELETE /api/attachments/:id, which is slice 9b — not built
       // yet. Left uncovered here deliberately rather than faked.
     });
+
+    it('holds the limit under genuinely concurrent uploads: one below the limit, 3 requests race for the last slot, exactly 1 succeeds and the rest are 409 (never 500)', async () => {
+      const ticketId = await createTicket(requesterAId);
+
+      // Snapshot the uploads dir before this test writes anything, so the
+      // orphan-file check below can identify exactly the files *this test*
+      // wrote, independent of whatever earlier tests in this file may have
+      // left behind on disk.
+      const filesBeforeThisTest = new Set(readdirSync(tempUploadsDir));
+
+      // Get to one below the limit sequentially — only the final slot is
+      // contested.
+      for (let i = 0; i < 4; i++) {
+        const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `seed-${i}.pdf` });
+        expect(res.status, `seed upload #${i + 1}`).toBe(201);
+      }
+
+      // Fire genuinely concurrent requests (Promise.all of in-flight
+      // requests, not sequential awaits) at the 5th and only remaining
+      // slot. Without a row lock serializing the recount, more than one of
+      // these can observe 4 active attachments and proceed, landing above
+      // BR-23's limit of 5 — this is the regression this test exists to
+      // catch.
+      const raceSize = 3;
+      const responses = await Promise.all(
+        Array.from({ length: raceSize }, (_, i) =>
+          upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `race-${i}.pdf` })
+        )
+      );
+
+      // Never a 500: every response is either the one winner (201) or a
+      // clean rejection (409 ATTACHMENT_LIMIT).
+      for (const res of responses) {
+        expect([201, 409]).toContain(res.status);
+        if (res.status === 409) {
+          expect(res.body.error).toBe('ATTACHMENT_LIMIT');
+        }
+      }
+      expect(responses.filter((res) => res.status === 201)).toHaveLength(1);
+      expect(responses.filter((res) => res.status === 409)).toHaveLength(raceSize - 1);
+
+      // Never a 6th row: the ticket ends with exactly 5 active attachments,
+      // not 6 or 7.
+      const activeCount = await prisma.attachment.count({ where: { ticketId, isRemoved: false } });
+      expect(activeCount).toBe(5);
+
+      // No orphan files: every file the losing requests wrote before
+      // hitting the locked recount must have been deleted on the
+      // best-effort cleanup path. Compare only the files *this test*
+      // created (filtering out `filesBeforeThisTest`) against this
+      // ticket's rows, so the assertion doesn't depend on whether earlier
+      // tests in this file left files of their own on disk.
+      const newFilesOnDisk = readdirSync(tempUploadsDir).filter((entry) => !filesBeforeThisTest.has(entry));
+      const rows = await prisma.attachment.findMany({ where: { ticketId } });
+      expect(newFilesOnDisk.sort()).toEqual(rows.map((row) => row.storedFilename).sort());
+    });
   });
 
   describe('API-25: attachment storage safety (BR-27, BR-29)', () => {

@@ -56,22 +56,28 @@ export interface UploadAttachmentInput {
  * Verifies ownership and the active-attachment limit, then stores the file
  * and creates its metadata row.
  *
- * Ownership + the count check both read from one `findUnique` so a single
- * round trip answers "does this ticket exist, is it owned by this
- * requester, and how many active attachments does it already have" — but
- * this is a plain read, not a lock: two uploads to the same near-full
- * ticket racing each other could both observe count 4 and both proceed,
- * landing at 6 active attachments. BR-23 doesn't call for serialization
- * (and the client only ever uploads sequentially per A-07), so this
- * accepts that narrow race rather than adding transactional locking for a
- * case the spec doesn't test.
+ * Ownership + a first-pass count both read from one `findUnique` so the
+ * common case (a ticket nowhere near the limit) is rejected or accepted
+ * without ever touching the filesystem or opening a transaction. That read
+ * is a plain, unlocked count, though, so it cannot be the thing that
+ * actually enforces BR-23: BR-23 is a server-side invariant on the
+ * `Attachment` table ("at most 5 active"), not a promise about how any one
+ * client behaves, and this endpoint is reachable by any caller, well-behaved
+ * or not. So the real enforcement happens below, inside the transaction:
+ * `SELECT ... FOR UPDATE` takes a row lock on the parent Ticket, and the
+ * active count is re-read under that lock before the insert. Concurrent
+ * uploads to the same near-full ticket serialize on the lock instead of
+ * both observing room and both proceeding, so the table can never end up
+ * above the limit no matter how many callers race.
  *
  * BR-27's ordering is structural: `storeAttachmentFile` is awaited (the
  * file is durably on disk) before the `Attachment` row is ever created. If
  * the transaction that creates the row (and bumps the ticket's `updatedAt`,
- * BR-07) then fails, the just-written file is deleted on a best-effort
- * basis (`deleteAttachmentFileBestEffort`) and the original error
- * propagates — the router maps any error reaching it to `500 INTERNAL`.
+ * BR-07) then fails — including a late rejection from the locked recount
+ * above — the just-written file is deleted on a best-effort basis
+ * (`deleteAttachmentFileBestEffort`) and the original error propagates: an
+ * `AttachmentLimitError` reaching the router still maps to `409
+ * ATTACHMENT_LIMIT`, anything else to `500 INTERNAL`.
  */
 export async function uploadAttachment(input: UploadAttachmentInput) {
   const ticket = await prisma.ticket.findUnique({
@@ -93,8 +99,22 @@ export async function uploadAttachment(input: UploadAttachmentInput) {
   const { storedFilename } = await storeAttachmentFile(input.buffer, input.extension);
 
   try {
-    const [attachment] = await prisma.$transaction([
-      prisma.attachment.create({
+    const attachment = await prisma.$transaction(async (tx) => {
+      // Row-lock the parent ticket so concurrent uploads to it serialize
+      // here rather than racing: whichever transaction gets the lock first
+      // recounts and inserts (or rejects) before the next one is even let
+      // through `SELECT ... FOR UPDATE`. This is what actually makes BR-23
+      // hold under concurrency — see the function doc above.
+      await tx.$queryRaw`SELECT "id" FROM "Ticket" WHERE "id" = ${input.ticketId} FOR UPDATE`;
+
+      const activeCount = await tx.attachment.count({
+        where: { ticketId: input.ticketId, isRemoved: false },
+      });
+      if (activeCount >= MAX_ACTIVE_ATTACHMENTS_PER_TICKET) {
+        throw new AttachmentLimitError();
+      }
+
+      const created = await tx.attachment.create({
         data: {
           ticketId: input.ticketId,
           originalFilename: input.originalFilename,
@@ -102,12 +122,15 @@ export async function uploadAttachment(input: UploadAttachmentInput) {
           mimeType: input.mimeType,
           fileSize: input.buffer.length,
         },
-      }),
+      });
+
       // BR-07: bump the parent ticket's `updatedAt` on any change to its
-      // attachments. In the same transaction as the row insert so the two
-      // effects of one successful upload are atomic with each other.
-      prisma.ticket.update({ where: { id: input.ticketId }, data: { updatedAt: new Date() } }),
-    ]);
+      // attachments. Same transaction as the row insert so the two effects
+      // of one successful upload are atomic with each other.
+      await tx.ticket.update({ where: { id: input.ticketId }, data: { updatedAt: new Date() } });
+
+      return created;
+    });
 
     return attachment;
   } catch (error) {
