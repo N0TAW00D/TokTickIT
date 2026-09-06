@@ -121,6 +121,14 @@ body {
   margin: 0;
   background: var(--zen-page-bg);
   color: var(--zen-text);
+  /* AC-39/R-01: the page itself must never scroll horizontally — any wide
+     content (e.g. the My Tickets table) owns its own internal
+     `overflow-x: auto` scroller instead (MyTicketsScreen.css). This is a
+     deliberate backstop, not a fix for a specific leak: it guarantees the
+     rule holds even if a future layout change (or an engine quirk in how
+     nested scroll containers report root-level layout overflow) would
+     otherwise let inner overflow bleed into page-level scroll. */
+  overflow-x: hidden;
 }
 
 /* Container (ui-spec.md §3): centered, max-width 1120px, 24px desktop gutters
