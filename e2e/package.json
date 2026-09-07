@@ -1,0 +1,27 @@
+{
+  "name": "e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright E2E + responsive harness for TokTickIT (docs/lab-02/tests.md §1.1)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=11.18.0"
+  },
+  "scripts": {
+    "db:e2e:reset": "tsx scripts/reset-e2e-db.ts",
+    "pretest:e2e": "npm run db:e2e:reset",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0",
+    "tsx": "^4.23.8",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
+  }
+}
