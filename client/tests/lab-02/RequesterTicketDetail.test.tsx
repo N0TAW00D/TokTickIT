@@ -16,8 +16,10 @@ import {
 
 // Covers docs/lab-02/tests.md rows C-29..C-32 (read-only header render, the
 // not-found/failure states, the X-Requester-Id header ui-spec.md §10
-// requires, and the BR-11/AC-09 requester-switch guard). The attachment
-// section (C-15..C-21) belongs elsewhere and is not covered here.
+// requires, and the BR-11/AC-09 requester-switch guard). The detailed
+// per-state attachment-row checks (C-20/C-21) live in
+// AttachmentSection.test.tsx; this file only confirms the section is on
+// the page at all.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKET_URL = `${API_BASE_URL}/api/tickets/1`;
@@ -176,16 +178,49 @@ describe("C-29 Ticket Detail read-only render", () => {
     expect(container.querySelectorAll("select")).toHaveLength(0);
   });
 
-  it("does not render an attachment section even though the API response includes attachments", async () => {
+  it("renders the attachment from the API response in an Attachments section (slice 14a)", async () => {
     mockFetch();
     renderScreen();
 
     await screen.findByText(TICKET.ticketNumber);
 
     expect(
-      screen.queryByText(/battery-report\.pdf/i),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText(/attachment/i)).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: /attachments/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("battery-report.pdf")).toBeInTheDocument();
+  });
+
+  // ui-spec.md:431 pins the heading format `Attachments (2 active / 3 total)`
+  // — two counts that must differ. TICKET's single active attachment makes
+  // active and total identical, so it cannot tell the two apart: dropping the
+  // `!isRemoved` filter leaves every other test green. This fixture carries
+  // one active and one removed attachment so the counts diverge.
+  it("counts active and total attachments separately in the section heading", async () => {
+    mockFetch(() =>
+      jsonResponse(200, {
+        ...TICKET,
+        attachments: [
+          TICKET.attachments[0],
+          {
+            id: 6,
+            originalFilename: "screenshot.png",
+            mimeType: "image/png",
+            fileSize: 51200,
+            isRemoved: true,
+            removedAt: "2026-09-01T09:02:00.000Z",
+            removedReason: "Wrong screenshot",
+            createdAt: "2026-09-01T08:20:00.000Z",
+          },
+        ],
+      }),
+    );
+    renderScreen();
+
+    await screen.findByText(TICKET.ticketNumber);
+
+    expect(
+      screen.getByRole("heading", { name: "Attachments (1 active / 2 total)" }),
+    ).toBeInTheDocument();
   });
 
   it("sends X-Requester-Id on the detail request", async () => {

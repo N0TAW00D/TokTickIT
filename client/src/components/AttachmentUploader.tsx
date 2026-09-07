@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import { Button } from "./Button";
+import { formatFileSize } from "../tickets/formatFileSize";
 import "./AttachmentUploader.css";
 
 /** Allowed attachment types (specification.md BR-21). */
@@ -88,13 +89,6 @@ function validateFile(file: File): string | undefined {
     return "File is larger than 5 MB — not added.";
   }
   return undefined;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${Math.round(kb)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 /**

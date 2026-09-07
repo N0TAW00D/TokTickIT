@@ -1,0 +1,77 @@
+/* Ticket Detail attachment rows (ui-spec.md §10 "Attachment section"). */
+
+.zen-attachment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-unit);
+}
+
+.zen-attachment-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+  background: var(--zen-surface);
+}
+
+.zen-attachment-list__item--removed {
+  background: var(--zen-page-bg);
+}
+
+.zen-attachment-list__icon {
+  flex: 0 0 auto;
+  font-size: 1.125rem;
+}
+
+/* Attachment names must wrap, never truncate to unreadable (ui-spec.md §11). */
+.zen-attachment-list__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  color: var(--zen-text);
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-attachment-list__size,
+.zen-attachment-list__type {
+  flex: 0 0 auto;
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+}
+
+.zen-attachment-list__actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.zen-attachment-list__removed-meta {
+  flex: 1 1 100%;
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+@media (max-width: 767px) {
+  .zen-attachment-list__item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .zen-attachment-list__actions {
+    width: 100%;
+  }
+
+  .zen-attachment-list__actions .zen-btn {
+    flex: 1 1 auto;
+  }
+}
