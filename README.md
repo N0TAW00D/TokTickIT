@@ -125,11 +125,24 @@ src/index.ts`, `DATABASE_URL` pointed at `toktickit_e2e`) and the real client (`
 process from another checkout on :3000/:5173 can never be silently adopted; if either port is
 already occupied, Playwright fails fast instead of running the suite against it.
 
-Only one spec exists so far, `e2e/lab-02/harness.smoke.spec.ts`: it proves the harness boots the
-whole stack by asserting the Requester Selection screen lists the seeded active Requesters (and
-not the inactive one) — data that can only come from a real API call against the real database.
-The full E2E and responsive suites (`e2e/lab-02/requester-ticket-flow.spec.ts`,
-`e2e/lab-02/responsive.spec.ts`) are added by later Lab 2 slices (see `docs/lab-02/tests.md`).
+Specs under `e2e/lab-02/`, each mapped to rows in `docs/lab-02/tests.md` (§2 planned tests,
+Final column):
+
+- `harness.smoke.spec.ts` — proves the harness boots the whole stack: the Requester Selection
+  screen lists the seeded active Requesters (and not the inactive one), data that can only come
+  from a real API call against the real database.
+- `requester-ticket-flow.spec.ts` — the Requester ticketing journeys (`tests.md` rows
+  E2E-01..E2E-05): full create-with-attachment then download, attachment upload failure + retry
+  + soft-removal, cross-requester isolation, create-failure input preservation, and empty vs
+  no-results.
+- `responsive.spec.ts` — the responsive checks (`tests.md` rows R-01..R-06): no horizontal
+  scroll, table↔cards, nav collapse, no clipped labels/hidden actions, keyboard traversal — plus
+  the R-05 screenshot capture under `artifacts/lab-02/screenshots/`.
+- `submission-evidence.spec.ts` — the state-specific screenshots for the submission PDF's Answer
+  Parts 6, 7 and 8; each shot is taken by a test that asserts the state before capturing it.
+
+The Final column of `docs/lab-02/tests.md` is the source of truth for which rows are passing on
+the current branch.
 
 ### 5. Full suite
 
@@ -148,8 +161,9 @@ assumes `npm run bootstrap` (section 0) — or the equivalent per-package `npm i
 ## Project structure
 
 ```
-client/   React + TypeScript + Vite frontend
-server/   Express + TypeScript + Prisma backend
-e2e/      Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
-docs/     Lab notes and reference material
+client/              React + TypeScript + Vite frontend
+server/              Express + TypeScript + Prisma backend
+e2e/                 Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
+docs/lab-02/         Lab 2 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
+artifacts/lab-02/    Committed Playwright screenshots for the submission PDF
 ```
