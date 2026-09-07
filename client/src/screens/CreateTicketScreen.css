@@ -62,10 +62,15 @@
   }
 }
 
-.zen-create-ticket__attachments-placeholder {
-  color: var(--zen-text-muted);
+.zen-create-ticket__warning {
+  background: var(--zen-warning-bg);
+  color: var(--zen-warning);
+  border-radius: var(--zen-radius-card);
+  padding: 12px 16px;
+  margin: 0 0 var(--zen-space-group-gap);
   font-size: var(--zen-font-size-body);
-  margin: 0;
+  font-weight: var(--zen-font-weight-error);
+  text-align: left;
 }
 
 .zen-create-ticket__actions {

@@ -279,3 +279,111 @@ export async function createTicket(
   }
   return response.json();
 }
+
+/** One uploaded attachment, per the `POST /api/tickets/:id/attachments` `201` body (api-spec.md §4.1). */
+export interface AttachmentResponse {
+  id: number;
+  ticketId: number;
+  originalFilename: string;
+  mimeType: string;
+  fileSize: number;
+  isRemoved: boolean;
+  removedAt: string | null;
+  removedReason: string | null;
+  createdAt: string;
+}
+
+/**
+ * The three distinct rejection reasons `uploadAttachment` can raise, one per
+ * server rule (api-spec.md §4.1 constraints table): `415` type mismatch,
+ * `413` size, `409` the 5-active-attachment ceiling. Every other failure
+ * (network error, `404`, `400 NO_FILE`, `5xx`) raises a plain `Error`
+ * instead — those are not attachment-specific rules the caller needs to
+ * branch on.
+ */
+export type UploadAttachmentErrorCode =
+  | "UNSUPPORTED_TYPE"
+  | "FILE_TOO_LARGE"
+  | "ATTACHMENT_LIMIT";
+
+/**
+ * Thrown by `uploadAttachment` for the three server rules above, so a
+ * caller can tell "wrong type" from "too big" from "ticket already has 5
+ * active attachments" instead of catching one generic `Error` for all
+ * three (api-spec.md §4.1, BR-21..BR-23, AC-18..AC-20).
+ */
+export class UploadAttachmentError extends Error {
+  readonly code: UploadAttachmentErrorCode;
+
+  constructor(code: UploadAttachmentErrorCode, message: string) {
+    super(message);
+    this.name = "UploadAttachmentError";
+    this.code = code;
+  }
+}
+
+/**
+ * Best-effort read of the error body's safe `message` (api-spec.md §1.3).
+ * Falls back to a generic status-coded message when the body is absent,
+ * not JSON, or missing the field — never throws.
+ */
+function readErrorMessage(body: unknown, status: number): string {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    typeof (body as Record<string, unknown>).message === "string"
+  ) {
+    return (body as Record<string, unknown>).message as string;
+  }
+  return `Failed to upload attachment (status ${status}).`;
+}
+
+/**
+ * `POST /api/tickets/:id/attachments` (api-spec.md §4.1): upload one file
+ * to a ticket owned by the calling Requester, identified via the
+ * `X-Requester-Id` header (§1.2) exactly like `createTicket` above.
+ *
+ * The request body is `multipart/form-data` with a single `file` part —
+ * `Content-Type` (including its boundary) is left for the browser/runtime
+ * to set from the `FormData` body; setting it manually would drop the
+ * boundary and break parsing server-side.
+ *
+ * `415`/`413`/`409` raise the matching `UploadAttachmentError` code; every
+ * other failure (network error, `404`, `400 NO_FILE`, `5xx`) raises a
+ * generic `Error`.
+ */
+export async function uploadAttachment(
+  requesterId: number,
+  ticketId: number,
+  file: File,
+): Promise<AttachmentResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/tickets/${ticketId}/attachments`,
+    {
+      method: "POST",
+      headers: { "X-Requester-Id": String(requesterId) },
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    const body = await readErrorBody(response);
+    const message = readErrorMessage(body, response.status);
+
+    if (response.status === 415) {
+      throw new UploadAttachmentError("UNSUPPORTED_TYPE", message);
+    }
+    if (response.status === 413) {
+      throw new UploadAttachmentError("FILE_TOO_LARGE", message);
+    }
+    if (response.status === 409) {
+      throw new UploadAttachmentError("ATTACHMENT_LIMIT", message);
+    }
+    throw new Error(`Failed to upload attachment (status ${response.status})`);
+  }
+
+  return response.json();
+}
