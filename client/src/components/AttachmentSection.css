@@ -21,3 +21,53 @@
   color: var(--zen-error);
   font-size: var(--zen-font-size-error, 0.875rem);
 }
+
+/* Per-file "Upload failed — retry" rows for an immediate upload from the
+   Add control that the server rejected (415/413/409) or the network
+   dropped — ui-spec.md §10 row table:
+   "name + --zen-error 'Upload failed — retry', Retry + Dismiss".
+   Distinct from the active AttachmentList rows and from the uploader's
+   own client-side --rejected rows; sits next to the Add control. Layout
+   and border come from .zen-attachment-uploader__item (AttachmentUploader.css). */
+
+.zen-attachment-failed {
+  margin-top: var(--zen-space-field-gap);
+}
+
+.zen-attachment-uploader__item--failed {
+  background: var(--zen-error-bg);
+  border-color: var(--zen-error);
+}
+
+.zen-attachment-failed__status {
+  flex: 0 0 auto;
+  color: var(--zen-error);
+  font-size: var(--zen-font-size-error);
+  font-weight: var(--zen-font-weight-error);
+}
+
+.zen-attachment-failed__detail {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  color: var(--zen-error);
+  font-size: var(--zen-font-size-helper);
+}
+
+.zen-attachment-failed__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--zen-space-unit);
+}
+
+@media (max-width: 767px) {
+  .zen-attachment-uploader__item--failed .zen-attachment-failed__actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .zen-attachment-uploader__item--failed .zen-attachment-failed__actions .zen-btn {
+    width: 100%;
+  }
+}

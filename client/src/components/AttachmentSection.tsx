@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "./Button";
 import { AttachmentList } from "./AttachmentList";
 import { RemoveAttachmentDialog } from "./RemoveAttachmentDialog";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
@@ -26,6 +27,22 @@ interface DialogState {
   conflictError?: string;
   /** A `400 VALIDATION_FAILED` field message, kept alongside the dialog's own client-side check. */
   serverFieldError?: string;
+}
+
+/**
+ * One file whose immediate upload from the Add control failed on the
+ * server (`415`/`413`/`409`) or the network — it gets its own
+ * "Upload failed — retry" row with `Retry` + `Dismiss` (ui-spec.md §10
+ * row table), keyed by a client-only id so each row's controls act on
+ * exactly its file.
+ */
+interface FailedUpload {
+  id: string;
+  file: File;
+  /** The 409/413/415/network wording from `uploadErrorMessage`, shown as the row's detail line. */
+  message: string;
+  /** A re-attempt is in flight — the row's `Retry` shows its busy state and `Dismiss` is held. */
+  retrying: boolean;
 }
 
 const IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
@@ -112,7 +129,7 @@ export function AttachmentSection({
   const [toast, setToast] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TicketAttachment | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([]);
   const [uploading, setUploading] = useState(false);
   // AttachmentUploader is a controlled queue component; on Ticket Detail we
   // upload immediately and never persist a queue, so this stays empty.
@@ -223,7 +240,6 @@ export function AttachmentSection({
     // (ui-spec.md §8). On Ticket Detail there is no submit step — upload
     // each one now and keep our own queue empty.
     if (next.length === 0) return;
-    setUploadError(null);
     setUploading(true);
     try {
       for (const item of next) {
@@ -235,7 +251,19 @@ export function AttachmentSection({
           );
           onAttachmentAdded?.(added);
         } catch (error) {
-          setUploadError(uploadErrorMessage(error, item.file.name));
+          // Give the failed file its own "Upload failed — retry" row
+          // (ui-spec.md §10) and stop the batch here — the same
+          // stop-on-first-failure behaviour slice 14d shipped; any files
+          // after this one in the selection are simply not attempted.
+          setFailedUploads((current) => [
+            ...current,
+            {
+              id: crypto.randomUUID(),
+              file: item.file,
+              message: uploadErrorMessage(error, item.file.name),
+              retrying: false,
+            },
+          ]);
           break;
         }
       }
@@ -243,6 +271,47 @@ export function AttachmentSection({
       setUploading(false);
       setQueued([]);
     }
+  }
+
+  /**
+   * `Retry` on a failed-upload row: re-attempts the upload for that exact
+   * file. On success the row is removed and the attachment is reported via
+   * `onAttachmentAdded` (the normal success path — a real active row
+   * appears and the "N active / M total" heading updates). On another
+   * failure the row stays with refreshed wording.
+   */
+  async function handleRetryUpload(id: string) {
+    const target = failedUploads.find((item) => item.id === id);
+    if (!target || target.retrying) return;
+
+    setFailedUploads((current) =>
+      current.map((item) =>
+        item.id === id ? { ...item, retrying: true } : item,
+      ),
+    );
+
+    try {
+      const added = await uploadAttachment(requesterId, ticketId, target.file);
+      onAttachmentAdded?.(added);
+      setFailedUploads((current) => current.filter((item) => item.id !== id));
+    } catch (error) {
+      setFailedUploads((current) =>
+        current.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                retrying: false,
+                message: uploadErrorMessage(error, target.file.name),
+              }
+            : item,
+        ),
+      );
+    }
+  }
+
+  /** `Dismiss` on a failed-upload row: drop the row, nothing else. */
+  function handleDismissUpload(id: string) {
+    setFailedUploads((current) => current.filter((item) => item.id !== id));
   }
 
   return (
@@ -257,10 +326,49 @@ export function AttachmentSection({
             disabled={uploading}
             addButtonLabel="+ Add attachment"
           />
-          {uploadError && (
-            <div role="alert" className="zen-attachment-section__error">
-              <span aria-hidden="true">⚠</span> {uploadError}
-            </div>
+          {failedUploads.length > 0 && (
+            <ul
+              className="zen-attachment-uploader__list zen-attachment-failed"
+              role="alert"
+            >
+              {failedUploads.map((item) => (
+                <li
+                  key={item.id}
+                  className="zen-attachment-uploader__item zen-attachment-uploader__item--failed"
+                >
+                  <span
+                    className="zen-attachment-uploader__name"
+                    title={item.file.name}
+                  >
+                    {item.file.name}
+                  </span>
+                  <span className="zen-attachment-failed__status">
+                    <span aria-hidden="true">⚠</span> Upload failed — retry
+                  </span>
+                  <span className="zen-attachment-failed__detail">
+                    {item.message}
+                  </span>
+                  <span className="zen-attachment-failed__actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      busy={item.retrying}
+                      onClick={() => handleRetryUpload(item.id)}
+                    >
+                      Retry
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="tertiary"
+                      disabled={item.retrying}
+                      onClick={() => handleDismissUpload(item.id)}
+                    >
+                      Dismiss
+                    </Button>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}
