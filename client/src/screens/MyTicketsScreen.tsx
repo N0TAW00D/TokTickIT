@@ -196,6 +196,13 @@ function SortableHeader({
  * would add nothing but risk of nested interactive elements. This keeps
  * exactly two real links per row (the number and the explicit "View"),
  * never a third overlapping one.
+ *
+ * Only Summary and Related System truncate with an ellipsis + `title`
+ * (ui-spec.md §9: "long summaries and related-system names truncate with
+ * an ellipsis and a `title`, never clip silently"; §11 repeats this as the
+ * general "long text truncates" rule). Category is free text from a small,
+ * team-curated reference list (server/prisma/seed.ts) and is left
+ * unclamped rather than truncated on a column the spec never names for it.
  */
 function TicketsTable({ items, sort, order, onToggleSort, disabled }: SortableTableProps) {
   return (
@@ -247,19 +254,14 @@ function TicketsTable({ items, sort, order, onToggleSort, disabled }: SortableTa
               </td>
               <td>{formatDateTime(ticket.createdAt)}</td>
               <td
-                className="zen-my-tickets__truncate"
+                className="zen-my-tickets__truncate zen-my-tickets__truncate--summary"
                 title={ticket.summary}
               >
                 {ticket.summary}
               </td>
+              <td>{ticket.category.name}</td>
               <td
-                className="zen-my-tickets__truncate"
-                title={ticket.category.name}
-              >
-                {ticket.category.name}
-              </td>
-              <td
-                className="zen-my-tickets__truncate"
+                className="zen-my-tickets__truncate zen-my-tickets__truncate--related-system"
                 title={ticket.relatedSystem.name}
               >
                 {ticket.relatedSystem.name}

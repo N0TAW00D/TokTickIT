@@ -115,7 +115,14 @@
 .zen-my-tickets__table th,
 .zen-my-tickets__table td {
   text-align: left;
-  padding: 12px 16px;
+  /* Horizontal padding trimmed from the original 16px so all eight columns
+     (plus the hidden-label Actions column) fit inside the 1120px container
+     without a horizontal scrollbar (ui-spec.md §3, §11) — see the
+     `.zen-my-tickets__truncate--*` widths below, sized against this
+     padding for the real seeded data (server/prisma/seed.ts's longest
+     Category, "Account and Access", and longest Related System, "Grade
+     Submission App"). */
+  padding: 12px 8px;
   border-bottom: 1px solid var(--zen-border);
   white-space: nowrap;
 }
@@ -207,12 +214,32 @@
 
 /* Long summaries / related-system names truncate with an ellipsis, never
    silently clip (ui-spec.md §9, §11) — the `title` attribute on the cell
-   carries the full text. */
+   carries the full text. Table-layout is `auto` (not `fixed`): a cell's
+   `max-width` still constrains that column's computed width under the
+   auto algorithm, which is what keeps these two columns from pushing the
+   rest of the row (Priority, Status, Last Updated) past the 1120px
+   container (ui-spec.md §3, §11) — confirmed against the real table via
+   Playwright `getBoundingClientRect`, not assumed. */
 .zen-my-tickets__truncate {
-  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Desktop-table-only widths, sized so all nine `<th>`/`<td>` columns fit
+   the 1022px content width the table's `.zen-my-tickets__table-scroll`
+   ancestor actually has at desktop (measured: 1120px container − 24px×2
+   outer gutter − 24px×2 `.zen-app-shell__content` inner gutter − 1px×2
+   scroll-container border). The other six columns' content is bounded
+   (ticket number / date formats, the fixed Priority/Status badge text)
+   and are left to size themselves; only Summary and Related System carry
+   effectively unbounded text. */
+.zen-my-tickets__table .zen-my-tickets__truncate--summary {
+  max-width: 132px;
+}
+
+.zen-my-tickets__table .zen-my-tickets__truncate--related-system {
+  max-width: 104px;
 }
 
 /* ---- Mobile cards ---- */
