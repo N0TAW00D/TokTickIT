@@ -6,6 +6,7 @@ import {
   AttachmentUploader,
   type QueuedAttachment,
 } from "../../src/components/AttachmentUploader.tsx";
+import { AttachmentList } from "../../src/components/AttachmentList.tsx";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
 import {
   RequesterProvider,
@@ -14,11 +15,13 @@ import {
 import {
   uploadAttachment,
   UploadAttachmentError,
+  type TicketAttachment,
 } from "../../src/tickets/api.ts";
 
 // Covers docs/lab-02/tests.md rows C-15 (attachment client validation),
-// C-16 (partial attachment failure after a successful create), and C-17
-// (add-attachment disabled at the 5-attachment ceiling).
+// C-16 (partial attachment failure after a successful create), C-17
+// (add-attachment disabled at the 5-attachment ceiling), C-20 (removed
+// attachment presentation), and C-21 (attachment actions per type).
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -749,5 +752,107 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     const uploaded = (init.body as FormData).get("file");
     expect(uploaded).toBeInstanceOf(File);
     expect((uploaded as File).name).toBe("f.pdf");
+  });
+});
+
+// --- C-20 / C-21: AttachmentList row rendering on Ticket Detail. ---
+//
+// AttachmentList is a pure presentational component (like
+// AttachmentUploader above) — these tests render it directly with fixed
+// attachment fixtures rather than going through TicketDetailScreen's
+// fetch, since the row-presentation rules (ui-spec.md §10 row table,
+// BR-33, BR-34) are independent of how the data got there.
+
+/** Active PDF (api-spec.md §3.3 example): Download + Remove, no Preview. */
+const ACTIVE_PDF: TicketAttachment = {
+  id: 1,
+  originalFilename: "battery-report.pdf",
+  mimeType: "application/pdf",
+  fileSize: 249184, // -> "243 KB"
+  isRemoved: false,
+  removedAt: null,
+  removedReason: null,
+  createdAt: "2026-09-01T08:15:10.000Z",
+};
+
+/** Active image: Preview + Download + Remove. */
+const ACTIVE_IMAGE: TicketAttachment = {
+  id: 2,
+  originalFilename: "photo.png",
+  mimeType: "image/png",
+  fileSize: 819200, // 800 * 1024 -> "800 KB"
+  isRemoved: false,
+  removedAt: null,
+  removedReason: null,
+  createdAt: "2026-09-01T08:16:00.000Z",
+};
+
+/**
+ * Removed attachment: metadata only, no controls. `removedAt` is UTC
+ * "2026-09-01T02:02:00.000Z", which is 09:02 in Asia/Bangkok (UTC+7,
+ * specification.md BR-04/A-11) — the expected string below is hardcoded
+ * independently of formatDateTime, not derived by calling it (lesson: a
+ * test must not validate a function by calling that same function).
+ */
+const REMOVED_ATTACHMENT: TicketAttachment = {
+  id: 3,
+  originalFilename: "screenshot.png",
+  mimeType: "image/png",
+  fileSize: 512000, // 500 * 1024 -> "500 KB"
+  isRemoved: true,
+  removedAt: "2026-09-01T02:02:00.000Z",
+  removedReason: "Wrong screenshot",
+  createdAt: "2026-09-01T08:17:00.000Z",
+};
+
+describe("C-21 attachment actions (AC-33, BR-34)", () => {
+  it("active image: Preview + Download + Remove all present", () => {
+    render(<AttachmentList attachments={[ACTIVE_IMAGE]} />);
+
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+    expect(screen.getByText("800 KB")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove/i })).toBeInTheDocument();
+  });
+
+  it("active PDF: Download + Remove present, Preview absent", () => {
+    render(<AttachmentList attachments={[ACTIVE_PDF]} />);
+
+    expect(screen.getByText("battery-report.pdf")).toBeInTheDocument();
+    expect(screen.getByText("243 KB")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /preview/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove/i })).toBeInTheDocument();
+  });
+});
+
+describe("C-20 removed attachment presentation (AC-36, BR-33)", () => {
+  it("shows name, size, type, and \"Removed <date> · \\\"<reason>\\\"\", with no Download/Preview/Remove control", () => {
+    render(<AttachmentList attachments={[REMOVED_ATTACHMENT]} />);
+
+    // Metadata: name, size, type.
+    expect(screen.getByText("screenshot.png")).toBeInTheDocument();
+    expect(screen.getByText("500 KB")).toBeInTheDocument();
+    expect(screen.getByText("PNG")).toBeInTheDocument();
+
+    // Removed date + reason, exact literal shape from ui-spec.md §10.
+    expect(
+      screen.getByText('Removed 1 Sep, 09:02 · "Wrong screenshot"'),
+    ).toBeInTheDocument();
+
+    // No download link, no inline preview, no remove control (BR-33).
+    expect(
+      screen.queryByRole("button", { name: /download/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /preview/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 });
