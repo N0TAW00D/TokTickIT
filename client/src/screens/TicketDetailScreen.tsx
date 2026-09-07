@@ -94,10 +94,11 @@ type DetailState =
  * (ui-spec.md §10 "Attachment section", tests.md C-20/C-21: active rows
  * with their per-type controls, removed rows as metadata only), wired to
  * the Remove confirmation dialog via `AttachmentSection` (tests.md
- * C-18/C-19). A successful removal replaces that attachment in-place in
- * `state.ticket.attachments`, so the row and the "N active / M total"
- * heading both update without a full re-fetch. The Add Attachment control
- * is a separate slice and is not wired in here.
+ * C-18/C-19), the per-row Download/Preview actions, and the Add
+ * Attachment control (slice 14d). A successful removal, upload, or the
+ * (unchanged) header all flow through `state.ticket.attachments` in-place,
+ * so the rows and the "N active / M total" heading update without a full
+ * re-fetch.
  */
 export function TicketDetailScreen() {
   const params = useParams<{ id: string }>();
@@ -178,6 +179,25 @@ export function TicketDetailScreen() {
           attachments: previous.ticket.attachments.map((attachment) =>
             attachment.id === updated.id ? updated : attachment,
           ),
+        },
+      };
+    });
+  }
+
+  /**
+   * Appends a just-uploaded attachment (from the Add control) to the
+   * currently-loaded ticket's `attachments[]`, so its row appears and the
+   * section heading's "N active / M total" counts both rise — same
+   * in-place update as `handleAttachmentRemoved`, no re-fetch.
+   */
+  function handleAttachmentAdded(added: TicketAttachment) {
+    setState((previous) => {
+      if (previous.phase !== "loaded") return previous;
+      return {
+        phase: "loaded",
+        ticket: {
+          ...previous.ticket,
+          attachments: [...previous.ticket.attachments, added],
         },
       };
     });
@@ -281,7 +301,9 @@ export function TicketDetailScreen() {
             <AttachmentSection
               attachments={state.ticket.attachments}
               requesterId={requesterId as number}
+              ticketId={state.ticket.id}
               onAttachmentRemoved={handleAttachmentRemoved}
+              onAttachmentAdded={handleAttachmentAdded}
             />
           </section>
         </>

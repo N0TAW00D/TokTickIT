@@ -9,3 +9,15 @@
   color: var(--zen-success);
   font-size: var(--zen-font-size-body);
 }
+
+/* Non-blocking failure for a per-attachment action (download 410 / network,
+   or an immediate upload rejection) — ui-spec.md §5.4 error role. */
+
+.zen-attachment-section__error {
+  margin-top: var(--zen-space-field-gap);
+  padding: 8px 12px;
+  border-radius: var(--zen-radius-control);
+  background: var(--zen-error-bg);
+  color: var(--zen-error);
+  font-size: var(--zen-font-size-error, 0.875rem);
+}

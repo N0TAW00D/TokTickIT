@@ -35,13 +35,18 @@ function describeType(mimeType: string): string {
 export interface AttachmentListProps {
   attachments: TicketAttachment[];
   /**
-   * Wired by a later slice (Download actually fetching/saving the file).
-   * Left unwired here, the button still renders per C-21 — it just has no
-   * effect yet.
+   * Fetch + save the file (slice 14d). Left unwired the button still
+   * renders per C-21 — it just has no effect.
    */
   onDownload?: (attachment: TicketAttachment) => void;
-  /** Wired by a later slice (the inline preview lightbox, ui-spec.md §10). */
-  onPreview?: (attachment: TicketAttachment) => void;
+  /**
+   * Open the inline preview lightbox (slice 14d, ui-spec.md §10). Receives
+   * the clicked button element as its second argument so the caller can
+   * restore focus to it when the lightbox closes (ui-spec.md §12), the
+   * same way `onRemove` does — via `event.currentTarget` so it works even
+   * when the click didn't itself move focus (e.g. `fireEvent.click`).
+   */
+  onPreview?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
   /**
    * Wired by slice 14c (the Remove confirmation dialog: required reason,
    * focus trap, Esc, toast, 400 handling). Receives the clicked button
@@ -91,7 +96,7 @@ export function AttachmentList({
 interface ActiveRowProps {
   attachment: TicketAttachment;
   onDownload?: (attachment: TicketAttachment) => void;
-  onPreview?: (attachment: TicketAttachment) => void;
+  onPreview?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
   onRemove?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
 }
 
@@ -121,7 +126,7 @@ function ActiveRow({ attachment, onDownload, onPreview, onRemove }: ActiveRowPro
           <Button
             type="button"
             variant="secondary"
-            onClick={() => onPreview?.(attachment)}
+            onClick={(event) => onPreview?.(attachment, event.currentTarget)}
           >
             Preview
           </Button>
