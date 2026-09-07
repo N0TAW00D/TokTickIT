@@ -44,10 +44,14 @@ export interface AttachmentListProps {
   onPreview?: (attachment: TicketAttachment) => void;
   /**
    * Wired by slice 14c (the Remove confirmation dialog: required reason,
-   * focus trap, Esc, toast, 400 handling — all out of scope here). The
-   * control itself still renders per C-21.
+   * focus trap, Esc, toast, 400 handling). Receives the clicked button
+   * element as its second argument so the caller can restore focus to it
+   * when the dialog closes without success (ui-spec.md §10: "returns
+   * focus to the triggering Remove button") — using `event.currentTarget`
+   * rather than `document.activeElement` so this works even when the
+   * click didn't itself move focus (e.g. `fireEvent.click` in tests).
    */
-  onRemove?: (attachment: TicketAttachment) => void;
+  onRemove?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
 }
 
 /**
@@ -88,7 +92,7 @@ interface ActiveRowProps {
   attachment: TicketAttachment;
   onDownload?: (attachment: TicketAttachment) => void;
   onPreview?: (attachment: TicketAttachment) => void;
-  onRemove?: (attachment: TicketAttachment) => void;
+  onRemove?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
 }
 
 /**
@@ -132,7 +136,9 @@ function ActiveRow({ attachment, onDownload, onPreview, onRemove }: ActiveRowPro
         <Button
           type="button"
           variant="destructive"
-          onClick={() => onRemove?.(attachment)}
+          onClick={(event) =>
+            onRemove?.(attachment, event.currentTarget)
+          }
         >
           Remove
         </Button>
