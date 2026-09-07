@@ -20,12 +20,12 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 // Playwright route intercept stubs the network response for that one
 // request rather than anything in the app being swapped out.
 //
-// NOT covered here (see the final report, not this file): labsheet
-// demonstration 4 ("one valid and one invalid attachment upload") is not
-// possible on this branch — CreateTicketScreen.tsx's Attachments section is
-// a placeholder ("Attachments are added after the ticket is created.");
-// the real AttachmentUploader lives in an unmerged PR. Skipped rather than
-// faked.
+// Labsheet demonstration 4 ("one valid and one invalid attachment upload")
+// is covered by the "demonstration 4" test in the Create Ticket describe
+// below: `lab2-staging` now renders the real `AttachmentUploader`
+// (client/src/components/AttachmentUploader.tsx) on the Create Ticket
+// screen, so two files can be selected through its real file input and the
+// valid/invalid split asserted on screen before the capture.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -530,6 +530,93 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     }
     await page.screenshot({
       path: shot(PART6_DIR, "13-demo2-desktop-reference-data-populated.png"),
+      fullPage: true,
+    });
+  });
+
+  test("demonstration 4: one valid and one invalid attachment on the Create Ticket screen", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Jennifer Anderson");
+
+    await page.goto("/tickets/new");
+    await expect(
+      page.getByRole("heading", { name: "Create Ticket", level: 1 }),
+    ).toBeVisible();
+    // Attachments section starts empty (ui-spec.md §8: the count header
+    // reads "Attachments (n/5)").
+    await expect(
+      page.getByRole("heading", { name: "Attachments (0/5)", level: 2 }),
+    ).toBeVisible();
+
+    // Demonstration 4 (labsheet §8.2): select TWO files through the real
+    // file input rendered by AttachmentUploader (client/src/components/
+    // AttachmentUploader.tsx) — one VALID (a PDF within the 5 MB limit,
+    // matching the `battery-report.pdf` row in ui-spec.md §8's
+    // illustration) and one INVALID (a `.exe`, matching the same
+    // illustration's `virus.exe` row). setInputFiles is programmatic, so it
+    // bypasses the input's `accept=".jpg,.jpeg,.png,.webp,.pdf"` hint on
+    // purpose — that is exactly the drag-and-drop / programmatic path the
+    // component's own client-side MIME + extension check (`validateFile`)
+    // exists to guard (see its comment). The two files are written to a
+    // gitignored temp dir at runtime; nothing binary is committed.
+    const fixtureDir = path.resolve(here, "../test-results/demo4-attachments");
+    fs.mkdirSync(fixtureDir, { recursive: true });
+    const validPdfPath = path.join(fixtureDir, "battery-report.pdf");
+    const invalidExePath = path.join(fixtureDir, "virus.exe");
+    // ~240 KB so the queued row shows a realistic "KB" size, well under the
+    // 5 MB ceiling. A minimal but well-formed PDF envelope around the pad.
+    fs.writeFileSync(
+      validPdfPath,
+      `%PDF-1.4\n${" ".repeat(240 * 1024)}\n%%EOF\n`,
+    );
+    fs.writeFileSync(invalidExePath, "MZ not a real attachment");
+
+    await page
+      .locator("#create-ticket-attachments-input")
+      .setInputFiles([validPdfPath, invalidExePath]);
+
+    // The valid file is queued: exactly one non-rejected row, showing name
+    // + size + Remove, and the count header advances to "Attachments (1/5)"
+    // (AC-18, AC-19, ui-spec.md §8).
+    await expect(
+      page.getByRole("heading", { name: "Attachments (1/5)", level: 2 }),
+    ).toBeVisible();
+    const queuedRow = page.locator(
+      ".zen-attachment-uploader__item:not(.zen-attachment-uploader__item--rejected)",
+    );
+    await expect(queuedRow).toHaveCount(1);
+    await expect(
+      queuedRow.locator(".zen-attachment-uploader__name"),
+    ).toHaveText("battery-report.pdf");
+    await expect(
+      queuedRow.locator(".zen-attachment-uploader__size"),
+    ).toHaveText(/^\d+(\.\d+)?\s(KB|MB)$/);
+    await expect(
+      queuedRow.getByRole("button", { name: "Remove" }),
+    ).toBeVisible();
+
+    // The invalid file is rejected with its red per-file reason — the exact
+    // string AttachmentUploader.tsx's `validateFile` returns for a bad type
+    // — and is NOT added to the queue (AC-19). The rejection span carries
+    // role="alert".
+    const rejectedRow = page.locator(
+      ".zen-attachment-uploader__item--rejected",
+    );
+    await expect(rejectedRow).toHaveCount(1);
+    await expect(
+      rejectedRow.locator(".zen-attachment-uploader__name"),
+    ).toHaveText("virus.exe");
+    await expect(rejectedRow.getByRole("alert")).toContainText(
+      "Unsupported file type — not added.",
+    );
+    // "virus.exe" never became a queued file: still exactly one Remove
+    // button on the whole screen (the valid row's).
+    await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(1);
+
+    await page.screenshot({
+      path: shot(PART6_DIR, "14-demo4-valid-and-invalid-attachment.png"),
       fullPage: true,
     });
   });
