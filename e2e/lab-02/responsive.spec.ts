@@ -318,26 +318,33 @@ test.describe("R-01 no horizontal scroll (tests.md:133, AC-39)", () => {
         await loginAsSeededRequester(page);
         await goToPopulatedScreen(page, screen, viewportName);
 
-        // Measured on `document.body`, not `document.documentElement`:
-        // Chromium's `documentElement.scrollWidth` can over-report here by
-        // exactly the amount of a *nested* scroll container's own internal
-        // overflow (e.g. My Tickets' `.zen-my-tickets__table-scroll`, which
-        // deliberately owns a wide table's horizontal scroll per
-        // MyTicketsScreen.css) — `body`'s metrics match what's actually
-        // scrollable at the page level (confirmed by attempting a real
-        // wheel scroll below).
+        // Measured on `document.documentElement`, deliberately NOT on
+        // `document.body` and not via a wheel-scroll probe. theme.css sets
+        // `body { overflow-x: hidden }` as the AC-39 backstop, and that
+        // single declaration forces BOTH of those weaker checks to pass no
+        // matter how far content actually overflows: it clamps
+        // `body.scrollWidth` to `body.clientWidth` by construction, and it
+        // makes the page unscrollable so `window.scrollX` is pinned at 0.
+        // A test that cannot fail is not evidence. Verified: with the
+        // `.zen-my-tickets__table-scroll` containing-block fix reverted,
+        // my-tickets at tablet genuinely overflowed the document by 105px
+        // while both the body metric and the wheel probe still reported
+        // clean.
+        //
+        // The earlier concern that `documentElement` over-reports a nested
+        // scroll container's internal overflow does not hold here: the
+        // table scrolls inside `.zen-my-tickets__table-scroll` and
+        // contributes nothing to this number. The 105px came from
+        // `position: absolute` `.zen-visually-hidden` spans escaping that
+        // container because it was not a containing block.
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-          scrollWidth: document.body.scrollWidth,
-          clientWidth: document.body.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
         }));
-        expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
-
-        // Behavioral confirmation, not just a metric: a real horizontal
-        // wheel scroll over the page must not move it at all (theme.css's
-        // `body { overflow-x: hidden }` backstop).
-        await page.mouse.wheel(1000, 0);
-        const scrollXAfterWheel = await page.evaluate(() => window.scrollX);
-        expect(scrollXAfterWheel).toBe(0);
+        expect(
+          scrollWidth,
+          `${screen} at ${viewportName}: document overflows its client width by ${scrollWidth - clientWidth}px`,
+        ).toBeLessThanOrEqual(clientWidth);
       });
     }
   }
@@ -434,6 +441,50 @@ test.describe("R-04 no clipped label / hidden primary action (tests.md:136, AC-3
         expect(labelCount).toBeGreaterThan(0);
         for (let i = 0; i < labelCount; i++) {
           await expectFullyVisible(labels.nth(i));
+        }
+
+        // A `<select>` never overflows its own box — it silently truncates
+        // the option text instead, so `expectFullyVisible` on the control
+        // passes while the user sees "Created (newe". ui-spec.md:549
+        // requires "Filters, sort, Clear Filters, and pagination are usable
+        // and unclipped at every viewport", so measure the widest option's
+        // rendered text against the control's content box directly. Two of
+        // the four controls failed this before the flex-basis fix (Sort by
+        // 36.6px, Category by 21.2px).
+        if (screen === "my-tickets") {
+          const shortfalls = await page.evaluate(() => {
+            const out: Array<{ id: string; longest: string; by: number }> = [];
+            for (const select of document.querySelectorAll("select")) {
+              const style = getComputedStyle(select);
+              const probe = document.createElement("span");
+              probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${style.font}`;
+              probe.textContent = [...select.options].reduce(
+                (widest, option) =>
+                  option.text.length > widest.length ? option.text : widest,
+                "",
+              );
+              document.body.appendChild(probe);
+              const needed =
+                probe.getBoundingClientRect().width +
+                parseFloat(style.paddingLeft) +
+                parseFloat(style.paddingRight);
+              probe.remove();
+              const shortfall =
+                needed - select.getBoundingClientRect().width;
+              if (shortfall > 0) {
+                out.push({
+                  id: select.id,
+                  longest: probe.textContent ?? "",
+                  by: Math.round(shortfall * 10) / 10,
+                });
+              }
+            }
+            return out;
+          });
+          expect(
+            shortfalls,
+            `selects whose longest option does not fit: ${JSON.stringify(shortfalls)}`,
+          ).toEqual([]);
         }
 
         // Strengthened per PR #44 review (Palapluem): the checks above
