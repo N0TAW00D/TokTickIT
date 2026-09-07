@@ -541,30 +541,42 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
 
 test.describe("Part 7 — My Tickets", () => {
   // Requester roles for this Part, kept disjoint from Part 6's Jennifer
-  // Anderson and from each other so no test's fixtures contaminate
-  // another test's evidence:
-  //   - David Lee ("Requester A"): already owns a large number of tickets
-  //     accumulated across other Playwright specs sharing this same
-  //     toktickit_e2e database (responsive.spec.ts / harness.smoke.spec.ts
-  //     always log in as GET /api/requesters' first, alphabetically-first
-  //     active Requester — "David Lee"). Real pre-existing data, reused
-  //     rather than re-faked, per the task's "check the seed data before
-  //     inventing a new mechanism" guidance.
+  // Anderson and from each other so no test's fixtures contaminate another
+  // test's evidence. Every ticket these tests screenshot is created here,
+  // in this `beforeAll`, through the real `POST /api/tickets` endpoint —
+  // nothing depends on tickets left behind by another spec or an earlier
+  // run. PR #42's `pretest:e2e` hook TRUNCATEs Ticket/Attachment/
+  // TicketCounter before every `npm run test:e2e`, so each Requester below
+  // starts from zero and this Part builds exactly the fixtures its
+  // assertions and screenshots need.
+  //   - David Lee ("Requester A"): seeded here with a self-contained set of
+  //     12 tickets — more than one page at the default page size of 10 (so
+  //     `06-pagination-page2.png` is a genuine page 2) and spread across
+  //     every seeded Category and all three priorities, so the search,
+  //     filter and sort screenshots demonstrate real filtering that is
+  //     asserted row by row against the rendered table.
   //   - Sarah Johnson ("Requester B"): seeded here with her OWN small,
-  //     distinct set of tickets, so the "switch to B" screenshot shows a
-  //     genuinely different non-empty list, not just an empty one.
+  //     distinct pair of tickets, so the "switch to B" screenshot shows a
+  //     genuinely different non-empty list.
   //   - Michael Brown ("Requester Empty"): must own zero tickets — used
   //     ONLY for the empty-state and cross-Requester-rejection tests. No
-  //     test in this file may ever create a ticket for him.
+  //     test in this file ever creates a ticket for him; the `beforeAll`
+  //     still asserts his live count is zero rather than assuming it.
   let davidId: number;
   let sarahId: number;
   let michaelId: number;
+  // A ticket owned by David Lee that the search / filter screenshots key
+  // off. Populated in the `beforeAll` from the real `POST /api/tickets`
+  // response, so its id / number / category / priority are known facts,
+  // not assumptions. Created LAST so it sits on page 1 of the default
+  // newest-first list.
   let davidReferenceTicket: {
     id: number;
     ticketNumber: string;
     categoryName: string;
     priority: "LOW" | "MEDIUM" | "HIGH";
   };
+  const davidTicketNumbers: string[] = [];
   const sarahTicketNumbers: string[] = [];
 
   test.beforeAll(async () => {
@@ -586,10 +598,36 @@ test.describe("Part 7 — My Tickets", () => {
     sarahId = requesterIdByName("Sarah Johnson");
     michaelId = requesterIdByName("Michael Brown");
 
+    const categories: Array<{ id: number; name: string }> = await (
+      await api.get("/api/categories")
+    ).json();
+    const relatedSystems: Array<{ id: number; name: string }> = await (
+      await api.get("/api/related-systems")
+    ).json();
+    function categoryIdByName(name: string): number {
+      const found = categories.find((c) => c.name === name);
+      if (!found) {
+        throw new Error(
+          `Seeded category "${name}" not found via GET /api/categories — check server/prisma/seed.ts.`,
+        );
+      }
+      return found.id;
+    }
+    function relatedSystemIdByName(name: string): number {
+      const found = relatedSystems.find((s) => s.name === name);
+      if (!found) {
+        throw new Error(
+          `Seeded related system "${name}" not found via GET /api/related-systems — check server/prisma/seed.ts.`,
+        );
+      }
+      return found.id;
+    }
+
     // Precondition for the empty-state screenshot (ui-spec.md §9 "Empty —
-    // Requester owns zero tickets"): checked live, not assumed, since
-    // toktickit_e2e accumulates tickets across every worktree/agent run on
-    // this machine and is never reset to a clean slate between them.
+    // Requester owns zero tickets"): checked live, not assumed. `pretest:e2e`
+    // truncates the ticket tables before every run and no test here writes
+    // for Michael Brown, so this should always hold — the assertion is a
+    // tripwire for a future spec accidentally seeding him.
     const michaelTickets: { meta: { totalItems: number } } = await (
       await api.get("/api/tickets", {
         headers: { "X-Requester-Id": String(michaelId) },
@@ -599,50 +637,175 @@ test.describe("Part 7 — My Tickets", () => {
       throw new Error(
         `Expected Michael Brown (id ${michaelId}) to own zero tickets for the ` +
           `empty-state screenshot, but found ${michaelTickets.meta.totalItems}. ` +
-          "Pick a different genuinely-empty active Requester, or investigate " +
-          "what created tickets for him.",
+          "Some other spec created tickets for him — pick a different " +
+          "genuinely-empty active Requester, or stop seeding him.",
       );
     }
 
-    // Precondition for the pagination screenshot: David Lee needs enough
-    // real tickets for a genuine page 2 to exist at the default page size
-    // (10).
-    const davidList: {
-      items: Array<{
+    // --- David Lee (Requester A): 12 self-created tickets -----------------
+    // Ordered so the last one created (newest, therefore top of the default
+    // list and on page 1) is the reference ticket the search / filter shots
+    // assert on. Categories and priorities are spread deliberately: the
+    // "filters applied" screenshot narrows to Network + High and every
+    // remaining row is checked against that Category in the DOM.
+    const davidFixtures: Array<{
+      category: string;
+      relatedSystem: string;
+      priority: "LOW" | "MEDIUM" | "HIGH";
+      summary: string;
+      description: string;
+    }> = [
+      {
+        category: "Hardware",
+        relatedSystem: "Corporate Laptop",
+        priority: "MEDIUM",
+        summary: "Laptop fan runs at full speed constantly",
+        description:
+          "The corporate laptop fan spins at full speed within minutes of booting even with no heavy applications open.",
+      },
+      {
+        category: "Hardware",
+        relatedSystem: "Printer",
+        priority: "LOW",
+        summary: "Third-floor printer jams on every multi-page job",
+        description:
+          "The shared printer on the third floor jams on nearly every multi-page job and needs the tray cleared each time.",
+      },
+      {
+        category: "Hardware",
+        relatedSystem: "Corporate Laptop",
+        priority: "HIGH",
+        summary: "Corporate laptop will not power on at all",
+        description:
+          "The corporate laptop shows no lights and does not respond to the power button even after charging overnight.",
+      },
+      {
+        category: "Software",
+        relatedSystem: "LEB2 App",
+        priority: "LOW",
+        summary: "LEB2 app shows a stale course list after login",
+        description:
+          "The LEB2 application keeps showing last semester's course list and does not refresh after signing out and back in.",
+      },
+      {
+        category: "Software",
+        relatedSystem: "Grade Submission App",
+        priority: "MEDIUM",
+        summary: "Grade submission export fails partway through",
+        description:
+          "Exporting grades to a spreadsheet from the grade submission application fails with a generic error partway through.",
+      },
+      {
+        category: "Software",
+        relatedSystem: "LEB2 App",
+        priority: "HIGH",
+        summary: "Cannot sign in to LEB2 — unexpected error",
+        description:
+          "Signing in to the LEB2 application returns an unexpected error on every attempt since this morning, blocking all work.",
+      },
+      {
+        category: "Account and Access",
+        relatedSystem: "Email",
+        priority: "MEDIUM",
+        summary: "Mailbox over-quota warnings persist after archiving",
+        description:
+          "The mailbox keeps showing over-quota warnings even after archiving several gigabytes of old messages yesterday.",
+      },
+      {
+        category: "Account and Access",
+        relatedSystem: "Email",
+        priority: "LOW",
+        summary: "Department distribution list membership is wrong",
+        description:
+          "Messages sent to the department distribution list are not delivered to two team members who should be on it.",
+      },
+      {
+        category: "Network",
+        relatedSystem: "Campus Wi-Fi",
+        priority: "LOW",
+        summary: "Weak Wi-Fi signal in the ground-floor meeting room",
+        description:
+          "The Wi-Fi signal in the ground floor meeting room drops to one bar and disconnects during video calls.",
+      },
+      {
+        category: "Network",
+        relatedSystem: "VPN",
+        priority: "MEDIUM",
+        summary: "VPN is slow to establish a connection each morning",
+        description:
+          "The VPN client takes several minutes to establish a connection each morning before any internal site loads.",
+      },
+      {
+        category: "Network",
+        relatedSystem: "Campus Wi-Fi",
+        priority: "HIGH",
+        summary: "Campus Wi-Fi drops every few minutes on all devices",
+        description:
+          "The campus Wi-Fi connection drops roughly every five minutes on every device, forcing a manual reconnect each time.",
+      },
+      {
+        category: "Network",
+        relatedSystem: "VPN",
+        priority: "HIGH",
+        summary: "Cannot connect to VPN from the home network",
+        description:
+          "The VPN connection fails immediately from the home network with an authentication error, though the account works on site.",
+      },
+    ];
+
+    for (const [index, fixture] of davidFixtures.entries()) {
+      const response = await api.post("/api/tickets", {
+        headers: { "X-Requester-Id": String(davidId) },
+        data: {
+          categoryId: categoryIdByName(fixture.category),
+          relatedSystemId: relatedSystemIdByName(fixture.relatedSystem),
+          requestedPriority: fixture.priority,
+          summary: fixture.summary,
+          description: fixture.description,
+        },
+      });
+      if (response.status() !== 201) {
+        throw new Error(
+          `Seed POST /api/tickets for David Lee failed: ${response.status()} ${await response.text()}`,
+        );
+      }
+      const created: {
         id: number;
         ticketNumber: string;
         category: { name: string };
         requestedPriority: "LOW" | "MEDIUM" | "HIGH";
-      }>;
-      meta: { totalItems: number };
-    } = await (
-      await api.get("/api/tickets", {
-        headers: { "X-Requester-Id": String(davidId) },
-      })
-    ).json();
-    if (davidList.meta.totalItems < 11) {
+      } = await response.json();
+      davidTicketNumbers.push(created.ticketNumber);
+      if (index === davidFixtures.length - 1) {
+        davidReferenceTicket = {
+          id: created.id,
+          ticketNumber: created.ticketNumber,
+          categoryName: created.category.name,
+          priority: created.requestedPriority,
+        };
+      }
+    }
+
+    // Guard the two facts the rest of this Part relies on, so an edit to
+    // davidFixtures above can't silently invalidate the screenshots.
+    if (davidTicketNumbers.length <= 10) {
       throw new Error(
-        `Expected David Lee (id ${davidId}) to already own at least 11 tickets ` +
-          "(for a real page-2 pagination shot) from prior harness/responsive " +
-          `spec runs against toktickit_e2e, but found ${davidList.meta.totalItems}.`,
+        "Part 7 needs David Lee to own more than one page of tickets (page " +
+          `size 10); seeded only ${davidTicketNumbers.length}.`,
       );
     }
-    const first = davidList.items[0];
-    davidReferenceTicket = {
-      id: first.id,
-      ticketNumber: first.ticketNumber,
-      categoryName: first.category.name,
-      priority: first.requestedPriority,
-    };
+    if (
+      davidReferenceTicket.categoryName !== "Network" ||
+      davidReferenceTicket.priority !== "HIGH"
+    ) {
+      throw new Error(
+        "Part 7 expects the David Lee reference ticket to be Network / HIGH " +
+          `(got ${davidReferenceTicket.categoryName} / ${davidReferenceTicket.priority}).`,
+      );
+    }
 
     // Sarah Johnson (Requester B) gets her own real tickets through the
     // real POST /api/tickets endpoint — never inserted directly.
-    const categories: Array<{ id: number; name: string }> = await (
-      await api.get("/api/categories")
-    ).json();
-    const relatedSystems: Array<{ id: number; name: string }> = await (
-      await api.get("/api/related-systems")
-    ).json();
     const sarahFixtures = [
       {
         summary: "Sarah Johnson evidence ticket: mouse stopped working",
@@ -835,7 +998,11 @@ test.describe("Part 7 — My Tickets", () => {
     const match = initialText.match(/Showing 1–10 of (\d+)/);
     expect(match).not.toBeNull();
     const total = Number(match![1]);
-    expect(total).toBeGreaterThanOrEqual(11);
+    // Self-contained: David Lee's ticket count must be at least the number
+    // this spec's beforeAll created for him (which alone already exceeds
+    // the page size of 10), never a value assumed from accumulated data.
+    expect(total).toBeGreaterThanOrEqual(davidTicketNumbers.length);
+    expect(davidTicketNumbers.length).toBeGreaterThan(10);
 
     await page.getByRole("button", { name: "Page 2" }).click();
     await expect(summary).toHaveText(
