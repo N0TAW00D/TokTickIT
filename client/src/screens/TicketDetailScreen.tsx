@@ -7,6 +7,7 @@ import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { AttachmentList } from "../components/AttachmentList";
 import { useRequester } from "../requester/RequesterContext";
 import {
   fetchTicketDetail,
@@ -88,10 +89,12 @@ type DetailState =
 /**
  * Requester Ticket Detail screen (ui-spec.md §10, `/tickets/:id`).
  *
- * Read-only view of one ticket's header fields. The attachment section
- * (ui-spec.md §10 "Attachment section", tests.md C-15..C-21) is out of
- * scope here and deliberately not rendered, even though the API response
- * carries an `attachments` array — a later slice owns it.
+ * Read-only view of one ticket's header fields plus its attachment list
+ * (ui-spec.md §10 "Attachment section", tests.md C-20/C-21: active rows
+ * with their per-type controls, removed rows as metadata only). The Add
+ * Attachment control and the Remove confirmation dialog are separate
+ * slices and are not wired in here — `AttachmentList`'s `onRemove` is
+ * left unset, so the Remove button renders per C-21 but has no effect yet.
  */
 export function TicketDetailScreen() {
   const params = useParams<{ id: string }>();
@@ -195,48 +198,65 @@ export function TicketDetailScreen() {
       )}
 
       {state.phase === "loaded" && (
-        <section className="zen-ticket-detail__card">
-          <h2>Ticket information</h2>
+        <>
+          <section className="zen-ticket-detail__card">
+            <h2>Ticket information</h2>
 
-          <div className="zen-ticket-detail__grid">
-            <StaticField
-              label="Ticket No."
-              value={state.ticket.ticketNumber}
-            />
-            <StaticField
-              label="Ticket Date"
-              value={formatDateTimeWithYear(state.ticket.createdAt)}
-            />
-            <StaticField label="Category" value={state.ticket.category.name} />
-            <StaticField
-              label="Requester"
-              value={state.ticket.requester.name}
-            />
-            <StaticBadgeField label="Requested Priority">
-              <PriorityBadge value={state.ticket.requestedPriority} />
-            </StaticBadgeField>
-            <StaticBadgeField label="Current Status">
-              <StatusBadge value={state.ticket.status} />
-            </StaticBadgeField>
-            <StaticField
-              label="Related System"
-              value={state.ticket.relatedSystem.name}
-            />
-          </div>
+            <div className="zen-ticket-detail__grid">
+              <StaticField
+                label="Ticket No."
+                value={state.ticket.ticketNumber}
+              />
+              <StaticField
+                label="Ticket Date"
+                value={formatDateTimeWithYear(state.ticket.createdAt)}
+              />
+              <StaticField
+                label="Category"
+                value={state.ticket.category.name}
+              />
+              <StaticField
+                label="Requester"
+                value={state.ticket.requester.name}
+              />
+              <StaticBadgeField label="Requested Priority">
+                <PriorityBadge value={state.ticket.requestedPriority} />
+              </StaticBadgeField>
+              <StaticBadgeField label="Current Status">
+                <StatusBadge value={state.ticket.status} />
+              </StaticBadgeField>
+              <StaticField
+                label="Related System"
+                value={state.ticket.relatedSystem.name}
+              />
+            </div>
 
-          <StaticField
-            label="Summary"
-            value={state.ticket.summary}
-            fullWidth
-            multiline
-          />
-          <StaticField
-            label="Description"
-            value={state.ticket.description}
-            fullWidth
-            multiline
-          />
-        </section>
+            <StaticField
+              label="Summary"
+              value={state.ticket.summary}
+              fullWidth
+              multiline
+            />
+            <StaticField
+              label="Description"
+              value={state.ticket.description}
+              fullWidth
+              multiline
+            />
+          </section>
+
+          {/* Clear separation from the ticket information card above
+              (ui-spec.md §10, labsheet §8.5). */}
+          <section className="zen-ticket-detail__card">
+            <h2>
+              Attachments (
+              {state.ticket.attachments.filter((a) => !a.isRemoved).length}
+              {" active / "}
+              {state.ticket.attachments.length} total)
+            </h2>
+            <AttachmentList attachments={state.ticket.attachments} />
+          </section>
+        </>
       )}
     </AppShell>
   );

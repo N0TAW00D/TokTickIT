@@ -42,6 +42,23 @@ export interface CreateTicketRequest {
   description: string;
 }
 
+/**
+ * One attachment as it appears in a ticket's `attachments[]` (api-spec.md
+ * §3.3): both active and soft-removed rows use this same shape. Removed
+ * rows carry `removedAt`/`removedReason`; active rows carry `null` for
+ * both (BR-33).
+ */
+export interface TicketAttachment {
+  id: number;
+  originalFilename: string;
+  mimeType: string;
+  fileSize: number;
+  isRemoved: boolean;
+  removedAt: string | null;
+  removedReason: string | null;
+  createdAt: string;
+}
+
 export interface CreateTicketResponse {
   id: number;
   ticketNumber: string;
@@ -54,7 +71,7 @@ export interface CreateTicketResponse {
   description: string;
   createdAt: string;
   updatedAt: string;
-  attachments: unknown[];
+  attachments: TicketAttachment[];
 }
 
 /** One `{ field, message }` entry from a `VALIDATION_FAILED` body (api-spec.md §1.3). */
@@ -280,17 +297,15 @@ export async function createTicket(
   return response.json();
 }
 
-/** One uploaded attachment, per the `POST /api/tickets/:id/attachments` `201` body (api-spec.md §4.1). */
-export interface AttachmentResponse {
-  id: number;
+/**
+ * One uploaded attachment, per the `POST /api/tickets/:id/attachments`
+ * `201` body (api-spec.md §4.1) — the same shape as `TicketAttachment`
+ * plus `ticketId`, which only the upload/metadata endpoints (§4.1, §4.2)
+ * include (the `GET /api/tickets/:id` attachments[] entries in §3.3 do
+ * not).
+ */
+export interface AttachmentResponse extends TicketAttachment {
   ticketId: number;
-  originalFilename: string;
-  mimeType: string;
-  fileSize: number;
-  isRemoved: boolean;
-  removedAt: string | null;
-  removedReason: string | null;
-  createdAt: string;
 }
 
 /**

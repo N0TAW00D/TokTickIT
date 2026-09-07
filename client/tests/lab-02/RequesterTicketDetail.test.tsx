@@ -16,8 +16,10 @@ import {
 
 // Covers docs/lab-02/tests.md rows C-29..C-32 (read-only header render, the
 // not-found/failure states, the X-Requester-Id header ui-spec.md §10
-// requires, and the BR-11/AC-09 requester-switch guard). The attachment
-// section (C-15..C-21) belongs elsewhere and is not covered here.
+// requires, and the BR-11/AC-09 requester-switch guard). The detailed
+// per-state attachment-row checks (C-20/C-21) live in
+// AttachmentSection.test.tsx; this file only confirms the section is on
+// the page at all.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKET_URL = `${API_BASE_URL}/api/tickets/1`;
@@ -176,16 +178,16 @@ describe("C-29 Ticket Detail read-only render", () => {
     expect(container.querySelectorAll("select")).toHaveLength(0);
   });
 
-  it("does not render an attachment section even though the API response includes attachments", async () => {
+  it("renders the attachment from the API response in an Attachments section (slice 14a)", async () => {
     mockFetch();
     renderScreen();
 
     await screen.findByText(TICKET.ticketNumber);
 
     expect(
-      screen.queryByText(/battery-report\.pdf/i),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText(/attachment/i)).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: /attachments/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("battery-report.pdf")).toBeInTheDocument();
   });
 
   it("sends X-Requester-Id on the detail request", async () => {
