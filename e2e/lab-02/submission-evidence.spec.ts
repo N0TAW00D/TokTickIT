@@ -39,6 +39,7 @@ const SUBMISSION_ROOT = path.resolve(
 );
 const PART6_DIR = path.join(SUBMISSION_ROOT, "part-6-create-ticket");
 const PART7_DIR = path.join(SUBMISSION_ROOT, "part-7-my-tickets");
+const PART8_DIR = path.join(SUBMISSION_ROOT, "part-8-ticket-detail");
 
 // server/src/index.ts hardcodes port 3000 (see the SERVER_URL comment in
 // ../playwright.config.ts); duplicated here for the same reason
@@ -54,6 +55,7 @@ function shot(dir: string, name: string): string {
 test.beforeAll(() => {
   fs.mkdirSync(PART6_DIR, { recursive: true });
   fs.mkdirSync(PART7_DIR, { recursive: true });
+  fs.mkdirSync(PART8_DIR, { recursive: true });
 });
 
 /**
@@ -1167,6 +1169,373 @@ test.describe("Part 7 — My Tickets", () => {
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART7_DIR, "09-cross-requester-access-rejected.png"),
+      fullPage: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Answer Part 8 — Requester Ticket Detail & Attachments
+// (ui-spec.md §10, api-spec.md §4, labsheet §8.5)
+// ---------------------------------------------------------------------------
+
+test.describe("Part 8 — Ticket Detail & Attachments", () => {
+  // Every test here seeds its OWN ticket + attachment through the real
+  // POST /api/tickets and POST /api/tickets/:id/attachments endpoints
+  // (api-spec.md §3.1, §4.1) in its own `beforeAll`, so no test depends on
+  // another's side effects or on data left by Part 7. `pretest:e2e`
+  // TRUNCATEs the ticket tables before every run. "Sarah Johnson" owns the
+  // tickets; "Michael Brown" (never given a ticket — Part 7's beforeAll
+  // still asserts he owns zero) is the "different Requester" for the
+  // unauthorized-access shot.
+  let sarahId: number;
+  let michaelId: number;
+  let categoryId: number;
+  let relatedSystemId: number;
+
+  const FIXTURE_DIR = path.resolve(here, "../test-results/part8-attachments");
+
+  /** A minimal but well-formed PDF envelope, `sizeKb` KB, under the 5 MB cap. */
+  function writePdfFixture(name: string, sizeKb: number): string {
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+    const filePath = path.join(FIXTURE_DIR, name);
+    fs.writeFileSync(filePath, `%PDF-1.4\n${" ".repeat(sizeKb * 1024)}\n%%EOF\n`);
+    return filePath;
+  }
+
+  interface SeededTicket {
+    id: number;
+    ticketNumber: string;
+    attachmentId: number;
+  }
+
+  /**
+   * Creates one Sarah-owned ticket with a single active PDF attachment,
+   * through the real API. Returns the ids the tests key their assertions to.
+   */
+  async function seedTicketWithAttachment(
+    api: Awaited<ReturnType<typeof playwrightRequest.newContext>>,
+    attachmentName: string,
+    sizeKb: number,
+  ): Promise<SeededTicket> {
+    const createResponse = await api.post("/api/tickets", {
+      headers: { "X-Requester-Id": String(sarahId) },
+      data: {
+        categoryId,
+        relatedSystemId,
+        requestedPriority: "MEDIUM",
+        summary:
+          "Part 8 evidence: corporate laptop battery drains within an hour",
+        description:
+          "The corporate laptop battery drops from full to empty within an hour of unplugging, even with just a browser open.",
+      },
+    });
+    if (createResponse.status() !== 201) {
+      throw new Error(
+        `Part 8 seed POST /api/tickets failed: ${createResponse.status()} ${await createResponse.text()}`,
+      );
+    }
+    const created: { id: number; ticketNumber: string } =
+      await createResponse.json();
+
+    const pdfPath = writePdfFixture(attachmentName, sizeKb);
+    const uploadResponse = await api.post(
+      `/api/tickets/${created.id}/attachments`,
+      {
+        headers: { "X-Requester-Id": String(sarahId) },
+        multipart: {
+          file: {
+            name: attachmentName,
+            mimeType: "application/pdf",
+            buffer: fs.readFileSync(pdfPath),
+          },
+        },
+      },
+    );
+    if (uploadResponse.status() !== 201) {
+      throw new Error(
+        `Part 8 seed POST /api/tickets/:id/attachments failed: ${uploadResponse.status()} ${await uploadResponse.text()}`,
+      );
+    }
+    const uploaded: { id: number } = await uploadResponse.json();
+    return {
+      id: created.id,
+      ticketNumber: created.ticketNumber,
+      attachmentId: uploaded.id,
+    };
+  }
+
+  test.beforeAll(async () => {
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+
+    const requesters: Array<{ id: number; name: string }> = await (
+      await api.get("/api/requesters")
+    ).json();
+    function requesterIdByName(name: string): number {
+      const found = requesters.find((r) => r.name === name);
+      if (!found) {
+        throw new Error(
+          `Seeded active requester "${name}" not found via GET /api/requesters — check server/prisma/seed.ts.`,
+        );
+      }
+      return found.id;
+    }
+    sarahId = requesterIdByName("Sarah Johnson");
+    michaelId = requesterIdByName("Michael Brown");
+
+    const categories: Array<{ id: number; name: string }> = await (
+      await api.get("/api/categories")
+    ).json();
+    const relatedSystems: Array<{ id: number; name: string }> = await (
+      await api.get("/api/related-systems")
+    ).json();
+    const cat = categories.find((c) => c.name === "Hardware")?.id;
+    const rel = relatedSystems.find((r) => r.name === "Corporate Laptop")?.id;
+    if (cat === undefined || rel === undefined) {
+      throw new Error(
+        "Part 8 seed: expected the seeded 'Hardware' category and 'Corporate Laptop' related system — check server/prisma/seed.ts.",
+      );
+    }
+    categoryId = cat;
+    relatedSystemId = rel;
+
+    await api.dispose();
+  });
+
+  test("owned ticket detail (read-only header), adding an attachment via the Add control, and downloading an active one", async ({
+    page,
+  }) => {
+    const ATTACHMENT_NAME = "initial-report.pdf";
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const ticket = await seedTicketWithAttachment(api, ATTACHMENT_NAME, 180);
+
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Sarah Johnson");
+    await page.goto(`/tickets/${ticket.id}`);
+
+    // --- Shot 1: a Requester viewing their own ticket's detail page ------
+    await expect(
+      page.getByRole("heading", { name: "Ticket Details", level: 1 }),
+    ).toBeVisible();
+    const infoCard = page.locator(".zen-ticket-detail__card").first();
+    await expect(infoCard.getByText(ticket.ticketNumber)).toBeVisible();
+    // The owning Requester shows in the ticket-information card — scoped
+    // there, not the app-shell badge (which reads the same name on every
+    // screen).
+    await expect(infoCard.getByText("Sarah Johnson")).toBeVisible();
+    // ui-spec.md §10 / BR-39 / tests.md C-29: every header field is static
+    // text — the information card has no inputs at all.
+    await expect(infoCard.locator("input, textarea, select")).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (1 active / 1 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+    const seededRow = page.locator(".zen-attachment-list__item", {
+      hasText: ATTACHMENT_NAME,
+    });
+    await expect(seededRow).toBeVisible();
+    await expect(
+      seededRow.getByRole("button", { name: "Download" }),
+    ).toBeVisible();
+    await expect(
+      seededRow.getByRole("button", { name: "Remove" }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART8_DIR, "01-owned-ticket-detail.png"),
+      fullPage: true,
+    });
+
+    // --- Shot 2: Add-attachment control after a file has been uploaded ---
+    const addedName = "supplementary-log.pdf";
+    await page
+      .locator("#ticket-detail-attachments-input")
+      .setInputFiles(writePdfFixture(addedName, 90));
+
+    // A new active row appears and both counts in the heading advance
+    // (ui-spec.md §10 "N active / M total", AC-21).
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (2 active / 2 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+    const addedRow = page.locator(".zen-attachment-list__item", {
+      hasText: addedName,
+    });
+    await expect(addedRow).toBeVisible();
+    await expect(
+      addedRow.getByRole("button", { name: "Download" }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART8_DIR, "02-add-attachment.png"),
+      fullPage: true,
+    });
+
+    // --- Shot 3: downloading an active attachment (assert the GET is 200) -
+    page.on("download", (download) => {
+      // Accept + discard: the real <a download> click still fires (so the
+      // save path is exercised) but the bytes aren't needed on disk.
+      void download.path().catch(() => {});
+    });
+    const downloadResponsePromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/attachments/${ticket.attachmentId}/download`) &&
+        res.request().method() === "GET",
+    );
+    await seededRow.getByRole("button", { name: "Download" }).click();
+    const downloadResponse = await downloadResponsePromise;
+    // api-spec.md §4.3: an active attachment on an owned ticket → 200, with
+    // the original filename in Content-Disposition.
+    expect(downloadResponse.status()).toBe(200);
+    expect(
+      downloadResponse.headers()["content-disposition"] ?? "",
+    ).toContain(ATTACHMENT_NAME);
+    await page.screenshot({
+      path: shot(PART8_DIR, "03-download-active-attachment.png"),
+      fullPage: true,
+    });
+
+    await api.dispose();
+  });
+
+  test("soft removal with a reason: the confirmation dialog, the removed-row presentation, retained metadata, and the blocked download", async ({
+    page,
+  }) => {
+    const ATTACHMENT_NAME = "report-to-remove.pdf";
+    const REMOVAL_REASON =
+      "Uploaded the wrong report for this Part 8 evidence ticket";
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const ticket = await seedTicketWithAttachment(api, ATTACHMENT_NAME, 180);
+
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Sarah Johnson");
+    await page.goto(`/tickets/${ticket.id}`);
+
+    const seededRow = page.locator(".zen-attachment-list__item", {
+      hasText: ATTACHMENT_NAME,
+    });
+    await expect(
+      seededRow.getByRole("button", { name: "Remove" }),
+    ).toBeVisible();
+
+    // --- Shot 4: Remove confirmation dialog open, reason typed in --------
+    await seededRow.getByRole("button", { name: "Remove" }).click();
+    const dialog = page.getByRole("dialog", { name: "Remove attachment" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(ATTACHMENT_NAME);
+    const reasonField = dialog.getByLabel("Reason for removal");
+    await reasonField.fill(REMOVAL_REASON);
+    await expect(reasonField).toHaveValue(REMOVAL_REASON);
+    await page.screenshot({
+      path: shot(PART8_DIR, "04-remove-dialog-with-reason.png"),
+      fullPage: true,
+    });
+
+    // --- Shot 5: the result — the row in its "Removed" presentation -----
+    await dialog.getByRole("button", { name: "Remove attachment" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // AC-34: a role="status" toast confirms the removal.
+    await expect(
+      page.locator(".zen-attachment-section__toast"),
+    ).toContainText(`"${ATTACHMENT_NAME}" was removed.`);
+
+    const removedRow = page.locator(".zen-attachment-list__item--removed");
+    await expect(removedRow).toHaveCount(1);
+    // ui-spec.md §10: the removed line is exactly `Removed <date> · "<reason>"`
+    // — no "on", a middot separator, the reason wrapped in double quotes.
+    await expect(
+      removedRow.locator(".zen-attachment-list__removed-meta"),
+    ).toHaveText(
+      new RegExp(
+        `^Removed \\d{1,2} [A-Z][a-z]{2}, \\d{2}:\\d{2} \\u00b7 "${REMOVAL_REASON.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        )}"$`,
+      ),
+    );
+    // This ticket's only attachment was just removed: 0 active, 1 total —
+    // a removed attachment is retained, not deleted (BR-31).
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (0 active / 1 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART8_DIR, "05-attachment-removed-with-reason.png"),
+      fullPage: true,
+    });
+
+    // --- Shot 6: retained metadata (BR-33, AC-36) ----------------------
+    // name / size / type / removed-date / reason all still on the removed
+    // row — the metadata is kept, only access is revoked.
+    await expect(
+      removedRow.locator(".zen-attachment-list__name"),
+    ).toHaveText(ATTACHMENT_NAME);
+    await expect(
+      removedRow.locator(".zen-attachment-list__size"),
+    ).toHaveText(/^\d+(\.\d+)?\s(KB|MB)$/);
+    await expect(
+      removedRow.locator(".zen-attachment-list__type"),
+    ).toHaveText("PDF");
+    await expect(removedRow).toContainText(REMOVAL_REASON);
+    await page.screenshot({
+      path: shot(PART8_DIR, "06-removed-metadata-retained.png"),
+      fullPage: true,
+    });
+
+    // --- Shot 7: the removed attachment can't be downloaded ------------
+    // The removed row offers no Download / Preview / Remove control
+    // (BR-33, AC-36)…
+    await expect(removedRow.getByRole("button")).toHaveCount(0);
+    // …and the download endpoint itself now returns 410 ATTACHMENT_REMOVED
+    // (api-spec.md §4.3) — proven by a direct API call, not just the UI.
+    const blockedResponse = await api.get(
+      `/api/attachments/${ticket.attachmentId}/download`,
+      { headers: { "X-Requester-Id": String(sarahId) } },
+    );
+    expect(blockedResponse.status()).toBe(410);
+    const blockedBody: { error: string } = await blockedResponse.json();
+    expect(blockedBody.error).toBe("ATTACHMENT_REMOVED");
+    await page.screenshot({
+      path: shot(PART8_DIR, "07-removed-download-blocked.png"),
+      fullPage: true,
+    });
+
+    await api.dispose();
+  });
+
+  test("unauthorized access rejected: a different Requester opening this ticket's /tickets/:id URL", async ({
+    page,
+  }) => {
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const ticket = await seedTicketWithAttachment(
+      api,
+      "owner-only-report.pdf",
+      120,
+    );
+    await api.dispose();
+
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Michael Brown");
+    // Guard the premise of this shot: Michael is not the owner.
+    expect(michaelId).not.toBe(sarahId);
+
+    await page.goto(`/tickets/${ticket.id}`);
+    // ui-spec.md §10 / AC-37, AC-38, BR-14: unknown and not-owned are the
+    // same "Ticket not found" state, byte-identical copy.
+    await expect(
+      page.getByRole("heading", { name: "Ticket not found" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "This ticket doesn't exist or isn't associated with the current development requester.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({
+      path: shot(PART8_DIR, "08-unauthorized-access-rejected.png"),
       fullPage: true,
     });
   });
