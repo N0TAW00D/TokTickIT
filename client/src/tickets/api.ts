@@ -338,11 +338,10 @@ export class UploadAttachmentError extends Error {
 }
 
 /**
- * Best-effort read of the error body's safe `message` (api-spec.md §1.3).
- * Falls back to a generic status-coded message when the body is absent,
- * not JSON, or missing the field — never throws.
+ * The error body's safe `message` string (api-spec.md §1.3), or `undefined`
+ * when the body is absent, not JSON, or missing the field. Never throws.
  */
-function readErrorMessage(body: unknown, status: number): string {
+function extractSafeMessage(body: unknown): string | undefined {
   if (
     typeof body === "object" &&
     body !== null &&
@@ -350,7 +349,19 @@ function readErrorMessage(body: unknown, status: number): string {
   ) {
     return (body as Record<string, unknown>).message as string;
   }
-  return `Failed to upload attachment (status ${status}).`;
+  return undefined;
+}
+
+/**
+ * Best-effort read of the error body's safe `message` (api-spec.md §1.3).
+ * Falls back to a generic status-coded message when the body is absent,
+ * not JSON, or missing the field — never throws.
+ */
+function readErrorMessage(body: unknown, status: number): string {
+  return (
+    extractSafeMessage(body) ??
+    `Failed to upload attachment (status ${status}).`
+  );
 }
 
 /**
@@ -492,4 +503,96 @@ export async function removeAttachment(
   }
 
   return response.json();
+}
+
+/**
+ * Pulls the download filename out of a `Content-Disposition` header
+ * (api-spec.md §4.3 serves `attachment; filename="<originalFilename>"`).
+ * Also understands the RFC 5987 `filename*=UTF-8''...` form some servers
+ * emit. Returns `null` when the header is absent or carries no filename —
+ * the caller then falls back to the attachment's own `originalFilename`.
+ */
+export function filenameFromContentDisposition(
+  header: string | null | undefined,
+): string | null {
+  if (!header) return null;
+
+  const extended = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(header);
+  if (extended?.[1]) {
+    const raw = extended[1].trim().replace(/^["']|["']$/g, "");
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      // Malformed percent-encoding — fall through to the plain form.
+    }
+  }
+
+  const plain = /filename\s*=\s*("?)([^";]+)\1/i.exec(header);
+  if (plain?.[2]) return plain[2].trim();
+
+  return null;
+}
+
+/**
+ * Thrown by `downloadAttachment` when the server responds `410
+ * ATTACHMENT_REMOVED` (api-spec.md §4.3) — the attachment was soft-removed
+ * between the page load and the click. Distinct from the generic `Error`
+ * every other failure raises so the caller can surface "this file was
+ * removed" rather than a connection error (BR-33, AC-34).
+ */
+export class AttachmentRemovedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AttachmentRemovedError";
+  }
+}
+
+/** The bytes of an attachment plus the filename to save them under. */
+export interface AttachmentDownload {
+  blob: Blob;
+  /**
+   * From the response's `Content-Disposition` header; `null` when the
+   * header is absent or unparseable, in which case the caller falls back
+   * to the attachment's `originalFilename`.
+   */
+  filename: string | null;
+}
+
+/**
+ * `GET /api/attachments/:id/download` (api-spec.md §4.3): fetch the raw
+ * bytes of an **active** attachment on an owned ticket, identified via the
+ * `X-Requester-Id` header (§1.2) exactly like the calls above. The bytes
+ * come back as a `Blob` together with the filename parsed from
+ * `Content-Disposition`.
+ *
+ * A `410` raises `AttachmentRemovedError`; every other failure (`404`,
+ * `5xx`, network error) raises a generic `Error`.
+ */
+export async function downloadAttachment(
+  requesterId: number,
+  attachmentId: number,
+): Promise<AttachmentDownload> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/attachments/${attachmentId}/download`,
+    { headers: { "X-Requester-Id": String(requesterId) } },
+  );
+
+  if (!response.ok) {
+    if (response.status === 410) {
+      const body = await readErrorBody(response);
+      throw new AttachmentRemovedError(
+        extractSafeMessage(body) ??
+          "This attachment has been removed and can no longer be downloaded.",
+      );
+    }
+    throw new Error(
+      `Failed to download attachment (status ${response.status})`,
+    );
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFromContentDisposition(
+    response.headers.get("Content-Disposition"),
+  );
+  return { blob, filename };
 }

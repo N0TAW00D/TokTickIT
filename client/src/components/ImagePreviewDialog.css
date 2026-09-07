@@ -1,0 +1,75 @@
+/* Inline image lightbox for an active image attachment (ui-spec.md §10
+   "Preview (opens inline lightbox)", BR-34). Shares the modal-shell look
+   with RemoveAttachmentDialog. */
+
+.zen-image-preview__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--zen-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--zen-space-group-gap);
+  z-index: 1000;
+}
+
+.zen-image-preview {
+  width: 100%;
+  max-width: 880px;
+  max-height: calc(100vh - 2 * var(--zen-space-group-gap));
+  display: flex;
+  flex-direction: column;
+  background: var(--zen-surface);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+.zen-image-preview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-image-preview__title {
+  margin: 0;
+  font-size: var(--zen-font-size-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-image-preview__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.zen-image-preview__image {
+  max-width: 100%;
+  max-height: calc(100vh - 6 * var(--zen-space-group-gap));
+  object-fit: contain;
+}
+
+.zen-image-preview__message {
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-body);
+  padding: var(--zen-space-group-gap);
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .zen-image-preview {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+
+  .zen-image-preview__header .zen-btn {
+    flex-shrink: 0;
+  }
+}

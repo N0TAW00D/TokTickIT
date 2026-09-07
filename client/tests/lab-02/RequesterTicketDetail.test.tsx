@@ -175,10 +175,13 @@ describe("C-29 Ticket Detail read-only render", () => {
     expect(detail.getByText("Medium")).toBeInTheDocument();
     expect(detail.getByText("New")).toBeInTheDocument();
 
-    // This is the read-only detail view — no field is an editable control.
-    expect(container.querySelectorAll("input")).toHaveLength(0);
-    expect(container.querySelectorAll("textarea")).toHaveLength(0);
-    expect(container.querySelectorAll("select")).toHaveLength(0);
+    // This is the read-only detail view — no *header* field is an editable
+    // control (BR-39). Scoped to the ticket-information card: the separate
+    // attachments card below it carries the Add-attachment control's own
+    // (visually hidden) file input, which is legitimate (ui-spec.md §10).
+    expect((card as HTMLElement).querySelectorAll("input")).toHaveLength(0);
+    expect((card as HTMLElement).querySelectorAll("textarea")).toHaveLength(0);
+    expect((card as HTMLElement).querySelectorAll("select")).toHaveLength(0);
   });
 
   it("renders the attachment from the API response in an Attachments section (slice 14a)", async () => {
@@ -449,5 +452,72 @@ describe("C-18 remove flow integration on Ticket Detail", () => {
     expect(
       screen.queryByRole("button", { name: /^remove$/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// Not a tests.md row on its own, but required by the task (slice 14d): an
+// immediate upload from the Add control on Ticket Detail must append the
+// new row AND bump BOTH counts in the "N active / M total" heading, via
+// TicketDetailScreen's own handleAttachmentAdded splice.
+describe("Add-attachment flow integration on Ticket Detail (AC-20 path)", () => {
+  it("uploading a file adds its row and raises the heading from '1 active / 1 total' to '2 active / 2 total'", async () => {
+    const uploaded = {
+      id: 99,
+      ticketId: 1,
+      originalFilename: "new-evidence.pdf",
+      mimeType: "application/pdf",
+      fileSize: 4096,
+      isRemoved: false,
+      removedAt: null,
+      removedReason: null,
+      createdAt: "2026-09-02T08:15:10.000Z",
+    };
+
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (input === TICKET_URL && init?.method === undefined) {
+        return jsonResponse(200, TICKET);
+      }
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(201, uploaded);
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderScreen();
+    await screen.findByText(TICKET.ticketNumber);
+
+    // Falsifiable pre-state.
+    expect(
+      screen.getByRole("heading", { name: "Attachments (1 active / 1 total)" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/attachment files/i), {
+      target: {
+        files: [
+          new File([new Uint8Array(4096)], "new-evidence.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
+    });
+
+    expect(await screen.findByText("new-evidence.pdf")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Attachments (2 active / 2 total)" }),
+    ).toBeInTheDocument();
+
+    const uploadCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST",
+    );
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0][1]?.headers).toMatchObject({
+      "X-Requester-Id": "7",
+    });
   });
 });

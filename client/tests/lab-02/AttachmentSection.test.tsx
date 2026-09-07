@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -20,6 +20,9 @@ import {
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 import {
+  AttachmentRemovedError,
+  downloadAttachment,
+  filenameFromContentDisposition,
   removeAttachment,
   RemoveAttachmentError,
   uploadAttachment,
@@ -894,21 +897,32 @@ const ATTACHMENT_DELETE_URL = `${API_BASE_URL}/api/attachments/1`;
 function AttachmentSectionHarness({
   initialAttachments,
   requesterId = 7,
+  ticketId = 1,
+  withUpload = false,
 }: {
   initialAttachments: TicketAttachment[];
   requesterId?: number;
+  ticketId?: number;
+  /** When true, wire `onAttachmentAdded` so the Add-attachment control renders. */
+  withUpload?: boolean;
 }) {
   const [attachments, setAttachments] = useState(initialAttachments);
   return (
     <AttachmentSection
       attachments={attachments}
       requesterId={requesterId}
+      ticketId={ticketId}
       onAttachmentRemoved={(updated) =>
         setAttachments((previous) =>
           previous.map((attachment) =>
             attachment.id === updated.id ? updated : attachment,
           ),
         )
+      }
+      onAttachmentAdded={
+        withUpload
+          ? (added) => setAttachments((previous) => [...previous, added])
+          : undefined
       }
     />
   );
@@ -1433,5 +1447,487 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
       "Content-Type": "application/json",
     });
     expect(JSON.parse(init.body as string)).toEqual({ reason: "ok reason" });
+  });
+});
+
+// --- Slice 14d: per-attachment Download / Preview, and Add-attachment. ---
+//
+// tests.md rows touched: C-21 (Download present on active rows — the
+// button now actually does something), C-17 (Add disabled at 5). The rest
+// are behaviours the task pins that no tests.md row spells out verbatim:
+// the download request shape + Content-Disposition handling, a 410 on
+// download surfaced not crashed, the preview lightbox, and immediate
+// upload on Ticket Detail.
+
+const DOWNLOAD_URL = (id: number) =>
+  `${API_BASE_URL}/api/attachments/${id}/download`;
+
+/** A `Response` stand-in carrying a Blob body + a Content-Disposition header. */
+function blobResponse(
+  status: number,
+  {
+    body = new Blob(["file-bytes"], { type: "application/pdf" }),
+    contentDisposition,
+    jsonBody,
+  }: {
+    body?: Blob;
+    contentDisposition?: string;
+    jsonBody?: unknown;
+  } = {},
+): Promise<Response> {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    blob: () => Promise.resolve(body),
+    json: () => Promise.resolve(jsonBody ?? {}),
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === "content-disposition"
+          ? (contentDisposition ?? null)
+          : null,
+    },
+  } as unknown as Response);
+}
+
+/** jsdom has no object-URL support — stub it so saveBlob / the lightbox work. */
+function installObjectUrlStub() {
+  const created: Blob[] = [];
+  const revoked: string[] = [];
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn((blob: Blob) => {
+      created.push(blob);
+      return `blob:mock/${created.length}`;
+    }),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn((url: string) => {
+      revoked.push(url);
+    }),
+  });
+  return { created, revoked };
+}
+
+describe("downloadAttachment (api-spec.md §4.3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("GETs /api/attachments/:id/download with the X-Requester-Id header and returns the blob + Content-Disposition filename", async () => {
+    const pdfBlob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    const fetchMock = vi.fn(() =>
+      blobResponse(200, {
+        body: pdfBlob,
+        contentDisposition: 'attachment; filename="battery-report.pdf"',
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await downloadAttachment(9, 42);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:3000/api/attachments/42/download");
+    expect(init.headers).toMatchObject({ "X-Requester-Id": "9" });
+    expect(result.blob).toBe(pdfBlob);
+    expect(result.filename).toBe("battery-report.pdf");
+  });
+
+  it("returns filename: null when the response carries no Content-Disposition (caller falls back to originalFilename)", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(200, {})));
+
+    const result = await downloadAttachment(1, 1);
+    expect(result.filename).toBeNull();
+  });
+
+  it("raises AttachmentRemovedError (not a generic Error) on a 410 ATTACHMENT_REMOVED", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        blobResponse(410, {
+          jsonBody: {
+            error: "ATTACHMENT_REMOVED",
+            message: "This attachment has been removed.",
+          },
+        }),
+      ),
+    );
+
+    const promise = downloadAttachment(1, 5);
+    await expect(promise).rejects.toBeInstanceOf(AttachmentRemovedError);
+    await expect(promise).rejects.toHaveProperty(
+      "message",
+      "This attachment has been removed.",
+    );
+  });
+
+  it.each([
+    [404, "not owned / unknown"],
+    [500, "server fault"],
+  ])("raises a plain Error, not AttachmentRemovedError, on a %i (%s)", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(status, {})));
+
+    const promise = downloadAttachment(1, 5);
+    await expect(promise).rejects.toBeInstanceOf(Error);
+    await expect(promise).rejects.not.toBeInstanceOf(AttachmentRemovedError);
+  });
+});
+
+describe("filenameFromContentDisposition", () => {
+  it.each([
+    ['attachment; filename="battery-report.pdf"', "battery-report.pdf"],
+    ["attachment; filename=plain.png", "plain.png"],
+    [
+      "attachment; filename*=UTF-8''caf%C3%A9%20menu.pdf",
+      "café menu.pdf",
+    ],
+    ['inline; filename="a b.webp"', "a b.webp"],
+  ])("parses %j -> %j", (header, expected) => {
+    expect(filenameFromContentDisposition(header)).toBe(expected);
+  });
+
+  it.each([[null], [undefined], [""], ["attachment"]])(
+    "returns null for %j",
+    (header) => {
+      expect(filenameFromContentDisposition(header)).toBeNull();
+    },
+  );
+});
+
+describe("Attachment download wiring on Ticket Detail (AC-33)", () => {
+  let clicked: { href: string; download: string }[];
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    clicked = [];
+    clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push({ href: this.href, download: this.download });
+      });
+  });
+
+  afterEach(() => {
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("clicking Download fetches the bytes and saves them under the Content-Disposition filename", async () => {
+    installObjectUrlStub();
+    const fetchMock = vi.fn(() =>
+      blobResponse(200, {
+        contentDisposition: 'attachment; filename="server-name.pdf"',
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^download$/i }));
+
+    await vi.waitFor(() => expect(clicked).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      DOWNLOAD_URL(REMOVABLE_ATTACHMENT.id),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Requester-Id": "7" }),
+      }),
+    );
+    // Server-provided name wins over the attachment's own originalFilename.
+    expect(clicked[0].download).toBe("server-name.pdf");
+    expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("falls back to the attachment's originalFilename when the response has no Content-Disposition", async () => {
+    installObjectUrlStub();
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(200, {})));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^download$/i }));
+
+    await vi.waitFor(() => expect(clicked).toHaveLength(1));
+    expect(clicked[0].download).toBe(REMOVABLE_ATTACHMENT.originalFilename);
+  });
+
+  it("surfaces a role=alert (does not crash) when the attachment was removed between page load and click (410)", async () => {
+    installObjectUrlStub();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        blobResponse(410, {
+          jsonBody: {
+            error: "ATTACHMENT_REMOVED",
+            message: "This attachment has been removed.",
+          },
+        }),
+      ),
+    );
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^download$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/was removed/i);
+    // No download was triggered, and the row is still on screen.
+    expect(clicked).toHaveLength(0);
+    expect(
+      screen.getByText(REMOVABLE_ATTACHMENT.originalFilename),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces a role=alert on a non-410 download failure", async () => {
+    installObjectUrlStub();
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(500, {})));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^download$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /could not download/i,
+    );
+  });
+});
+
+const ACTIVE_IMAGE_ROW: TicketAttachment = {
+  id: 2,
+  originalFilename: "photo.png",
+  mimeType: "image/png",
+  fileSize: 819200,
+  isRemoved: false,
+  removedAt: null,
+  removedReason: null,
+  createdAt: "2026-09-01T08:16:00.000Z",
+};
+
+describe("Image preview lightbox (ui-spec.md §10, BR-34)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("Preview on an image row opens an accessible modal lightbox that fetches and shows the image", async () => {
+    installObjectUrlStub();
+    const imageBlob = new Blob(["img"], { type: "image/png" });
+    const fetchMock = vi.fn(() => blobResponse(200, { body: imageBlob }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[ACTIVE_IMAGE_ROW]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAccessibleName("photo.png");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      DOWNLOAD_URL(ACTIVE_IMAGE_ROW.id),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Requester-Id": "7" }),
+      }),
+    );
+
+    const img = await within(dialog).findByRole("img", { name: "photo.png" });
+    expect(img).toHaveAttribute("src", expect.stringMatching(/^blob:mock/));
+  });
+
+  it("Esc closes the lightbox and returns focus to the triggering Preview button; the object URL is revoked", async () => {
+    const stub = installObjectUrlStub();
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(200, {
+      body: new Blob(["img"], { type: "image/png" }),
+    })));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[ACTIVE_IMAGE_ROW]} />,
+    );
+    const previewButton = screen.getByRole("button", { name: /^preview$/i });
+    fireEvent.click(previewButton);
+
+    await screen.findByRole("dialog");
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(previewButton).toHaveFocus();
+    await vi.waitFor(() =>
+      expect(stub.revoked.length).toBeGreaterThan(0),
+    );
+  });
+
+  it("the Close button also closes the lightbox", async () => {
+    installObjectUrlStub();
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(200, {
+      body: new Blob(["img"], { type: "image/png" }),
+    })));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[ACTIVE_IMAGE_ROW]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^preview$/i }));
+    await screen.findByRole("dialog");
+
+    fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows a role=alert inside the lightbox when the image fails to load", async () => {
+    installObjectUrlStub();
+    vi.stubGlobal("fetch", vi.fn(() => blobResponse(500, {})));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[ACTIVE_IMAGE_ROW]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      /could not load this preview/i,
+    );
+  });
+});
+
+describe("Add attachment on Ticket Detail (AC-20, ui-spec.md §10)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function uploadResponse(fileName: string): Promise<Response> {
+    return jsonResponse(201, {
+      id: Math.floor(Math.random() * 1e6),
+      ticketId: 1,
+      originalFilename: fileName,
+      mimeType: "application/pdf",
+      fileSize: 2048,
+      isRemoved: false,
+      removedAt: null,
+      removedReason: null,
+      createdAt: "2026-09-02T08:15:10.000Z",
+    });
+  }
+
+  it("uploads a selected valid file immediately and adds its row (no submit step)", async () => {
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return uploadResponse("added.pdf");
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: { files: [makeFile("added.pdf", 2048, "application/pdf")] },
+    });
+
+    expect(await screen.findByText("added.pdf")).toBeInTheDocument();
+    const uploadCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST",
+    );
+    expect(uploadCalls).toHaveLength(1);
+  });
+
+  it("disables the Add control with the 'Maximum of 5 active attachments' tooltip once 5 active attachments exist (AC-20)", () => {
+    const fiveActive: TicketAttachment[] = Array.from({ length: 5 }, (_, i) => ({
+      ...REMOVABLE_ATTACHMENT,
+      id: 100 + i,
+      originalFilename: `f${i}.pdf`,
+    }));
+
+    render(
+      <AttachmentSectionHarness initialAttachments={fiveActive} withUpload />,
+    );
+
+    const addButton = screen.getByRole("button", { name: /add attachment/i });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveAttribute(
+      "title",
+      "Maximum of 5 active attachments",
+    );
+  });
+
+  it("counts only active attachments toward the ceiling — 4 active + 2 removed still allows Add", () => {
+    const mixed: TicketAttachment[] = [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        ...REMOVABLE_ATTACHMENT,
+        id: 200 + i,
+        originalFilename: `a${i}.pdf`,
+      })),
+      ...Array.from({ length: 2 }, (_, i) => ({
+        ...REMOVABLE_ATTACHMENT,
+        id: 300 + i,
+        originalFilename: `r${i}.pdf`,
+        isRemoved: true,
+        removedAt: "2026-09-01T02:02:00.000Z",
+        removedReason: "gone",
+      })),
+    ];
+
+    render(<AttachmentSectionHarness initialAttachments={mixed} withUpload />);
+    expect(
+      screen.getByRole("button", { name: /add attachment/i }),
+    ).toBeEnabled();
+  });
+
+  it("surfaces a role=alert when the server rejects the upload (409 ATTACHMENT_LIMIT) and keeps the section usable", async () => {
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(409, {
+          error: "ATTACHMENT_LIMIT",
+          message: "Ticket already has 5 active attachments.",
+        });
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: { files: [makeFile("sixth.pdf", 2048, "application/pdf")] },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Maximum of 5 active attachments");
+    // The row that failed to upload is not added.
+    expect(screen.queryByText("sixth.pdf")).not.toBeInTheDocument();
+    // The existing row is still there and the Add control still works.
+    expect(
+      screen.getByText(REMOVABLE_ATTACHMENT.originalFilename),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /add attachment/i }),
+    ).toBeEnabled();
+  });
+
+  it("does not render the Add control when onAttachmentAdded is not provided", () => {
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /add attachment/i }),
+    ).not.toBeInTheDocument();
   });
 });
