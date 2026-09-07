@@ -218,12 +218,13 @@ tablet 820×1024, mobile 375×812. (§1.4 lists 834×1112 / 390×844 for tablet 
 suite's values are what the committed screenshots were actually taken at and are used here.) Evidence: the committed screenshots under
 `artifacts/lab-02/screenshots/` (the `{create-ticket,my-tickets,ticket-detail}/{desktop,tablet,mobile}`
 set plus `submission/part-6*/`, `submission/part-7*/`, `submission/part-8*/`), the S-01
-computed-colour check and the R-01/R-04/R-06 responsive tests in `e2e/lab-02/responsive.spec.ts`.
+stylesheet token check in `client/tests/lab-02/ui-style.test.tsx` and the R-01/R-04/R-06
+responsive tests in `e2e/lab-02/responsive.spec.ts`.
 
 | # | Check | ui-spec ref | Result | Evidence / note |
 |---|---|---|---|---|
-| V-01 | Header, primary buttons use `--zen-primary`; active nav marked + `aria-current` | §2, §4 | ☑ | Header + `+ Create Ticket` compute to `rgb(0, 107, 60)` (`#006b3c`) — S-01. Active nav link underlined and carries `aria-current="page"` (`AppShell.tsx:53`). |
-| V-02 | Page bg `--zen-page-bg`; cards white + restrained shadow + `--zen-border` | §3 | ☑ | `document.body` computes to `rgb(245, 247, 246)` (`#f5f7f6`) — S-01. Cards white with a 1px `--zen-border` and a low-spread shadow on every screen shot. |
+| V-01 | Header, primary buttons use `--zen-primary`; active nav marked + `aria-current` | §2, §4 | ☑ | Header + `+ Create Ticket` render `--zen-primary` = `rgb(0, 107, 60)` (`#006b3c`); S-01 verifies theme.css defines the token and the components reference it. Active nav link underlined and carries `aria-current="page"` (`AppShell.tsx:53`). |
+| V-02 | Page bg `--zen-page-bg`; cards white + restrained shadow + `--zen-border` | §3 | ☑ | `body` background is `--zen-page-bg` = `rgb(245, 247, 246)` (`#f5f7f6`) — S-01. Cards white with a 1px `--zen-border` and a low-spread shadow on every screen shot. |
 | V-03 | Editable fields white/neutral border; read-only fields clearly distinct | §5.3 | ☑ | Create Ticket: Ticket No./Date/Requester render filled grey-green with no input border; Category/Related System/Summary/Description are white with a neutral border. Ticket Detail: every field in the read-only style. |
 | V-04 | Required `*` present **and** a validation message shows on error, directly under the field | §5.2 | ☑ | `part-6*/08-create-ticket-validation-failure.png`: red `*` on every required field; on submit each errored field shows a red message immediately below it ("Category is required.", "Summary must be between 5 and 140 characters.", etc.). |
 | V-05 | One input height; Description textarea taller, resizes without breaking layout | §5.3 | ☑ | Text inputs and selects share one height; the Description textarea is taller with a visible resize handle; the layout holds at all three viewports. |
