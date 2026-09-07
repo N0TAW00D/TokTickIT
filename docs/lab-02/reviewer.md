@@ -6,8 +6,8 @@ through a peer-reviewed pull request; there were no direct commits to `main` or
 
 > **Draft — not final.** Current through **PR #59**. PRs #21–#53 are merged; #54, #56–#59 are
 > open at the time of writing (#45 and #55 closed). Sections 2 and 3 track the open PRs' latest
-> state; both, and §5, need a final pass once the remaining PRs and the release PR merge and the
-> author's reflection is settled with the team.
+> state; both, and §5, need a final pass once the remaining PRs and the release PR merge; the
+> author reviews the drafted ai-use.md reflection and the §5 reciprocity note.
 
 ## 1. Reviewer identity
 
@@ -60,7 +60,7 @@ reviewer (an approval on the first pass is 1).
 | [#54](https://github.com/N0TAW00D/TokTickIT/pull/54) | E2E-01 full attachment journey & E2E-02 failure / soft-removal (#20) | **Changes requested** (E2E-02's "Upload failed — retry" affordance not implemented) → fix in #59 | 1+ |
 | [#55](https://github.com/N0TAW00D/TokTickIT/pull/55) | Add `@types/node` and `@types/pg` to the `e2e/` workspace (#20) | **Closed** without review — workspace hygiene only, not on any rubric path | — |
 | [#56](https://github.com/N0TAW00D/TokTickIT/pull/56) | Answer Part 8 evidence: Ticket Detail & attachment lifecycle (#20) | Approved first pass | 1 |
-| [#57](https://github.com/N0TAW00D/TokTickIT/pull/57) | Add `docs/lab-02/reviewer.md` and `ai-use.md` (this record) (#20) | **Changes requested** (stale outcomes; reflection still a TODO) → updating | 1+ |
+| [#57](https://github.com/N0TAW00D/TokTickIT/pull/57) | Add `docs/lab-02/reviewer.md` and `ai-use.md` (this record) (#20) | **Changes requested** (stale outcomes; reflection was a TODO) → outcomes updated, reflection drafted | 1+ |
 | [#58](https://github.com/N0TAW00D/TokTickIT/pull/58) | Refresh README e2e section and root `.gitignore` (#20) | **Changes requested** (README implied unmerged specs were on staging) → reworded | 1+ |
 | [#59](https://github.com/N0TAW00D/TokTickIT/pull/59) | Ticket Detail "Upload failed — retry" row with Retry and Dismiss (#17) — the affordance #54's E2E-02 needs | Review pending | — |
 

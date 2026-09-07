@@ -40,17 +40,30 @@ test infrastructure, verification by sabotage, debugging, responding to review, 
 
 ## My Reflection
 
-> TODO: `N0TAW00D` to write the personal reflection (2–3 sentences, in the first person). This must
-> be the author's own words, not the agent's.
+The workflow that worked for me was a spec-driven loop: write the frozen contract first
+(`specification.md`, `api-spec.md`, `ui-spec.md`, `tests.md`), then have an agent implement one
+small slice against it, then audit that slice before it went anywhere — and if the audit failed,
+send the slice back and go round again until it held. Freezing the docs up front was the part
+that paid off most: every later disagreement — with an agent or with the reviewer — could be
+settled by quoting a line of the contract instead of arguing about intent, and the agents
+couldn't quietly redesign a screen or an endpoint because the shape was already fixed.
 
-Prompts to help you write it:
+The audit step earned its place. A passing test suite was not the same as a correct slice: the
+pagination page-reset had real gaps that every test still went green over, a date formatter shipped
+rendering "Sept" that the suite never noticed because the test built its expectation by calling the
+same broken function, and one of my own E2E tests asserted a condition that could never fail. I
+only caught those by deliberately breaking the implementation and checking the right test failed
+by name. But sabotage has a blind spot of its own — it proves a test is wired, not that its
+expected value is right — so a test that confidently asserts the wrong answer passes the audit and
+is still wrong.
 
-- Where did the agent's "done" claim not hold up under audit? (e.g. the pagination page-reset gaps,
-  the "Sept" date-format bug that a passing suite hid, the `Content-Disposition` 500.)
-- What did the sabotage-based verification catch that the passing test suite did not — and what did
-  sabotage *still* miss? (a test that confidently asserts the wrong expected value is fully
-  falsifiable and still wrong.)
-- What was the cost and the benefit of splitting the work into a Claude Code controller plus
-  single-slice Sonnet subagents, versus doing it in one pass?
-- Which class of defect did the human peer reviewer (`Palapluem`) catch that the agent's own audit
-  did not, and vice versa?
+Splitting the work into a controller plus single-slice subagents cost real time and produced a lot
+of small PRs to coordinate, and it added its own failure mode — a merge that landed on the wrong
+branch, branches going stale as others merged. What I got back was that the review was always
+against a settled base, and the audit stayed sequential and focused, which is where the value was.
+
+The human reviewer still caught things neither the agent nor my audit did: that a `ui-spec` row
+state ("Upload failed — retry" with Retry and Dismiss) was simply never built, and that two of my
+E2E tests only passed in one execution order. The lesson I'm taking is that "the test documents
+the current behaviour" is not an acceptable answer when the behaviour disagrees with the frozen
+contract — that is a defect to fix, not to write down.
