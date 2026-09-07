@@ -40,9 +40,6 @@
 )
 #let repo = "https://github.com/N0TAW00D/TokTickIT"
 #let pr(n) = link(repo + "/pull/" + str(n))[\##n]
-#let pending(t) = block(fill: rgb("#fff4e5"), inset: 6pt, radius: 3pt, width: 100%)[
-  #text(fill: rgb("#8a5a00"), weight: "bold")[TO ADD BEFORE SUBMISSION: ] #t
-]
 
 #align(center)[
   #v(3cm)
@@ -84,12 +81,25 @@ ba1ef3c  Merge pull request #47 from N0TAW00D/feat/14c-remove-dialog
  …  (many more feature-branch merges) …
 ```
 
-#pending[A screenshot of `git log --graph --oneline main` (or the GitHub Network graph) on the
-*final* `main`, showing feature branches merging into `lab2-staging` and `lab2-staging` merging
-into `main`; and a screenshot of the GitHub Project Kanban with every Issue in *Done*. The board
-was swept on 2026-09-07: Issues #1–#19 are *Done* and closed; #20 moves to *Done* when the
-release PR merges. Kanban columns used: Backlog → Specified → Started → PR Review → (Fixing) →
-Done.]
+The IDE Git-graph view of the same history, most-recent first. Every labelled node is a
+`Merge pull request #NN` commit onto `lab2-staging`; `main` sits at the Lab 1 release
+(`Merge pull request #12`) and receives the whole of `lab2-staging` through the single release
+PR (#pr(64)'s successor, opened `lab2-staging → main` once #pr(62) — this document — merges).
+
+#shot("submission/part-1-workflow/git-graph-1-recent.png", [Git graph, most recent — the
+`docs/20-submission-pdf` branch (this document) one commit ahead of `lab2-staging`, over the
+#pr(57)–#pr(63) merges.])
+#shot("submission/part-1-workflow/git-graph-2-mid.png", [Git graph, middle — the #pr(38)–#pr(53)
+merge band: attachment lifecycle, My Tickets, E2E harness and responsive evidence.])
+#shot("submission/part-1-workflow/git-graph-3-early.png", [Git graph, earliest — #pr(21)
+(spec contract) through the #pr(36) merges, down to `main` at the Lab 1 release.])
+
+*Project board.* Swept 2026-09-07: Issues #1–#19 are *Done* and closed; #20 (this integration
+work) is the last card and moves to *Done* when the release PR merges. Columns:
+Backlog → Specified → Started → PR Review → (Fixing) → Done.
+
+#shot("submission/part-1-workflow/kanban-all-done.png", [GitHub Project "TokTickIT Individual
+Sprints": Specified / Started / PR Review / Fixing all empty; every delivered Issue in *Done*.])
 
 *Reviewer record.* Rendered copy: `docs/lab-02/reviewer.md`
 (#link(repo + "/blob/main/docs/lab-02/reviewer.md")[view on GitHub]). It lists the reviewer
@@ -120,7 +130,9 @@ docs/lab-02/         specification.md, api-spec.md, ui-spec.md, tests.md, review
 artifacts/lab-02/screenshots/   committed Playwright screenshots
 ```
 
-#pending[A screenshot of this directory tree open in your IDE (VS Code Explorer panel).]
+#shot("submission/part-1-workflow/directory-tree.png", [The repository in the VS Code Explorer:
+`client/`, `server/` and `e2e/` each an independent npm package; `docs/lab-02/` the frozen
+contract; `artifacts/lab-02/screenshots/` the committed evidence.])
 
 
 = Answer Part 2: Specification-Driven Development
@@ -148,8 +160,11 @@ $ git log --reverse --format='%ci  %h  %s' --since=2026-09-01 -- server/src clie
 2026-09-06 11:23:14 +0700  b135e65  feat(lab-02): add Zen Green presentational foundation
 ```
 
-#pending[One screenshot of #pr(21) on GitHub showing "merged … on Sep 1" next to the
-implementation PR list (#pr(22) onward, Sep 6+) — GitHub renders both timelines with dates.]
+#shot("submission/part-2-spec/pr-timeline-early.png", [GitHub PR list, oldest first: #pr(21)
+(the spec / API / UI / test-plan contract) *merged last week*; the first implementation PRs
+#pr(22)–#pr(39) *merged yesterday* — the contract landed before any implementation branch.])
+#shot("submission/part-2-spec/pr-timeline-recent.png", [GitHub PR list, most recent: 1 open
+(#pr(62), this document), 51 closed — the full peer-reviewed Lab 2 PR set.])
 
 
 = Answer Part 3: Test-Driven Development and Traceability
@@ -165,30 +180,17 @@ least one passing test.
 
 *Passing test output.*
 
-#pending[Re-run these three commands *on `main`* after the release PR merges and paste the
-final output. The counts below are from `lab2-staging` at the time this document was generated.]
+Run from a clean `lab2-staging` checkout (the exact tree this release PR merges into `main`):
 
-`npm run test:server` — Vitest + Supertest, `toktickit_test` database:
+#shot("submission/part-3-tests/test-server.png", [`npm run test:server` — Vitest + Supertest
+against `toktickit_test`: *13 files, 187 passed*.])
+#shot("submission/part-3-tests/test-client.png", [`npm run test:client` — Vitest + Testing
+Library (jsdom): *11 files, 206 passed* — includes S-01's Zen Green token check.])
+#shot("submission/part-3-tests/test-e2e.png", [`npm run test:e2e` — Playwright, real client +
+real API + `toktickit_e2e`: *77 passed* (harness smoke, E2E-01..E2E-05, R-01..R-06 + R-01b,
+Answer Part 6/7/8 evidence specs).])
 
-```
- Test Files  13 passed (13)
-      Tests  187 passed (187)
-```
-
-`npm run test:client` — Vitest + Testing Library, jsdom:
-
-```
- Test Files  11 passed (11)
-      Tests  202 passed (202)
-```
-
-`npm run test:e2e` — Playwright, real client + real API + `toktickit_e2e` database:
-
-```
-  68+ passed  (harness smoke, E2E-01..E2E-05, R-01..R-06, S-01, Answer Part 6/7/8 evidence)
-```
-
-The root `npm run test:all` runs all three in order.
+The root `npm run test:all` runs all three in order: *470 automated checks, all passing*.
 
 
 = Answer Part 4: AI Use with Reflection
