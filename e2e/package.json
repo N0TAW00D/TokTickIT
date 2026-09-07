@@ -4,6 +4,10 @@
   "version": "1.0.0",
   "description": "Playwright E2E + responsive harness for TokTickIT (docs/lab-02/tests.md §1.1)",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=11.18.0"
+  },
   "scripts": {
     "db:e2e:reset": "tsx scripts/reset-e2e-db.ts",
     "pretest:e2e": "npm run db:e2e:reset",
