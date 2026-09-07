@@ -190,6 +190,39 @@ describe("C-29 Ticket Detail read-only render", () => {
     expect(screen.getByText("battery-report.pdf")).toBeInTheDocument();
   });
 
+  // ui-spec.md:431 pins the heading format `Attachments (2 active / 3 total)`
+  // — two counts that must differ. TICKET's single active attachment makes
+  // active and total identical, so it cannot tell the two apart: dropping the
+  // `!isRemoved` filter leaves every other test green. This fixture carries
+  // one active and one removed attachment so the counts diverge.
+  it("counts active and total attachments separately in the section heading", async () => {
+    mockFetch(() =>
+      jsonResponse(200, {
+        ...TICKET,
+        attachments: [
+          TICKET.attachments[0],
+          {
+            id: 6,
+            originalFilename: "screenshot.png",
+            mimeType: "image/png",
+            fileSize: 51200,
+            isRemoved: true,
+            removedAt: "2026-09-01T09:02:00.000Z",
+            removedReason: "Wrong screenshot",
+            createdAt: "2026-09-01T08:20:00.000Z",
+          },
+        ],
+      }),
+    );
+    renderScreen();
+
+    await screen.findByText(TICKET.ticketNumber);
+
+    expect(
+      screen.getByRole("heading", { name: "Attachments (1 active / 2 total)" }),
+    ).toBeInTheDocument();
+  });
+
   it("sends X-Requester-Id on the detail request", async () => {
     const fetchMock = mockFetch();
     renderScreen({ requesterId: 42 });
