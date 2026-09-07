@@ -1224,11 +1224,12 @@ describe("AttachmentSection distinguishes 409 ALREADY_REMOVED from a field error
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
+    const { container } = render(
       <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
-    fireEvent.change(screen.getByLabelText(/reason for removal/i), {
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    fireEvent.change(reasonField, {
       target: { value: "Valid reason" },
     });
     fireEvent.click(
@@ -1237,6 +1238,15 @@ describe("AttachmentSection distinguishes 409 ALREADY_REMOVED from a field error
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("This attachment is already removed.");
+
+    // The message renders in the dedicated conflict slot, not the field's
+    // own error slot — a 409 must not masquerade as a bad-reason field
+    // error even though both currently use role="alert".
+    expect(alert).toHaveClass("zen-remove-dialog__conflict");
+    expect(
+      container.querySelector("#remove-attachment-reason-error"),
+    ).not.toBeInTheDocument();
+    expect(reasonField).not.toHaveAttribute("aria-invalid", "true");
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(
