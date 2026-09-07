@@ -61,6 +61,45 @@
   min-width: 0;
 }
 
+/* Per-control widths so no select clips its own longest option
+   (ui-spec.md:549 — "Filters, sort, Clear Filters, and pagination are
+   usable and unclipped at every viewport").
+
+   A uniform 140px basis gave all four controls the same 150.3px box, too
+   narrow for two of them and ~40px too wide for the other two. Measured at
+   the 1280px desktop viewport against the rendered font (a hidden probe
+   span + getBoundingClientRect), not estimated:
+
+     Sort      "Last updated (newest)"  needs 186.9  had 150.3  (-36.6)
+     Category  "Account and Access"     needs 171.5  had 150.3  (-21.2)
+     Priority  "All Priorities"         needs 110.0  had 150.3  (+40.3)
+     Status    "All Statuses"           needs 109.5  had 150.3  (+40.8)
+
+   The 57.8px the first two are short sits well inside the 81.1px the other
+   two waste, so this redistributes the row only — the bar's total width and
+   the search field beside it are untouched. Bases total 595px against the
+   ~601px the row already occupies, and `flex-grow: 1` splits the remainder,
+   leaving every control at or above its measured need (verified after:
+   +4.7 / +5.1 / +6.6 / +7.1).
+
+   Scoped to `min-width: 768px` so the mobile rule below (full-width stacked
+   controls) still wins. `:has()` avoids adding a prop to the shared
+   SelectField, which has no className escape hatch. */
+@media (min-width: 768px) {
+  .zen-my-tickets__filters > *:has(#my-tickets-sort) {
+    flex-basis: 190px;
+  }
+
+  .zen-my-tickets__filters > *:has(#my-tickets-category) {
+    flex-basis: 175px;
+  }
+
+  .zen-my-tickets__filters > *:has(#my-tickets-priority),
+  .zen-my-tickets__filters > *:has(#my-tickets-status) {
+    flex-basis: 115px;
+  }
+}
+
 /* Mobile: controls wrap to full-width stacked selects (ui-spec.md §9, §11 —
    no horizontal page scroll at any viewport). */
 @media (max-width: 767px) {
