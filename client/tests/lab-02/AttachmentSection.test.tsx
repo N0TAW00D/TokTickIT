@@ -1883,7 +1883,132 @@ describe("Add attachment on Ticket Detail (AC-20, ui-spec.md §10)", () => {
     ).toBeEnabled();
   });
 
-  it("surfaces a role=alert when the server rejects the upload (409 ATTACHMENT_LIMIT) and keeps the section usable", async () => {
+  it("renders a failed-upload row (file name + 'Upload failed — retry') when the server rejects the upload, and adds no active row", async () => {
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(500, {});
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: { files: [makeFile("broken.pdf", 2048, "application/pdf")] },
+    });
+
+    const group = await screen.findByRole("alert");
+    expect(group).toHaveTextContent("broken.pdf");
+    expect(group).toHaveTextContent("Upload failed — retry");
+    expect(within(group).getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(within(group).getByRole("button", { name: "Dismiss" })).toBeEnabled();
+
+    // No active AttachmentList row for the failed file — only the
+    // pre-existing attachment has a Download control.
+    expect(
+      screen.getAllByRole("button", { name: /download/i }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: /add attachment/i }),
+    ).toBeEnabled();
+  });
+
+  it("Retry on a failed-upload row re-attempts the upload; on success the row disappears and the active attachment is reported", async () => {
+    let attempts = 0;
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        attempts += 1;
+        return attempts === 1
+          ? jsonResponse(500, {})
+          : uploadResponse("retried.pdf");
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: { files: [makeFile("retried.pdf", 2048, "application/pdf")] },
+    });
+
+    const group = await screen.findByRole("alert");
+    fireEvent.click(within(group).getByRole("button", { name: "Retry" }));
+
+    // The failed row is gone and a real active row (with its own Download
+    // control) appeared alongside the pre-existing attachment's.
+    await vi.waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: /download/i }),
+      ).toHaveLength(2),
+    );
+    expect(
+      screen.queryByText("Upload failed — retry"),
+    ).not.toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
+
+  it("Dismiss removes the failed-upload row and does nothing else (no upload, no attachment added)", async () => {
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(500, {});
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: { files: [makeFile("gone.pdf", 2048, "application/pdf")] },
+    });
+
+    const group = await screen.findByRole("alert");
+    fireEvent.click(within(group).getByRole("button", { name: "Dismiss" }));
+
+    expect(
+      screen.queryByText("Upload failed — retry"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("gone.pdf")).not.toBeInTheDocument();
+    // Only the initial upload attempt was made — Dismiss never uploads.
+    const uploadCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST",
+    );
+    expect(uploadCalls).toHaveLength(1);
+    // No active row was added for the dismissed file.
+    expect(
+      screen.getAllByRole("button", { name: /download/i }),
+    ).toHaveLength(1);
+  });
+
+  it("a 409 ATTACHMENT_LIMIT rejection surfaces the 'Maximum of 5 active attachments' wording in the failed-row area", async () => {
     const fetchMock = vi.fn((input: string, init?: RequestInit) => {
       if (
         input === `${API_BASE_URL}/api/tickets/1/attachments` &&
@@ -1909,10 +2034,10 @@ describe("Add attachment on Ticket Detail (AC-20, ui-spec.md §10)", () => {
       target: { files: [makeFile("sixth.pdf", 2048, "application/pdf")] },
     });
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Maximum of 5 active attachments");
-    // The row that failed to upload is not added.
-    expect(screen.queryByText("sixth.pdf")).not.toBeInTheDocument();
+    const group = await screen.findByRole("alert");
+    expect(group).toHaveTextContent("Maximum of 5 active attachments");
+    expect(group).toHaveTextContent("sixth.pdf");
+    expect(group).toHaveTextContent("Upload failed — retry");
     // The existing row is still there and the Add control still works.
     expect(
       screen.getByText(REMOVABLE_ATTACHMENT.originalFilename),
@@ -1920,6 +2045,48 @@ describe("Add attachment on Ticket Detail (AC-20, ui-spec.md §10)", () => {
     expect(
       screen.getByRole("button", { name: /add attachment/i }),
     ).toBeEnabled();
+  });
+
+  it("selecting two files where the first fails: the failed one gets a row and the batch stops (second file not uploaded)", async () => {
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (
+        input === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST"
+      ) {
+        return jsonResponse(500, {});
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness
+        initialAttachments={[REMOVABLE_ATTACHMENT]}
+        withUpload
+      />,
+    );
+
+    fireEvent.change(getFileInput(), {
+      target: {
+        files: [
+          makeFile("first.pdf", 2048, "application/pdf"),
+          makeFile("second.pdf", 2048, "application/pdf"),
+        ],
+      },
+    });
+
+    const group = await screen.findByRole("alert");
+    expect(group).toHaveTextContent("first.pdf");
+    expect(group).toHaveTextContent("Upload failed — retry");
+    // Batch stopped on the first failure: second.pdf was never attempted
+    // and has no row.
+    expect(screen.queryByText("second.pdf")).not.toBeInTheDocument();
+    const uploadCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === `${API_BASE_URL}/api/tickets/1/attachments` &&
+        init?.method === "POST",
+    );
+    expect(uploadCalls).toHaveLength(1);
   });
 
   it("does not render the Add control when onAttachmentAdded is not provided", () => {
