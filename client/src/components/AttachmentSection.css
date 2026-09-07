@@ -1,0 +1,11 @@
+/* Toast confirming a successful attachment removal (ui-spec.md §10 "Remove
+   flow": "a role=status toast confirms" — AC-34). */
+
+.zen-attachment-section__toast {
+  margin-top: var(--zen-space-field-gap);
+  padding: 8px 12px;
+  border-radius: var(--zen-radius-control);
+  background: var(--zen-pale);
+  color: var(--zen-success);
+  font-size: var(--zen-font-size-body);
+}

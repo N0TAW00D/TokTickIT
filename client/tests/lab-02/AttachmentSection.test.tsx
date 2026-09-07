@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -7,12 +13,15 @@ import {
   type QueuedAttachment,
 } from "../../src/components/AttachmentUploader.tsx";
 import { AttachmentList } from "../../src/components/AttachmentList.tsx";
+import { AttachmentSection } from "../../src/components/AttachmentSection.tsx";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
 import {
   RequesterProvider,
   useRequester,
 } from "../../src/requester/RequesterContext.tsx";
 import {
+  removeAttachment,
+  RemoveAttachmentError,
   uploadAttachment,
   UploadAttachmentError,
   type TicketAttachment,
@@ -20,7 +29,8 @@ import {
 
 // Covers docs/lab-02/tests.md rows C-15 (attachment client validation),
 // C-16 (partial attachment failure after a successful create), C-17
-// (add-attachment disabled at the 5-attachment ceiling), C-20 (removed
+// (add-attachment disabled at the 5-attachment ceiling), C-18 (remove
+// dialog happy path), C-19 (remove dialog reason required), C-20 (removed
 // attachment presentation), and C-21 (attachment actions per type).
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
@@ -854,5 +864,574 @@ describe("C-20 removed attachment presentation (AC-36, BR-33)", () => {
       screen.queryByRole("button", { name: /remove/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+});
+
+// --- C-18 / C-19: the Remove confirmation dialog, wired end-to-end via
+// AttachmentSection (AttachmentList's Remove button -> RemoveAttachmentDialog
+// -> removeAttachment -> DELETE /api/attachments/:id). ---
+
+/** A removable active attachment (api-spec.md §3.3 example). */
+const REMOVABLE_ATTACHMENT: TicketAttachment = {
+  id: 1,
+  originalFilename: "battery-report.pdf",
+  mimeType: "application/pdf",
+  fileSize: 249184,
+  isRemoved: false,
+  removedAt: null,
+  removedReason: null,
+  createdAt: "2026-09-01T08:15:10.000Z",
+};
+
+const ATTACHMENT_DELETE_URL = `${API_BASE_URL}/api/attachments/1`;
+
+/**
+ * Minimal controlled harness: owns the attachments array the way
+ * TicketDetailScreen does, so a successful removal (reported via
+ * onAttachmentRemoved) is visibly reflected back into AttachmentList,
+ * exactly like the real screen's state splice.
+ */
+function AttachmentSectionHarness({
+  initialAttachments,
+  requesterId = 7,
+}: {
+  initialAttachments: TicketAttachment[];
+  requesterId?: number;
+}) {
+  const [attachments, setAttachments] = useState(initialAttachments);
+  return (
+    <AttachmentSection
+      attachments={attachments}
+      requesterId={requesterId}
+      onAttachmentRemoved={(updated) =>
+        setAttachments((previous) =>
+          previous.map((attachment) =>
+            attachment.id === updated.id ? updated : attachment,
+          ),
+        )
+      }
+    />
+  );
+}
+
+function deleteCallsOf(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.filter(
+    ([, init]: [string, RequestInit?]) => init?.method === "DELETE",
+  );
+}
+
+describe("C-18 remove dialog happy path (AC-34)", () => {
+  it('Remove opens a dialog naming the file with a required Reason field; submitting a valid reason moves the row to "Removed" and shows a role="status" toast', async () => {
+    // removedAt UTC 2026-09-02T03:15:00.000Z is 10:15 in Asia/Bangkok
+    // (UTC+7, specification.md BR-04/A-11) -> "2 Sep, 10:15", hardcoded
+    // independently of formatDateTime, same as C-20's fixture above.
+    const updatedAttachment: TicketAttachment = {
+      ...REMOVABLE_ATTACHMENT,
+      isRemoved: true,
+      removedAt: "2026-09-02T03:15:00.000Z",
+      removedReason: "Uploaded the wrong file",
+    };
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (input === ATTACHMENT_DELETE_URL && init?.method === "DELETE") {
+        return jsonResponse(200, updatedAttachment);
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    // Dialog: title "Remove attachment", body names the file, required
+    // Reason for removal field (ui-spec.md §10).
+    const dialog = screen.getByRole("dialog", { name: /remove attachment/i });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByText(/battery-report\.pdf/)).toBeInTheDocument();
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    expect(reasonField).toHaveAttribute("aria-required", "true");
+
+    fireEvent.change(reasonField, {
+      target: { value: "Uploaded the wrong file" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    const toast = await screen.findByRole("status");
+    expect(toast).toHaveTextContent('"battery-report.pdf" was removed.');
+
+    // Dialog closed.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Row now shows the Removed presentation (exact literal shape, C-20).
+    expect(
+      screen.getByText('Removed 2 Sep, 10:15 · "Uploaded the wrong file"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^remove$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /download/i }),
+    ).not.toBeInTheDocument();
+
+    // Exactly one DELETE, with the right headers and JSON body
+    // (api-spec.md §4.4: X-Requester-Id, Content-Type: application/json,
+    // { reason }).
+    const deleteCalls = deleteCallsOf(fetchMock);
+    expect(deleteCalls).toHaveLength(1);
+    const [url, init] = deleteCalls[0] as [string, RequestInit];
+    expect(url).toBe(ATTACHMENT_DELETE_URL);
+    expect(init.headers).toMatchObject({
+      "X-Requester-Id": "7",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(init.body as string)).toEqual({
+      reason: "Uploaded the wrong file",
+    });
+  });
+
+  it("accepts a reason of exactly 3 characters (BR-31/A-09 lower boundary)", async () => {
+    const updated: TicketAttachment = {
+      ...REMOVABLE_ATTACHMENT,
+      isRemoved: true,
+      removedAt: "2026-09-02T03:15:00.000Z",
+      removedReason: "abc",
+    };
+    const fetchMock = vi.fn((input: string, init?: RequestInit) =>
+      input === ATTACHMENT_DELETE_URL && init?.method === "DELETE"
+        ? jsonResponse(200, updated)
+        : jsonResponse(404, {}),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    fireEvent.change(screen.getByLabelText(/reason for removal/i), {
+      target: { value: "abc" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    await screen.findByRole("status");
+    expect(deleteCallsOf(fetchMock)).toHaveLength(1);
+  });
+
+  it("accepts a reason of exactly 200 characters (BR-31/A-09 upper boundary)", async () => {
+    const longReason = "x".repeat(200);
+    const updated: TicketAttachment = {
+      ...REMOVABLE_ATTACHMENT,
+      isRemoved: true,
+      removedAt: "2026-09-02T03:15:00.000Z",
+      removedReason: longReason,
+    };
+    const fetchMock = vi.fn((input: string, init?: RequestInit) =>
+      input === ATTACHMENT_DELETE_URL && init?.method === "DELETE"
+        ? jsonResponse(200, updated)
+        : jsonResponse(404, {}),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    fireEvent.change(screen.getByLabelText(/reason for removal/i), {
+      target: { value: longReason },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    await screen.findByRole("status");
+    const deleteCalls = deleteCallsOf(fetchMock);
+    expect(deleteCalls).toHaveLength(1);
+    expect(
+      JSON.parse((deleteCalls[0] as [string, RequestInit])[1].body as string),
+    ).toEqual({ reason: longReason });
+  });
+});
+
+describe("C-19 remove dialog reason required (AC-35)", () => {
+  it.each([
+    ["an empty reason", ""],
+    ["a 2-character reason", "no"],
+    ["a 201-character reason (one past the upper bound)", "x".repeat(201)],
+    ["a whitespace-only reason (rule is on the trimmed length)", "   "],
+  ])(
+    "shows the field error and keeps the dialog open for %s, firing no DELETE",
+    (_label, reasonValue) => {
+      const fetchMock = vi.fn(() => jsonResponse(200, REMOVABLE_ATTACHMENT));
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(
+        <AttachmentSectionHarness
+          initialAttachments={[REMOVABLE_ATTACHMENT]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+      if (reasonValue) {
+        fireEvent.change(screen.getByLabelText(/reason for removal/i), {
+          target: { value: reasonValue },
+        });
+      }
+      fireEvent.click(
+        screen.getByRole("button", { name: /^remove attachment$/i }),
+      );
+
+      expect(
+        screen.getByText(
+          "Reason for removal must be between 3 and 200 characters.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(deleteCallsOf(fetchMock)).toHaveLength(0);
+    },
+  );
+
+  it("clears the field error and fires the DELETE once the reason is corrected", async () => {
+    const updated: TicketAttachment = {
+      ...REMOVABLE_ATTACHMENT,
+      isRemoved: true,
+      removedAt: "2026-09-02T03:15:00.000Z",
+      removedReason: "Now a valid reason",
+    };
+    const fetchMock = vi.fn((input: string, init?: RequestInit) =>
+      input === ATTACHMENT_DELETE_URL && init?.method === "DELETE"
+        ? jsonResponse(200, updated)
+        : jsonResponse(404, {}),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    fireEvent.change(reasonField, { target: { value: "no" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+    expect(
+      screen.getByText(
+        "Reason for removal must be between 3 and 200 characters.",
+      ),
+    ).toBeInTheDocument();
+    expect(deleteCallsOf(fetchMock)).toHaveLength(0);
+
+    fireEvent.change(reasonField, { target: { value: "Now a valid reason" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    await screen.findByRole("status");
+    expect(deleteCallsOf(fetchMock)).toHaveLength(1);
+  });
+});
+
+// Not a tests.md row on its own, but explicitly required by ui-spec.md §10
+// ("focus trapped in the dialog", "Esc cancels, returns focus to the
+// triggering Remove button").
+describe("Remove dialog keyboard behavior (ui-spec.md §10)", () => {
+  it("focuses the Reason field when the dialog opens", () => {
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    expect(screen.getByLabelText(/reason for removal/i)).toHaveFocus();
+  });
+
+  it("Esc cancels the dialog without firing DELETE, and returns focus to the triggering Remove button", () => {
+    const fetchMock = vi.fn(() => jsonResponse(200, REMOVABLE_ATTACHMENT));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    const removeButton = screen.getByRole("button", { name: /^remove$/i });
+    fireEvent.click(removeButton);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(removeButton).toHaveFocus();
+    expect(deleteCallsOf(fetchMock)).toHaveLength(0);
+  });
+
+  it("Cancel closes the dialog and returns focus to the triggering Remove button", () => {
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    const removeButton = screen.getByRole("button", { name: /^remove$/i });
+    fireEvent.click(removeButton);
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(removeButton).toHaveFocus();
+  });
+
+  it("Tab from the last focusable element wraps to the first (focus trap)", () => {
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    const submitButton = screen.getByRole("button", {
+      name: /^remove attachment$/i,
+    });
+    submitButton.focus();
+    fireEvent.keyDown(submitButton, { key: "Tab" });
+
+    expect(screen.getByLabelText(/reason for removal/i)).toHaveFocus();
+  });
+
+  it("Shift+Tab from the first focusable element wraps to the last (focus trap)", () => {
+    render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    reasonField.focus();
+    fireEvent.keyDown(reasonField, { key: "Tab", shiftKey: true });
+
+    expect(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    ).toHaveFocus();
+  });
+});
+
+// Not a tests.md row on its own, but explicitly required by the task: a
+// 409 ALREADY_REMOVED must be distinguishable from a 400 field error
+// (api-spec.md §4.4) — a conflict banner, not the reason field's error —
+// and must keep the dialog open without applying any local removal.
+describe("AttachmentSection distinguishes 409 ALREADY_REMOVED from a field error", () => {
+  it("shows a conflict alert (not the field error) and keeps the dialog + active row on a 409", async () => {
+    const fetchMock = vi.fn(() =>
+      jsonResponse(409, {
+        error: "ALREADY_REMOVED",
+        message: "This attachment is already removed.",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    fireEvent.change(reasonField, {
+      target: { value: "Valid reason" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This attachment is already removed.");
+
+    // The message renders in the dedicated conflict slot, not the field's
+    // own error slot — a 409 must not masquerade as a bad-reason field
+    // error even though both currently use role="alert".
+    expect(alert).toHaveClass("zen-remove-dialog__conflict");
+    expect(
+      container.querySelector("#remove-attachment-reason-error"),
+    ).not.toBeInTheDocument();
+    expect(reasonField).not.toHaveAttribute("aria-invalid", "true");
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Reason for removal must be between 3 and 200 characters.",
+      ),
+    ).not.toBeInTheDocument();
+
+    // No removal was applied locally — the row is still active.
+    expect(screen.getByRole("button", { name: /^remove$/i })).toBeInTheDocument();
+  });
+});
+
+// AC-35 also names the server's own `400 VALIDATION_FAILED` (api-spec.md
+// §4.4), reached when a reason that clears the client-side check is still
+// rejected server-side (the two rules are expected to agree, so this is
+// defence in depth). It must surface on the Reason field itself — not the
+// 409 conflict slot — and keep the dialog open.
+describe("AttachmentSection surfaces a server 400 VALIDATION_FAILED on the Reason field (AC-35)", () => {
+  it("shows the server field message on the Reason field, keeps the dialog open, and applies no local removal", async () => {
+    const fetchMock = vi.fn(() =>
+      jsonResponse(400, {
+        error: "VALIDATION_FAILED",
+        message: "One or more fields are invalid.",
+        fields: [
+          {
+            field: "reason",
+            message: "reason must be between 3 and 200 characters after trimming.",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    // Passes the client-side 3-200 check, so the request is actually sent
+    // and the server's 400 is what surfaces.
+    fireEvent.change(reasonField, { target: { value: "Valid reason" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    const fieldError = await screen.findByText(
+      "reason must be between 3 and 200 characters after trimming.",
+    );
+    expect(fieldError).toHaveAttribute("id", "remove-attachment-reason-error");
+    expect(reasonField).toHaveAttribute("aria-invalid", "true");
+
+    // Not the 409 conflict slot.
+    expect(
+      container.querySelector(".zen-remove-dialog__conflict"),
+    ).not.toBeInTheDocument();
+
+    // Dialog open, one DELETE attempt, row still active.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(deleteCallsOf(fetchMock)).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: /^remove$/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+// Mirrors the "uploadAttachment distinguishes 415/413/409" block above:
+// removeAttachment's two server rules (api-spec.md §4.4) must be
+// distinguishable by the caller, and every other failure must not be
+// mistaken for one of them.
+describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("raises RemoveAttachmentError with code VALIDATION_FAILED on 400, carrying fields[]", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        jsonResponse(400, {
+          error: "VALIDATION_FAILED",
+          message: "One or more fields are invalid.",
+          fields: [
+            {
+              field: "reason",
+              message:
+                "reason must be between 3 and 200 characters after trimming.",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const promise = removeAttachment(1, 5, "ok reason");
+    await expect(promise).rejects.toBeInstanceOf(RemoveAttachmentError);
+    await expect(promise).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      fields: [
+        {
+          field: "reason",
+          message:
+            "reason must be between 3 and 200 characters after trimming.",
+        },
+      ],
+    });
+  });
+
+  it("raises RemoveAttachmentError with code ALREADY_REMOVED on 409", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        jsonResponse(409, {
+          error: "ALREADY_REMOVED",
+          message: "This attachment is already removed.",
+        }),
+      ),
+    );
+
+    const promise = removeAttachment(1, 5, "ok reason");
+    await expect(promise).rejects.toBeInstanceOf(RemoveAttachmentError);
+    await expect(promise).rejects.toMatchObject({ code: "ALREADY_REMOVED" });
+  });
+
+  it("the two codes are pairwise distinct — 400 and 409 do not collapse to the same code", async () => {
+    const codes = new Set<string>();
+    for (const status of [400, 409] as const) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => jsonResponse(status, { error: "X", message: "m" })),
+      );
+      try {
+        await removeAttachment(1, 5, "ok reason");
+      } catch (error) {
+        if (error instanceof RemoveAttachmentError) codes.add(error.code);
+      }
+    }
+    expect(codes.size).toBe(2);
+  });
+
+  it("raises a plain Error, not RemoveAttachmentError, on a 404 (attachment unknown/not owned)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        jsonResponse(404, { error: "NOT_FOUND", message: "Not found." }),
+      ),
+    );
+
+    const promise = removeAttachment(1, 5, "ok reason");
+    await expect(promise).rejects.not.toBeInstanceOf(RemoveAttachmentError);
+    await expect(promise).rejects.toBeInstanceOf(Error);
+  });
+
+  it("raises a plain Error, not RemoveAttachmentError, on a 500", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => jsonResponse(500, { error: "INTERNAL", message: "Broke." })),
+    );
+
+    const promise = removeAttachment(1, 5, "ok reason");
+    await expect(promise).rejects.not.toBeInstanceOf(RemoveAttachmentError);
+    await expect(promise).rejects.toBeInstanceOf(Error);
+  });
+
+  it("sends the reason as a JSON body with Content-Type and X-Requester-Id headers (api-spec.md §1.2, §4.4)", async () => {
+    const fetchMock = vi.fn(() =>
+      jsonResponse(200, {
+        ...REMOVABLE_ATTACHMENT,
+        isRemoved: true,
+        removedAt: "2026-09-02T03:15:00.000Z",
+        removedReason: "ok reason",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await removeAttachment(9, 5, "ok reason");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:3000/api/attachments/5");
+    expect(init.method).toBe("DELETE");
+    expect(init.headers).toMatchObject({
+      "X-Requester-Id": "9",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(init.body as string)).toEqual({ reason: "ok reason" });
   });
 });

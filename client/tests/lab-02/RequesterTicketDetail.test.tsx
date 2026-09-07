@@ -17,9 +17,12 @@ import {
 // Covers docs/lab-02/tests.md rows C-29..C-32 (read-only header render, the
 // not-found/failure states, the X-Requester-Id header ui-spec.md §10
 // requires, and the BR-11/AC-09 requester-switch guard). The detailed
-// per-state attachment-row checks (C-20/C-21) live in
-// AttachmentSection.test.tsx; this file only confirms the section is on
-// the page at all.
+// per-state attachment-row checks (C-20/C-21) and the Remove dialog's own
+// behavior (C-18/C-19) live in AttachmentSection.test.tsx; this file only
+// confirms the section is on the page at all, plus one end-to-end check
+// below that a successful removal actually propagates back into this
+// screen's own ticket state (the row *and* the section heading's active
+// count, not just AttachmentSection in isolation).
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKET_URL = `${API_BASE_URL}/api/tickets/1`;
@@ -382,5 +385,69 @@ describe("C-32 Ticket Detail on requester switch", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(TICKET.ticketNumber)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Not a tests.md row on its own (C-18/C-19 own AttachmentSection.test.tsx),
+// but explicitly required by the task: a successful removal must update
+// BOTH the row presentation AND the section heading's active count on the
+// real screen, not just in AttachmentSection's isolated harness — this
+// exercises TicketDetailScreen's own handleAttachmentRemoved splice.
+describe("C-18 remove flow integration on Ticket Detail", () => {
+  it("removing the ticket's one active attachment moves its row to Removed and drops the heading's active count from 1 to 0", async () => {
+    const attachmentId = TICKET.attachments[0].id;
+    const updatedAttachment = {
+      ...TICKET.attachments[0],
+      isRemoved: true,
+      // UTC 2026-09-02T03:15:00.000Z is 10:15 in Asia/Bangkok (UTC+7,
+      // specification.md BR-04/A-11) -> "2 Sep, 10:15", hardcoded
+      // independently of formatDateTime.
+      removedAt: "2026-09-02T03:15:00.000Z",
+      removedReason: "Wrong attachment",
+    };
+
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+      if (input === TICKET_URL && init?.method === undefined) {
+        return jsonResponse(200, TICKET);
+      }
+      if (
+        input === `${API_BASE_URL}/api/attachments/${attachmentId}` &&
+        init?.method === "DELETE"
+      ) {
+        return jsonResponse(200, updatedAttachment);
+      }
+      return jsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderScreen();
+    await screen.findByText(TICKET.ticketNumber);
+
+    // Falsifiable pre-state: exactly one active attachment before removal.
+    expect(
+      screen.getByRole("heading", { name: "Attachments (1 active / 1 total)" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    fireEvent.change(screen.getByLabelText(/reason for removal/i), {
+      target: { value: "Wrong attachment" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    await screen.findByRole("status");
+
+    // The heading's active count dropped; the row shows the Removed
+    // presentation with the server's date + reason.
+    expect(
+      screen.getByRole("heading", { name: "Attachments (0 active / 1 total)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Removed 2 Sep, 10:15 · "Wrong attachment"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^remove$/i }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -402,3 +402,94 @@ export async function uploadAttachment(
 
   return response.json();
 }
+
+/** One `{ field, message }` entry from a `VALIDATION_FAILED` body on the removal endpoint (api-spec.md §4.4). */
+export type RemoveAttachmentFieldError = CreateTicketFieldError;
+
+/**
+ * The two distinct rejection reasons `removeAttachment` can raise, one per
+ * server rule (api-spec.md §4.4 errors table): `400 VALIDATION_FAILED`
+ * (the `reason` failed the 3–200-trimmed-chars rule) and `409
+ * ALREADY_REMOVED` (the attachment was already soft-removed, e.g. by a
+ * concurrent request). Every other failure (network error, `404`, `5xx`)
+ * raises a plain `Error` instead — mirrors `UploadAttachmentError` above
+ * and the same 415/413/409-distinguishing pattern from PR #40.
+ */
+export type RemoveAttachmentErrorCode = "VALIDATION_FAILED" | "ALREADY_REMOVED";
+
+/**
+ * Thrown by `removeAttachment` for the two server rules above, so a caller
+ * can tell "bad reason" (stays on the field, dialog stays open — AC-35)
+ * from "already removed" (a conflict, not a field problem) instead of
+ * catching one generic `Error` for both (api-spec.md §4.4, BR-31, BR-32,
+ * AC-34, AC-35).
+ */
+export class RemoveAttachmentError extends Error {
+  readonly code: RemoveAttachmentErrorCode;
+  readonly fields?: RemoveAttachmentFieldError[];
+
+  constructor(
+    code: RemoveAttachmentErrorCode,
+    message: string,
+    fields?: RemoveAttachmentFieldError[],
+  ) {
+    super(message);
+    this.name = "RemoveAttachmentError";
+    this.code = code;
+    this.fields = fields;
+  }
+}
+
+/**
+ * `DELETE /api/attachments/:id` (api-spec.md §4.4): soft-remove one
+ * attachment on a ticket owned by the calling Requester, identified via
+ * the `X-Requester-Id` header (§1.2) exactly like `uploadAttachment`
+ * above. `reason` is sent as-is (trimmed) — the caller (the Remove
+ * dialog) is expected to have already validated it client-side so this
+ * request is only made once it passes.
+ *
+ * `400 VALIDATION_FAILED` and `409 ALREADY_REMOVED` raise the matching
+ * `RemoveAttachmentError` code; every other failure (network error,
+ * `404`, `5xx`) raises a generic `Error`.
+ */
+export async function removeAttachment(
+  requesterId: number,
+  attachmentId: number,
+  reason: string,
+): Promise<TicketAttachment> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/attachments/${attachmentId}`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requester-Id": String(requesterId),
+      },
+      body: JSON.stringify({ reason }),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await readErrorBody(response);
+    const message = readErrorMessage(body, response.status);
+
+    if (response.status === 400) {
+      const fields =
+        typeof body === "object" &&
+        body !== null &&
+        (body as Record<string, unknown>).error === "VALIDATION_FAILED" &&
+        Array.isArray((body as Record<string, unknown>).fields)
+          ? ((body as Record<string, unknown>).fields as unknown[]).filter(
+              isFieldError,
+            )
+          : undefined;
+      throw new RemoveAttachmentError("VALIDATION_FAILED", message, fields);
+    }
+    if (response.status === 409) {
+      throw new RemoveAttachmentError("ALREADY_REMOVED", message);
+    }
+    throw new Error(`Failed to remove attachment (status ${response.status})`);
+  }
+
+  return response.json();
+}

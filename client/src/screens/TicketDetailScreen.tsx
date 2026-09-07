@@ -7,11 +7,12 @@ import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { AttachmentList } from "../components/AttachmentList";
+import { AttachmentSection } from "../components/AttachmentSection";
 import { useRequester } from "../requester/RequesterContext";
 import {
   fetchTicketDetail,
   TicketNotFoundError,
+  type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
 import { formatDateTimeWithYear } from "../tickets/formatDateTime";
@@ -91,10 +92,12 @@ type DetailState =
  *
  * Read-only view of one ticket's header fields plus its attachment list
  * (ui-spec.md §10 "Attachment section", tests.md C-20/C-21: active rows
- * with their per-type controls, removed rows as metadata only). The Add
- * Attachment control and the Remove confirmation dialog are separate
- * slices and are not wired in here — `AttachmentList`'s `onRemove` is
- * left unset, so the Remove button renders per C-21 but has no effect yet.
+ * with their per-type controls, removed rows as metadata only), wired to
+ * the Remove confirmation dialog via `AttachmentSection` (tests.md
+ * C-18/C-19). A successful removal replaces that attachment in-place in
+ * `state.ticket.attachments`, so the row and the "N active / M total"
+ * heading both update without a full re-fetch. The Add Attachment control
+ * is a separate slice and is not wired in here.
  */
 export function TicketDetailScreen() {
   const params = useParams<{ id: string }>();
@@ -157,6 +160,27 @@ export function TicketDetailScreen() {
 
   function handleBack() {
     navigate("/tickets");
+  }
+
+  /**
+   * Splices the server's updated attachment (post-removal) into the
+   * currently-loaded ticket's `attachments[]` in place, so `AttachmentList`
+   * re-renders that one row as "Removed" and the section heading's active
+   * count drops — without re-fetching the whole ticket.
+   */
+  function handleAttachmentRemoved(updated: TicketAttachment) {
+    setState((previous) => {
+      if (previous.phase !== "loaded") return previous;
+      return {
+        phase: "loaded",
+        ticket: {
+          ...previous.ticket,
+          attachments: previous.ticket.attachments.map((attachment) =>
+            attachment.id === updated.id ? updated : attachment,
+          ),
+        },
+      };
+    });
   }
 
   return (
@@ -254,7 +278,11 @@ export function TicketDetailScreen() {
               {" active / "}
               {state.ticket.attachments.length} total)
             </h2>
-            <AttachmentList attachments={state.ticket.attachments} />
+            <AttachmentSection
+              attachments={state.ticket.attachments}
+              requesterId={requesterId as number}
+              onAttachmentRemoved={handleAttachmentRemoved}
+            />
           </section>
         </>
       )}
