@@ -116,13 +116,13 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | C-12 | C | AC-14, BR-24 | create busy state | on submit the button shows busy + is disabled until the response resolves; only one `POST` fired on double-click | `client/tests/lab-02/CreateTicket.test.tsx` | Pass |
 | C-13 | C | AC-15 | create success | `201` → confirmation shows returned `ticketNumber` + "View ticket" / "Create another" | `client/tests/lab-02/CreateTicket.test.tsx` | Pass |
 | C-14 | C | AC-17, BR-26 | create API failure | `POST` rejects → safe error state; all field values + pending attachment list preserved; submit re-enabled | `client/tests/lab-02/CreateTicket.test.tsx` | Pass |
-| C-15 | C | AC-18, AC-19 | attachment client validation | `.exe` → per-file "unsupported type", not queued; 6 MB image → "too large", not queued; valid PDF queued with name+size | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-16 | C | AC-21, BR-27 | partial attachment failure | create `201` then one upload rejects → success panel + warning callout naming the failed file | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-17 | C | AC-20, BR-23 | add-attachment disabled at 5 | 5 active → "Add attachment" disabled with tooltip | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-18 | C | AC-34 | remove dialog happy path | Remove → dialog with required reason; submit → row becomes "Removed" with date + reason; `role="status"` toast | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-19 | C | AC-35 | remove dialog reason required | empty / 2-char reason → dialog shows field error, stays open, no `DELETE` fired | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-20 | C | AC-36, BR-33 | removed attachment presentation | removed row shows name/size/type/removed-date/reason and **no** Download/Preview/Remove control | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
-| C-21 | C | AC-33, BR-34 | attachment actions | active image → Preview + Download; active PDF → Download only; both → Remove | `client/tests/lab-02/AttachmentSection.test.tsx` | Pending |
+| C-15 | C | AC-18, AC-19 | attachment client validation | `.exe` → per-file "unsupported type", not queued; 6 MB image → "too large", not queued; valid PDF queued with name+size | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-16 | C | AC-21, BR-27 | partial attachment failure | create `201` then one upload rejects → success panel + warning callout naming the failed file | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-17 | C | AC-20, BR-23 | add-attachment disabled at 5 | 5 active → "Add attachment" disabled with tooltip | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-18 | C | AC-34 | remove dialog happy path | Remove → dialog with required reason; submit → row becomes "Removed" with date + reason; `role="status"` toast | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-19 | C | AC-35 | remove dialog reason required | empty / 2-char reason → dialog shows field error, stays open, no `DELETE` fired | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-20 | C | AC-36, BR-33 | removed attachment presentation | removed row shows name/size/type/removed-date/reason and **no** Download/Preview/Remove control | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
+| C-21 | C | AC-33, BR-34 | attachment actions | active image → Preview + Download; active PDF → Download only; both → Remove | `client/tests/lab-02/AttachmentSection.test.tsx` | Pass |
 | C-22 | C | AC-22 | My Tickets list render | desktop rows show Ticket No., Created, Summary, Category, Related System, Priority badge, Status badge, Last Updated (no attachment-count column); mobile card shows the same fields plus a 📎 count when `> 0`; row links to `/tickets/:id` | `client/tests/lab-02/MyTickets.test.tsx` | Pass |
 | C-23 | C | AC-23, AC-24, AC-25 | My Tickets controls fire correct query | typing search (debounced), choosing filters, changing sort → request carries the right params | `client/tests/lab-02/MyTickets.test.tsx` | Pass |
 | C-24 | C | AC-26 | My Tickets pagination | Next → `page=2` request; "Showing 11–20 of 22" from `meta`; Prev disabled on page 1 | `client/tests/lab-02/MyTickets.test.tsx` | Pass |
@@ -139,19 +139,19 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | S-03 | S | ui-spec §5.2 | required asterisk + message coexist | required fields render `*`; on error the message **also** appears below the field | `client/tests/lab-02/ui-style.test.tsx` | Pass |
 | S-04 | S | ui-spec §5.2 | validation message placement | error node is `aria-describedby`-linked to its field and rendered adjacent, not only at top | `client/tests/lab-02/ui-style.test.tsx` | Pass |
 | S-05 | S | AC-14, ui-spec §5.1 | button states | disabled button has `aria-disabled` and cannot activate; Submit gets busy attributes during request | `client/tests/lab-02/ui-style.test.tsx` | Pass |
-| S-06 | S | AC-41, ui-spec §7 | badge consistency | same `PriorityBadge`/`StatusBadge` markup + text label in list, card, and detail; text present regardless of color | `client/tests/lab-02/ui-style.test.tsx` | Pending |
-| S-07 | S | AC-40, ui-spec §12 | icon-only controls labelled | sort carets / paperclip have `aria-label` + `title` | `client/tests/lab-02/ui-style.test.tsx` | Pending |
-| R-01 | R | AC-39 | no horizontal scroll | Create Ticket, My Tickets, Ticket Detail at desktop/tablet/mobile: `scrollWidth <= clientWidth` | `e2e/lab-02/responsive.spec.ts` | Pending |
-| R-02 | R | AC-39, ui-spec §9 | table → cards | ticket list renders `<table>` at ≥ 768px and card list at < 768px | `e2e/lab-02/responsive.spec.ts` | Pending |
-| R-03 | R | AC-39, ui-spec §4 | nav collapses | header nav links inline at ≥ 768px; hamburger with `aria-expanded` at < 768px | `e2e/lab-02/responsive.spec.ts` | Pending |
-| R-04 | R | AC-39 | no clipped label / hidden primary action | on each screen×viewport the primary action and every field label are visible in the layout box | `e2e/lab-02/responsive.spec.ts` | Pending |
-| R-05 | R | §8.8, A-13 | screenshot capture | writes `artifacts/lab-02/screenshots/{create-ticket,my-tickets,ticket-detail}/{desktop,tablet,mobile}.png` | `e2e/lab-02/responsive.spec.ts` | Pending |
-| R-06 | R | AC-40, ui-spec §12 | keyboard traversal | tabbing through Create Ticket / My Tickets / Ticket Detail reaches every interactive control in DOM order and each shows a `:focus-visible` ring (computed outline ≠ none) | `e2e/lab-02/responsive.spec.ts` | Pending |
+| S-06 | S | AC-41, ui-spec §7 | badge consistency | same `PriorityBadge`/`StatusBadge` markup + text label in list, card, and detail; text present regardless of color | `client/tests/lab-02/ui-style.test.tsx` | Pass |
+| S-07 | S | AC-40, ui-spec §12 | icon-only controls labelled | sort carets / paperclip have `aria-label` + `title` | `client/tests/lab-02/ui-style.test.tsx` | Pass |
+| R-01 | R | AC-39 | no horizontal scroll | Create Ticket, My Tickets, Ticket Detail at desktop/tablet/mobile: `scrollWidth <= clientWidth` | `e2e/lab-02/responsive.spec.ts` | Pass |
+| R-02 | R | AC-39, ui-spec §9 | table → cards | ticket list renders `<table>` at ≥ 768px and card list at < 768px | `e2e/lab-02/responsive.spec.ts` | Pass |
+| R-03 | R | AC-39, ui-spec §4 | nav collapses | header nav links inline at ≥ 768px; hamburger with `aria-expanded` at < 768px | `e2e/lab-02/responsive.spec.ts` | Pass |
+| R-04 | R | AC-39 | no clipped label / hidden primary action | on each screen×viewport the primary action and every field label are visible in the layout box | `e2e/lab-02/responsive.spec.ts` | Pass |
+| R-05 | R | §8.8, A-13 | screenshot capture | writes `artifacts/lab-02/screenshots/{create-ticket,my-tickets,ticket-detail}/{desktop,tablet,mobile}.png` | `e2e/lab-02/responsive.spec.ts` | Pass |
+| R-06 | R | AC-40, ui-spec §12 | keyboard traversal | tabbing through Create Ticket / My Tickets / Ticket Detail reaches every interactive control in DOM order and each shows a `:focus-visible` ring (computed outline ≠ none) | `e2e/lab-02/responsive.spec.ts` | Pass |
 | E2E-01 | E | AC-01, AC-15, AC-16, AC-23, AC-33 | full requester journey | select Requester → create ticket + 1 attachment → confirmation shows official number → find via search in My Tickets → open detail → download attachment (200) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
 | E2E-02 | E | AC-21, AC-34, AC-36 | attachment failure + soft-removal journey | on Ticket Detail, an upload forced to fail shows the retry affordance and a successful retry adds it; then remove an attachment with a reason → row shows "Removed" + reason → download blocked in UI | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
 | E2E-03 | E | AC-03, AC-09, AC-37 | cross-requester isolation | create ticket as A → Change Requester to B → B's My Tickets does not list A's ticket → visiting `/tickets/:idOfA` shows "Ticket not found" | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
-| E2E-04 | E | AC-17, BR-26 | create failure preserves input | fill valid form, stop API, submit → safe error, values still present, submit re-enabled | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
-| E2E-05 | E | AC-29, AC-30 | empty vs no-results | fresh Requester → empty state; after creating one, a non-matching search → no-results state (visibly different) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
+| E2E-04 | E | AC-17, BR-26 | create failure preserves input | fill valid form, stop API, submit → safe error, values still present, submit re-enabled | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
+| E2E-05 | E | AC-29, AC-30 | empty vs no-results | fresh Requester → empty state; after creating one, a non-matching search → no-results state (visibly different) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
 
 ---
 
