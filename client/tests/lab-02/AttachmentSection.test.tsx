@@ -948,6 +948,7 @@ describe("C-18 remove dialog happy path (AC-34)", () => {
     // Dialog: title "Remove attachment", body names the file, required
     // Reason for removal field (ui-spec.md §10).
     const dialog = screen.getByRole("dialog", { name: /remove attachment/i });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByText(/battery-report\.pdf/)).toBeInTheDocument();
     const reasonField = screen.getByLabelText(/reason for removal/i);
     expect(reasonField).toHaveAttribute("aria-required", "true");
@@ -1257,6 +1258,59 @@ describe("AttachmentSection distinguishes 409 ALREADY_REMOVED from a field error
 
     // No removal was applied locally — the row is still active.
     expect(screen.getByRole("button", { name: /^remove$/i })).toBeInTheDocument();
+  });
+});
+
+// AC-35 also names the server's own `400 VALIDATION_FAILED` (api-spec.md
+// §4.4), reached when a reason that clears the client-side check is still
+// rejected server-side (the two rules are expected to agree, so this is
+// defence in depth). It must surface on the Reason field itself — not the
+// 409 conflict slot — and keep the dialog open.
+describe("AttachmentSection surfaces a server 400 VALIDATION_FAILED on the Reason field (AC-35)", () => {
+  it("shows the server field message on the Reason field, keeps the dialog open, and applies no local removal", async () => {
+    const fetchMock = vi.fn(() =>
+      jsonResponse(400, {
+        error: "VALIDATION_FAILED",
+        message: "One or more fields are invalid.",
+        fields: [
+          {
+            field: "reason",
+            message: "reason must be between 3 and 200 characters after trimming.",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(
+      <AttachmentSectionHarness initialAttachments={[REMOVABLE_ATTACHMENT]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+    const reasonField = screen.getByLabelText(/reason for removal/i);
+    // Passes the client-side 3-200 check, so the request is actually sent
+    // and the server's 400 is what surfaces.
+    fireEvent.change(reasonField, { target: { value: "Valid reason" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /^remove attachment$/i }),
+    );
+
+    const fieldError = await screen.findByText(
+      "reason must be between 3 and 200 characters after trimming.",
+    );
+    expect(fieldError).toHaveAttribute("id", "remove-attachment-reason-error");
+    expect(reasonField).toHaveAttribute("aria-invalid", "true");
+
+    // Not the 409 conflict slot.
+    expect(
+      container.querySelector(".zen-remove-dialog__conflict"),
+    ).not.toBeInTheDocument();
+
+    // Dialog open, one DELETE attempt, row still active.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(deleteCallsOf(fetchMock)).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: /^remove$/i }),
+    ).toBeInTheDocument();
   });
 });
 
