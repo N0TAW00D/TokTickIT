@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
 import { Button } from "../../src/components/Button.tsx";
 import { FormField } from "../../src/components/FormField.tsx";
 import { TextInput } from "../../src/components/TextInput.tsx";
@@ -8,6 +10,12 @@ import { LoadingState } from "../../src/components/LoadingState.tsx";
 import { EmptyState } from "../../src/components/EmptyState.tsx";
 import { NoResultsState } from "../../src/components/NoResultsState.tsx";
 import { ErrorState } from "../../src/components/ErrorState.tsx";
+import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
+import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
+import {
+  RequesterProvider,
+  useRequester,
+} from "../../src/requester/RequesterContext.tsx";
 
 afterEach(() => {
   cleanup();
@@ -281,5 +289,344 @@ describe("ErrorState", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("⚠");
     expect(alert.textContent).toContain("Could not load tickets.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S-06 / S-07 (docs/lab-02/tests.md): badge consistency across surfaces, and
+// icon-only controls (sort carets, paperclip) carrying an aria-label + title.
+// ---------------------------------------------------------------------------
+
+const API_BASE_URL = "http://localhost:3000";
+const REQUESTER_ID = 1;
+const TICKET_ID = 42;
+const TICKET_NUMBER = "TKT-2026-000042";
+const CATEGORY = { id: 4, name: "Network" };
+const RELATED_SYSTEM = { id: 3, name: "VPN" };
+const CREATED_AT = "2026-09-01T02:08:00.000Z";
+const UPDATED_AT = "2026-09-01T02:45:00.000Z";
+
+/**
+ * One ticket, deliberately given `requestedPriority: "HIGH"` — the one
+ * priority whose badge is styled with `--zen-error-bg`/`--zen-error`
+ * (ui-spec.md §7.1) — so a test that only passed because a badge's text
+ * happened to match its color can't hide here: "High" must read out and
+ * markup must match across surfaces independent of that color.
+ */
+const S06_LIST_ITEM = {
+  id: TICKET_ID,
+  ticketNumber: TICKET_NUMBER,
+  summary: "Cannot connect to VPN",
+  category: CATEGORY,
+  relatedSystem: RELATED_SYSTEM,
+  requestedPriority: "HIGH",
+  status: "NEW",
+  createdAt: CREATED_AT,
+  updatedAt: UPDATED_AT,
+  activeAttachmentCount: 0,
+};
+
+const S06_DETAIL_TICKET = {
+  id: TICKET_ID,
+  ticketNumber: TICKET_NUMBER,
+  requester: {
+    id: REQUESTER_ID,
+    name: "Jennifer Anderson",
+    email: "jennifer.anderson@example.edu",
+  },
+  category: CATEGORY,
+  relatedSystem: RELATED_SYSTEM,
+  requestedPriority: "HIGH",
+  status: "NEW",
+  summary: "Cannot connect to VPN",
+  description: "VPN client fails to establish a session.",
+  createdAt: CREATED_AT,
+  updatedAt: UPDATED_AT,
+  attachments: [],
+};
+
+function s06JsonResponse(status: number, body: unknown): Promise<Response> {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as Response);
+}
+
+/**
+ * Serves the one ticket above from all three endpoints the three surfaces
+ * use: `GET /api/tickets` (list, desktop + mobile), `GET /api/categories`
+ * (the list screen's controls bar), and `GET /api/tickets/:id` (detail).
+ * The detail path is checked before the plain list path since
+ * `/api/tickets/42` also starts with `/api/tickets`.
+ */
+function mockS06Fetch() {
+  const fetchMock = vi.fn((input: string) => {
+    if (input.startsWith(`${API_BASE_URL}/api/tickets/${TICKET_ID}`)) {
+      return s06JsonResponse(200, S06_DETAIL_TICKET);
+    }
+    if (input.startsWith(`${API_BASE_URL}/api/tickets`)) {
+      return s06JsonResponse(200, {
+        items: [S06_LIST_ITEM],
+        meta: {
+          page: 1,
+          pageSize: 10,
+          totalItems: 1,
+          totalPages: 1,
+          sort: "createdAt",
+          order: "desc",
+        },
+      });
+    }
+    if (input.startsWith(`${API_BASE_URL}/api/categories`)) {
+      return s06JsonResponse(200, [CATEGORY]);
+    }
+    return s06JsonResponse(404, {});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** jsdom has no `window.matchMedia`; mirrors MyTickets.test.tsx's stub. */
+function stubMatchMedia(matches: boolean) {
+  const mediaQueryList = {
+    matches,
+    media: "",
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as unknown as MediaQueryList;
+
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mediaQueryList));
+}
+
+/** Seeds RequesterContext the way a real Continue click would, mirroring
+ * MyTickets.test.tsx / RequesterTicketDetail.test.tsx's identical helper,
+ * so screens can render directly without RequireRequester. */
+function S06Bootstrap({ children }: { children: ReactNode }) {
+  const { requesterName, selectRequester } = useRequester();
+
+  useEffect(() => {
+    if (requesterName === null) {
+      selectRequester({ id: REQUESTER_ID, name: "Jennifer Anderson" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (requesterName === null) return null;
+
+  return <>{children}</>;
+}
+
+function renderMyTickets(desktop: boolean) {
+  stubMatchMedia(desktop);
+  return render(
+    <RequesterProvider>
+      <S06Bootstrap>
+        <MemoryRouter initialEntries={["/tickets"]}>
+          <Routes>
+            <Route path="/tickets" element={<MyTicketsScreen />} />
+            <Route path="/tickets/:id" element={<h1>detail stub</h1>} />
+          </Routes>
+        </MemoryRouter>
+      </S06Bootstrap>
+    </RequesterProvider>,
+  );
+}
+
+function renderTicketDetail() {
+  return render(
+    <RequesterProvider>
+      <S06Bootstrap>
+        <MemoryRouter initialEntries={[`/tickets/${TICKET_ID}`]}>
+          <Routes>
+            <Route path="/tickets/:id" element={<TicketDetailScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </S06Bootstrap>
+    </RequesterProvider>,
+  );
+}
+
+describe("S-06 badge consistency across list, card, and detail (ui-spec.md §7, AC-41)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("renders the same PriorityBadge/StatusBadge markup and text label for the same ticket in the desktop table, mobile card, and detail screen", async () => {
+    mockS06Fetch();
+
+    // --- Desktop table (My Tickets, ≥768px) ---
+    const desktop = renderMyTickets(true);
+    await screen.findByRole("table");
+    const desktopPriority = desktop.container.querySelector(
+      ".zen-badge--priority-high",
+    );
+    const desktopStatus = desktop.container.querySelector(
+      ".zen-badge--status-new",
+    );
+    expect(desktopPriority).not.toBeNull();
+    expect(desktopStatus).not.toBeNull();
+    // The text label reads out on its own, independent of the color-carrying
+    // class name and of the decorative (aria-hidden) icon glyph (ui-spec.md
+    // §12 / §7: "never color alone").
+    expect(
+      desktopPriority!.querySelector(".zen-badge__label")!.textContent,
+    ).toBe("High");
+    expect(
+      desktopStatus!.querySelector(".zen-badge__label")!.textContent,
+    ).toBe("New");
+    const desktopPriorityHtml = desktopPriority!.outerHTML;
+    const desktopStatusHtml = desktopStatus!.outerHTML;
+    desktop.unmount();
+    cleanup();
+
+    // --- Mobile card (My Tickets, <768px) ---
+    mockS06Fetch();
+    const card = renderMyTickets(false);
+    await screen.findByRole("list");
+    const cardPriority = card.container.querySelector(
+      ".zen-badge--priority-high",
+    );
+    const cardStatus = card.container.querySelector(".zen-badge--status-new");
+    expect(cardPriority).not.toBeNull();
+    expect(cardStatus).not.toBeNull();
+    expect(cardPriority!.outerHTML).toBe(desktopPriorityHtml);
+    expect(cardStatus!.outerHTML).toBe(desktopStatusHtml);
+    card.unmount();
+    cleanup();
+
+    // --- Ticket Detail ---
+    mockS06Fetch();
+    const detail = renderTicketDetail();
+    await screen.findByText(TICKET_NUMBER);
+    const detailPriority = detail.container.querySelector(
+      ".zen-badge--priority-high",
+    );
+    const detailStatus = detail.container.querySelector(
+      ".zen-badge--status-new",
+    );
+    expect(detailPriority).not.toBeNull();
+    expect(detailStatus).not.toBeNull();
+    expect(detailPriority!.outerHTML).toBe(desktopPriorityHtml);
+    expect(detailStatus!.outerHTML).toBe(desktopStatusHtml);
+  });
+});
+
+describe("S-07 icon-only controls are labelled (ui-spec.md §12, AC-40)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("gives every sortable column header an aria-label and a title, matching for each", async () => {
+    mockS06Fetch();
+    renderMyTickets(true);
+    await screen.findByRole("table");
+
+    // All three sortable columns ui-spec.md §9 lists (Ticket No., Created,
+    // Last Updated) — not just one sample (see MyTicketsScreen.tsx's
+    // SortableHeader/sortToggleLabel). Expected strings are hardcoded here,
+    // never derived by calling sortToggleLabel itself.
+    const initialExpectations: [string, string][] = [
+      ["Ticket No.", "Sort by Ticket No."],
+      // createdAt is the default sort field, already descending on mount.
+      ["Created", "Sort by Created, descending"],
+      ["Last Updated", "Sort by Last Updated"],
+    ];
+
+    for (const [visibleLabel, expected] of initialExpectations) {
+      const button = screen.getByRole("button", { name: expected });
+      expect(button).toHaveTextContent(visibleLabel);
+      expect(button).toHaveAttribute("aria-label", expected);
+      expect(button).toHaveAttribute("title", expected);
+    }
+
+    // Clicking a column actually changes its label/title (proves the
+    // control is wired, not a static string) — exercised for each of the
+    // three controls in turn, not just the one that started active.
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Ticket No." }));
+    // Toggling sort re-fetches (loading state briefly unmounts the table),
+    // so the next assertion waits for the table to come back.
+    await screen.findByRole("table");
+    const ticketNoButton = screen.getByRole("button", {
+      name: "Sort by Ticket No., ascending",
+    });
+    expect(ticketNoButton).toHaveAttribute(
+      "aria-label",
+      "Sort by Ticket No., ascending",
+    );
+    expect(ticketNoButton).toHaveAttribute(
+      "title",
+      "Sort by Ticket No., ascending",
+    );
+    // Created, no longer the active sort, drops its order suffix.
+    const createdButton = screen.getByRole("button", { name: "Sort by Created" });
+    expect(createdButton).toHaveAttribute("aria-label", "Sort by Created");
+    expect(createdButton).toHaveAttribute("title", "Sort by Created");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sort by Last Updated" }),
+    );
+    await screen.findByRole("table");
+    const updatedButton = screen.getByRole("button", {
+      name: "Sort by Last Updated, descending",
+    });
+    expect(updatedButton).toHaveAttribute(
+      "aria-label",
+      "Sort by Last Updated, descending",
+    );
+    expect(updatedButton).toHaveAttribute(
+      "title",
+      "Sort by Last Updated, descending",
+    );
+  });
+
+  it("gives the mobile paperclip attachment indicator an aria-label and a title", async () => {
+    const fetchMock = vi.fn((input: string) => {
+      if (input.startsWith(`${API_BASE_URL}/api/tickets`)) {
+        return s06JsonResponse(200, {
+          items: [{ ...S06_LIST_ITEM, activeAttachmentCount: 2 }],
+          meta: {
+            page: 1,
+            pageSize: 10,
+            totalItems: 1,
+            totalPages: 1,
+            sort: "createdAt",
+            order: "desc",
+          },
+        });
+      }
+      if (input.startsWith(`${API_BASE_URL}/api/categories`)) {
+        return s06JsonResponse(200, [CATEGORY]);
+      }
+      return s06JsonResponse(404, {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderMyTickets(false);
+    await screen.findByRole("list");
+
+    const paperclip = screen.getByText("📎 2");
+    // Hardcoded against ui-spec.md §12's rule, not derived from the
+    // component's own label-building logic.
+    expect(paperclip).toHaveAttribute("aria-label", "2 attachments");
+    expect(paperclip).toHaveAttribute("title", "2 attachments");
   });
 });
