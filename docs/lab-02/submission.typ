@@ -98,7 +98,7 @@ Backlog → Specified → Started → PR Review → (Fixing) → Done.
 
 #shot("submission/part-1-workflow/kanban-all-done.png", [GitHub Project "TokTickIT Individual
 Sprints" after the #pr(64) merge: Specified / Started / PR Review / Fixing all empty; every
-Issue #1–#20 in *Done*.])
+tracked Issue (#1–#4, #13–#20) in *Done* and closed.])
 
 *Reviewer record.* Rendered copy: `docs/lab-02/reviewer.md`
 (#link(repo + "/blob/main/docs/lab-02/reviewer.md")[view on GitHub]). It lists the reviewer
@@ -162,9 +162,9 @@ $ git log --reverse --format='%ci  %h  %s' --since=2026-09-01 -- server/src clie
 #shot("submission/part-2-spec/pr-timeline-early.png", [GitHub PR list, oldest first: #pr(21)
 (the spec / API / UI / test-plan contract) *merged last week*; the first implementation PRs
 #pr(22)–#pr(39) *merged yesterday* — the contract landed before any implementation branch.])
-#shot("submission/part-2-spec/pr-timeline-recent.png", [GitHub PR list, most recent — after the
-#pr(64) release merge: 1 open (#pr(62), this document), 52 closed — the full peer-reviewed
-Lab 2 PR set.])
+#shot("submission/part-2-spec/pr-timeline-recent.png", [GitHub PR list after the #pr(64) release
+merge (top: #pr(64) *merged · Approved*): 1 open (#pr(62), this document), 51 closed — the full
+peer-reviewed Lab 2 PR set.])
 
 
 = Answer Part 3: Test-Driven Development and Traceability
