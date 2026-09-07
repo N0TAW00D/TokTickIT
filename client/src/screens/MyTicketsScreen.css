@@ -86,6 +86,15 @@
     flex: 0 1 auto;
     min-width: max-content;
   }
+
+  /* Keep the four on one line: without this the container is sized by its
+     `flex: 2 1 480px` basis, the controls wrap to a second row inside it,
+     and the search field beside them — aligned to `flex-end` — is stranded
+     against the bottom of a half-empty bar. Asking for their combined
+     natural width instead leaves the search field the remainder. */
+  .zen-my-tickets__filters {
+    min-width: max-content;
+  }
 }
 
 /* Mobile: controls wrap to full-width stacked selects (ui-spec.md §9, §11 —
