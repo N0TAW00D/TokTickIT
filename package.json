@@ -1,0 +1,17 @@
+{
+  "name": "toktickit",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Full-suite test orchestration for TokTickIT (Lab 2, Issue #20). Not a workspace root — server/, client/, and e2e/ each remain independent npm packages with their own node_modules.",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=11.18.0"
+  },
+  "scripts": {
+    "bootstrap": "npm --prefix server install && npm --prefix client install && npm --prefix e2e install && npm --prefix e2e exec playwright install chromium",
+    "test:server": "npm --prefix server test",
+    "test:client": "npm --prefix client test",
+    "test:e2e": "npm --prefix e2e run test:e2e",
+    "test:all": "npm run test:server && npm run test:client && npm run test:e2e"
+  }
+}

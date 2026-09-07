@@ -1,0 +1,169 @@
+/*
+ * Zen Green theme foundation — Lab 2 UI spec §2 (color tokens) and §3
+ * (typography, spacing, radius, shadow, container).
+ *
+ * This is the ONLY stylesheet allowed to contain hex color literals.
+ * Every other file (components, screens, etc.) must reference these
+ * tokens via var(--zen-*) — never a raw hex value.
+ */
+
+:root {
+  /* ---- Color tokens (ui-spec.md §2) ---- */
+  --zen-primary: #006b3c;
+  --zen-primary-hover: #005a32;
+  --zen-secondary: #0b7a46;
+  --zen-pale: #eaf6ef;
+  --zen-page-bg: #f5f7f6;
+  --zen-surface: #ffffff;
+  --zen-border: #d7e0db;
+  --zen-border-strong: #b7c6bd;
+  --zen-text: #1b2b23;
+  --zen-text-muted: #5b6b62;
+  --zen-readonly-bg: #eef3f0;
+  --zen-readonly-text: #3a4a42;
+  --zen-error: #b3261e;
+  --zen-error-bg: #fcecea;
+  --zen-warning: #8a5a00;
+  --zen-warning-bg: #fff4e5;
+  --zen-success: #0b7a46;
+  --zen-focus-ring: #0b7a46;
+  /* Modal backdrop (Remove attachment dialog, ui-spec.md §10 "Remove
+     flow"). A translucent dark-green tint rather than plain black, to
+     stay within the Zen Green palette. */
+  --zen-overlay: rgba(11, 27, 19, 0.55);
+
+  /* ---- Priority badge — LOW (ui-spec.md §7.1) ----
+     MEDIUM and HIGH reuse --zen-warning(-bg) and --zen-error(-bg) above;
+     LOW has no existing token, so it gets its own pair here rather than a
+     hard-coded hex in PriorityBadge.css. */
+  --zen-priority-low-bg: #e7f0ea;
+  --zen-priority-low-text: #2f6b49;
+
+  /* ---- Typography (ui-spec.md §3) ---- */
+  --zen-font-family: system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  --zen-font-size-page-title: 1.5rem;
+  --zen-font-weight-page-title: 700;
+
+  --zen-font-size-section-heading: 1.125rem;
+  --zen-font-weight-section-heading: 600;
+
+  --zen-font-size-body: 1rem;
+  --zen-font-weight-body: 400;
+
+  --zen-font-size-label: 0.875rem;
+  --zen-font-weight-label: 600;
+
+  --zen-font-size-helper: 0.75rem;
+  --zen-font-weight-helper: 400;
+
+  --zen-font-size-error: 0.8125rem;
+  --zen-font-weight-error: 500;
+
+  --zen-line-height-body: 1.5;
+  --zen-line-height-heading: 1.3;
+
+  /* ---- Spacing (4px base unit) ---- */
+  --zen-space-unit: 4px;
+  --zen-space-field-gap: 16px;
+  --zen-space-group-gap: 24px;
+  --zen-space-section-gap: 32px;
+  --zen-space-card-padding-desktop: 24px;
+  --zen-space-card-padding-mobile: 16px;
+
+  /* ---- Radius ---- */
+  --zen-radius-card: 8px;
+  --zen-radius-control: 6px;
+  --zen-radius-badge: 999px;
+
+  /* ---- Shadow (restrained card elevation) ---- */
+  --zen-shadow-card: 0 1px 2px rgba(16, 40, 28, 0.06),
+    0 1px 3px rgba(16, 40, 28, 0.1);
+
+  /* ---- Container / layout ---- */
+  --zen-container-max-width: 1120px;
+  --zen-container-gutter-desktop: 24px;
+  --zen-container-gutter-mobile: 16px;
+
+  /* ---- Shared control sizing ---- */
+  --zen-control-height: 40px;
+  --zen-control-height-touch: 44px;
+}
+
+/* Keyboard-first focus visibility (ui-spec.md §1 principle 5, §12). */
+:focus-visible {
+  outline: 2px solid var(--zen-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Base layer — applies the tokens above to the page itself.
+
+   The Vite scaffold's index.css/App.css (which used to own `:root`'s
+   color/background/font and shipped a `prefers-color-scheme: dark` block
+   repainting the page #16171d) have been removed — theme.css is now the
+   only stylesheet styling the page shell, so the app no longer risks
+   rendering dark on a dark-mode machine instead of the --zen-page-bg the
+   spec requires.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* The Zen Green theme is a single light visual system (ui-spec.md §2) —
+     opt out of the scaffold's automatic dark inversion. */
+  color-scheme: light;
+  background: var(--zen-page-bg);
+  color: var(--zen-text);
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-body);
+  font-weight: var(--zen-font-weight-body);
+  line-height: var(--zen-line-height-body);
+  letter-spacing: normal;
+}
+
+body {
+  margin: 0;
+  background: var(--zen-page-bg);
+  color: var(--zen-text);
+  /* AC-39/R-01: the page itself must never scroll horizontally — any wide
+     content (e.g. the My Tickets table) owns its own internal
+     `overflow-x: auto` scroller instead (MyTicketsScreen.css). This is a
+     deliberate backstop, not a fix for a specific leak: it guarantees the
+     rule holds even if a future layout change (or an engine quirk in how
+     nested scroll containers report root-level layout overflow) would
+     otherwise let inner overflow bleed into page-level scroll. */
+  overflow-x: hidden;
+}
+
+/* Full-bleed mount point: the header bar and page background span the
+   viewport. The centred 1120px container (ui-spec.md §3) lives on
+   `.zen-app-shell__header-inner` / `__content` / `.zen-selection-screen__main`,
+   not here — so a window wider than 1120px shows no strip beside the header.
+   `text-align: left` overrides the scaffold's centred column. */
+#root {
+  width: 100%;
+  margin: 0;
+  border-inline: 0;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+/* The scaffold sizes h1 at 56px / h2 at 24px; the spec's scale is page title
+   1.5rem/700 and section heading 1.125rem/600 (ui-spec.md §3). */
+h1 {
+  font-size: var(--zen-font-size-page-title);
+  font-weight: var(--zen-font-weight-page-title);
+  line-height: var(--zen-line-height-heading);
+  letter-spacing: normal;
+  color: var(--zen-text);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+h2 {
+  font-size: var(--zen-font-size-section-heading);
+  font-weight: var(--zen-font-weight-section-heading);
+  line-height: var(--zen-line-height-heading);
+  letter-spacing: normal;
+  color: var(--zen-text);
+  margin: 0 0 var(--zen-space-unit);
+}

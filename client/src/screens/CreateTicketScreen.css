@@ -1,0 +1,135 @@
+/* Create Ticket screen (ui-spec.md §8). */
+
+.zen-create-ticket__breadcrumb {
+  font-size: var(--zen-font-size-body);
+  color: var(--zen-text-muted);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-create-ticket__breadcrumb a {
+  color: var(--zen-secondary);
+}
+
+.zen-create-ticket__card {
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .zen-create-ticket__card {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+}
+
+.zen-create-ticket__section {
+  padding-bottom: var(--zen-space-section-gap);
+  margin-bottom: var(--zen-space-section-gap);
+  border-bottom: 1px solid var(--zen-border);
+}
+
+.zen-create-ticket__section:last-of-type {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.zen-create-ticket__row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
+}
+
+.zen-create-ticket__row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
+}
+
+@media (max-width: 991px) {
+  .zen-create-ticket__row-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .zen-create-ticket__row-2,
+  .zen-create-ticket__row-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zen-create-ticket__warning {
+  background: var(--zen-warning-bg);
+  color: var(--zen-warning);
+  border-radius: var(--zen-radius-card);
+  padding: 12px 16px;
+  margin: 0 0 var(--zen-space-group-gap);
+  font-size: var(--zen-font-size-body);
+  font-weight: var(--zen-font-weight-error);
+  text-align: left;
+}
+
+.zen-create-ticket__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--zen-space-unit);
+  margin-top: var(--zen-space-group-gap);
+}
+
+@media (max-width: 767px) {
+  .zen-create-ticket__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-create-ticket__actions .zen-btn {
+    width: 100%;
+  }
+}
+
+.zen-create-ticket__success {
+  background: var(--zen-pale);
+  border-radius: var(--zen-radius-card);
+  padding: var(--zen-space-card-padding-desktop);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .zen-create-ticket__success {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+}
+
+.zen-create-ticket__success-icon {
+  font-size: 2rem;
+  color: var(--zen-success);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-create-ticket__success h2 {
+  color: var(--zen-success);
+}
+
+.zen-create-ticket__success-summary {
+  color: var(--zen-text);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+.zen-create-ticket__success .zen-create-ticket__actions {
+  justify-content: center;
+  margin-top: 0;
+}
+
+@media (max-width: 767px) {
+  .zen-create-ticket__success .zen-create-ticket__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-create-ticket__success .zen-create-ticket__actions .zen-btn {
+    width: 100%;
+  }
+}

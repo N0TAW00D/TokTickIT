@@ -1,0 +1,14 @@
+memory
+server/uploads
+
+# Environment files — the *.example templates are committed (see per-package .gitignore too)
+.env*
+!.env.example
+!.env.test.example
+!.env.e2e.example
+
+# Build artifacts / tooling output not covered by a per-package .gitignore
+node_modules
+dist
+*.tsbuildinfo
+.DS_Store
