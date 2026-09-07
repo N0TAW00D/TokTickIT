@@ -212,26 +212,34 @@ BR-41 (API-32), BR-42 (API-20), BR-27 (API-25, C-16).
 
 ## 4. Responsive and Visual Checklist
 
-Run after the screens are built, at desktop / tablet / mobile, comparing against `ui-spec.md` §14
-and the approved illustrations (not memory). Record the result and attach screenshots.
+Completed 2026-09-07 against `ui-spec.md` §14 at desktop (1280×900), tablet (834×1112) and
+mobile (390×844). Evidence: the committed screenshots under
+`artifacts/lab-02/screenshots/` (the `{create-ticket,my-tickets,ticket-detail}/{desktop,tablet,mobile}`
+set plus `submission/part-6*/`, `submission/part-7*/`, `submission/part-8*/`), the S-01
+computed-colour check and the R-01/R-04/R-06 responsive tests in `e2e/lab-02/responsive.spec.ts`.
 
-| # | Check | ui-spec ref | Result |
-|---|---|---|---|
-| V-01 | Header, primary buttons use `--zen-primary`; active nav marked + `aria-current` | §2, §4 | ☐ |
-| V-02 | Page bg `--zen-page-bg`; cards white + restrained shadow + `--zen-border` | §3 | ☐ |
-| V-03 | Editable fields white/neutral border; read-only fields clearly distinct | §5.3 | ☐ |
-| V-04 | Required `*` present **and** a validation message shows on error, directly under the field | §5.2 | ☐ |
-| V-05 | One input height; Description textarea taller, resizes without breaking layout | §5.3 | ☐ |
-| V-06 | Buttons show text; disabled distinct + inert; Submit busy during request | §5.1 | ☐ |
-| V-07 | Priority + Status badges consistent everywhere and carry a text label | §7 | ☐ |
-| V-08 | Ticket list = table at ≥ 768px, cards at < 768px; card carries the same identifying fields plus the mobile-only 📎 attachment count | §9 | ☐ |
-| V-09 | Filters, sort, Clear Filters, pagination usable + unclipped at all viewports | §9, §11 | ☐ |
-| V-10 | Attachment controls + removed-metadata usable at all viewports; names readable (wrap not clip) | §10, §11 | ☐ |
-| V-11 | Empty state vs no-results state visibly different | §9 | ☐ |
-| V-12 | Visible focus ring when tabbing; keyboard reaches every control | §12 | ☐ |
-| V-13 | No horizontal page scroll, no overlap, no hidden primary action at desktop/tablet/mobile | §11 | ☐ |
-| V-14 | Create Ticket matches Figure-1-style field grouping (system fields top, classification grouped, Summary/Description wide, Attachments below, actions bottom) | §8 | ☐ |
-| V-15 | Screenshots saved under `artifacts/lab-02/screenshots/{create-ticket,my-tickets,ticket-detail}/` | §14 | ☐ |
+| # | Check | ui-spec ref | Result | Evidence / note |
+|---|---|---|---|---|
+| V-01 | Header, primary buttons use `--zen-primary`; active nav marked + `aria-current` | §2, §4 | ☑ | Header + `+ Create Ticket` compute to `rgb(0, 107, 60)` (`#006b3c`) — S-01. Active nav link underlined and carries `aria-current="page"` (`AppShell.tsx:53`). |
+| V-02 | Page bg `--zen-page-bg`; cards white + restrained shadow + `--zen-border` | §3 | ☑ | `document.body` computes to `rgb(245, 247, 246)` (`#f5f7f6`) — S-01. Cards white with a 1px `--zen-border` and a low-spread shadow on every screen shot. |
+| V-03 | Editable fields white/neutral border; read-only fields clearly distinct | §5.3 | ☑ | Create Ticket: Ticket No./Date/Requester render filled grey-green with no input border; Category/Related System/Summary/Description are white with a neutral border. Ticket Detail: every field in the read-only style. |
+| V-04 | Required `*` present **and** a validation message shows on error, directly under the field | §5.2 | ☑ | `part-6*/08-create-ticket-validation-failure.png`: red `*` on every required field; on submit each errored field shows a red message immediately below it ("Category is required.", "Summary must be between 5 and 140 characters.", etc.). |
+| V-05 | One input height; Description textarea taller, resizes without breaking layout | §5.3 | ☑ | Text inputs and selects share one height; the Description textarea is taller with a visible resize handle; the layout holds at all three viewports. |
+| V-06 | Buttons show text; disabled distinct + inert; Submit busy during request | §5.1 | ☑ | `07-create-ticket-initial.png` shows Submit pale-green and disabled; `08` / `10` show it filled green and enabled; `09-create-ticket-submitting.png` shows the "Submitting…" busy state. All buttons are text, not icon-only. |
+| V-07 | Priority + Status badges consistent everywhere and carry a text label | §7 | ☑ | The same `PriorityBadge` / `StatusBadge` markup and text label ("▽ Low" / "▷ Medium" / "△ High"; "New") appear in the desktop table, the mobile cards and Ticket Detail — verified by S-06 and visible across the list/card/detail shots. |
+| V-08 | Ticket list = table at ≥ 768px, cards at < 768px; card carries the same identifying fields plus the mobile-only 📎 attachment count | §9 | ☑ | `my-tickets/desktop.png` and `my-tickets/tablet.png` render a `<table>`; `my-tickets/mobile.png` renders cards with Ticket No., Created, Updated, Summary, Category·Related System, Priority + Status badges and a View link. The mobile-only 📎 count shows only when a ticket has attachments (R-02); the sample tickets in the shots have none, so its absence is correct. |
+| V-09 | Filters, sort, Clear Filters, pagination usable + unclipped at all viewports | §9, §11 | ☑ (see note) | Filters, Sort, Clear filters and the pagination controls (Prev / page / Next, Rows selector) are present and unclipped at every viewport — `my-tickets/{desktop,mobile}.png`, `part-7*/06-pagination-page2.png`. **Note:** at tablet the eight-column table is wider than the 834px viewport and scrolls inside its own `overflow-x: auto` container (`ui-spec.md` §9 keeps the table at ≥ 768px); the columns right of Related System require scrolling the table box. The page itself never scrolls horizontally (R-01). |
+| V-10 | Attachment controls + removed-metadata usable at all viewports; names readable (wrap not clip) | §10, §11 | ☑ | `part-8*/`: active rows show name + size + Download / Preview / Remove; removed rows show the retained name/size/type and `Removed <date> · "<reason>"` with no controls; the Upload-failed row shows Retry / Dismiss. File names wrap. Row actions stack below the file name at < 768px (`AttachmentList.css` `@media (max-width: 767px)`); every control is reachable by keyboard at all three viewports (R-06). |
+| V-11 | Empty state vs no-results state visibly different | §9 | ☑ | `part-7*/07-empty-state.png`: "You haven't created any tickets yet." + a primary "Create your first ticket" CTA, no filter bar. `part-7*/08-no-results-state.png`: "No tickets match your search or filters." + a 🔍 icon + a Clear filters link, with the search/filter bar visible and populated. Different message, different structure. |
+| V-12 | Visible focus ring when tabbing; keyboard reaches every control | §12 | ☑ | A green `--zen-focus-ring` outline is visible on the focused Category select in `part-6*/08`. R-06 tabs through every interactive control on all three screens × three viewports and asserts a computed outline ≠ `none` on each — passing. |
+| V-13 | No horizontal page scroll, no overlap, no hidden primary action at desktop/tablet/mobile | §11 | ☑ (see V-09 note) | R-01 asserts `documentElement.scrollWidth ≤ clientWidth` on all three screens × three viewports — passing (a real 105px tablet overflow was found and fixed during #44). No overlapping messages; R-04 asserts the primary action and every field label sit inside the layout box at every viewport. The only horizontal scroll anywhere is the My Tickets table's own container at tablet (V-09). |
+| V-14 | Create Ticket matches Figure-1-style field grouping (system fields top, classification grouped, Summary/Description wide, Attachments below, actions bottom) | §8 | ☑ | `create-ticket/desktop.png`: "Ticket information" (Ticket No./Date/Requester) at the top, a "Classification" group (Category / Related System / Requested Priority), Summary and Description full-width, "Attachments (n/5)" below, Cancel + Submit ticket bottom-right. |
+| V-15 | Screenshots saved under `artifacts/lab-02/screenshots/{create-ticket,my-tickets,ticket-detail}/` | §14 | ☑ | All nine `{screen}/{viewport}.png` files are committed (R-05 capture), alongside the `submission/part-6*/`, `part-7*/` and `part-8*/` state-specific sets. |
+
+**Overall:** every check passes. The one rough edge is the My Tickets table at the tablet
+viewport (V-09 / V-13): with eight columns and `ui-spec.md` §9 fixing the table layout at
+≥ 768px, the table is wider than an 834px viewport and scrolls within its own container.
+The page never scrolls horizontally and no control is hidden or clipped.
 
 ---
 
