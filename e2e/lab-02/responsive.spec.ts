@@ -444,48 +444,40 @@ test.describe("R-04 no clipped label / hidden primary action (tests.md:136, AC-3
         }
 
         // A `<select>` never overflows its own box — it silently truncates
-        // the option text instead, so `expectFullyVisible` on the control
-        // passes while the user sees "Created (newe". ui-spec.md:549
+        // its option text instead, so an element-level visibility check
+        // passes while the user reads "Created (newe". ui-spec.md:549
         // requires "Filters, sort, Clear Filters, and pagination are usable
-        // and unclipped at every viewport", so measure the widest option's
-        // rendered text against the control's content box directly. Two of
-        // the four controls failed this before the flex-basis fix (Sort by
-        // 36.6px, Category by 21.2px).
-        if (screen === "my-tickets") {
-          const shortfalls = await page.evaluate(() => {
-            const out: Array<{ id: string; longest: string; by: number }> = [];
-            for (const select of document.querySelectorAll("select")) {
-              const style = getComputedStyle(select);
-              const probe = document.createElement("span");
-              probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${style.font}`;
-              probe.textContent = [...select.options].reduce(
-                (widest, option) =>
-                  option.text.length > widest.length ? option.text : widest,
-                "",
-              );
-              document.body.appendChild(probe);
-              const needed =
-                probe.getBoundingClientRect().width +
-                parseFloat(style.paddingLeft) +
-                parseFloat(style.paddingRight);
-              probe.remove();
-              const shortfall =
-                needed - select.getBoundingClientRect().width;
-              if (shortfall > 0) {
-                out.push({
-                  id: select.id,
-                  longest: probe.textContent ?? "",
-                  by: Math.round(shortfall * 10) / 10,
-                });
-              }
+        // and unclipped at every viewport".
+        //
+        // Measured by cloning each select at `width: max-content` and
+        // comparing that natural width to the rendered one. Deriving the
+        // requirement from font metrics + padding instead is NOT equivalent
+        // and was wrong here: it omits the native dropdown arrow (~17px),
+        // which made this assertion pass while Priority and Status were
+        // visibly rendering "All Prioriti" and "All Status".
+        const clippedSelects = await page.evaluate(() => {
+          const clipped: Array<{ id: string; by: number }> = [];
+          for (const select of document.querySelectorAll("select")) {
+            const clone = select.cloneNode(true) as HTMLSelectElement;
+            clone.style.cssText =
+              "position:absolute;visibility:hidden;width:max-content;min-width:0;max-width:none";
+            select.parentElement!.appendChild(clone);
+            const natural = clone.getBoundingClientRect().width;
+            clone.remove();
+            const shortfall = natural - select.getBoundingClientRect().width;
+            if (shortfall > 0.5) {
+              clipped.push({
+                id: select.id,
+                by: Math.round(shortfall * 10) / 10,
+              });
             }
-            return out;
-          });
-          expect(
-            shortfalls,
-            `selects whose longest option does not fit: ${JSON.stringify(shortfalls)}`,
-          ).toEqual([]);
-        }
+          }
+          return clipped;
+        });
+        expect(
+          clippedSelects,
+          `selects narrower than their widest option: ${JSON.stringify(clippedSelects)}`,
+        ).toEqual([]);
 
         // Strengthened per PR #44 review (Palapluem): the checks above
         // never looked inside the My Tickets table, which is exactly
