@@ -30,11 +30,19 @@ test passing, then `Pass`.
 
 ### 1.3 Test database
 
-- API and E2E tests run against a dedicated database from `server/.env.test` (never the dev DB).
-- Before a run: migrate + seed the test DB (reference data + the 4 active / 1 inactive Requesters
-  are read-only fixtures).
-- Between tests: truncate `Attachment`, `Ticket`, `TicketCounter` and restart their identity
-  sequences. Reference/requester rows are left intact.
+- API tests run against a dedicated database from `server/.env.test` (`toktickit_test`, never the
+  dev DB).
+- E2E and responsive tests run against a second dedicated database, `toktickit_e2e`, configured in
+  `e2e/.env.e2e` — its own workspace (`e2e/`), separate from both the dev database and
+  `toktickit_test`, so the E2E suite can never touch either.
+- Before a run: migrate + seed the relevant database (reference data + the 4 active / 1 inactive
+  Requesters are read-only fixtures).
+- Server suite: before every test, truncate `Attachment`, `Ticket`, `TicketCounter` and restart
+  their identity sequences. Reference/requester rows are left intact.
+- E2E suite: before every `npm run test:e2e` run (there is no per-test hook, unlike the server
+  suite), the same truncate — `Attachment`, `Ticket`, `TicketCounter`, identity sequences restarted
+  — runs once via `e2e/scripts/reset-e2e-db.ts`, so ticket data does not accumulate across runs.
+  Reference/requester rows are left intact there too.
 - Uploaded files during tests go to a temp directory cleared in `afterEach`.
 
 ### 1.4 Environment matrix (responsive)
@@ -226,36 +234,45 @@ and the approved illustrations (not memory). Record the result and attach screen
 
 ## 5. Test Commands
 
-> The `.env.test.example`, `npm run db:test:reset` / `db:test` scripts, the root `test:all` script,
-> and the `e2e/` workspace do **not exist yet** — they are created by Issue #14 (test DB) and Issue
-> #20 (E2E). Until then, only `cd server && npm test` (existing Lab 1 tests) and `cd client && npm
-> test` run.
+> `server/.env.test.example`, `npm run db:test:reset` / `db:test`, the root `test:all` script, and
+> the `e2e/` workspace (created by Issue #14 and Issue #20) now exist. The commands below are the
+> actual working commands, verified against a clean checkout — see `README.md` for the full setup
+> walkthrough.
 
 Run from the repository root.
 
 ```bash
-# --- one-time: test database (created in #14) ---
+# --- one-time: install server/, client/, and e2e/ dependencies + Playwright's Chromium ---
+npm run bootstrap
+
+# --- one-time: server test database ---
 cd server
 cp .env.test.example .env.test           # points DATABASE_URL at the toktickit_test DB
 npm run db:test:reset                     # migrate + seed the test DB
 
 # --- server: unit + API/integration ---
-npm test                                  # vitest run (uses .env.test, truncates Ticket/Attachment per test)
+npm test                                  # vitest run (uses .env.test, truncates Ticket/Attachment/TicketCounter per test)
 
 # --- client: UI component + UI style ---
 cd ../client
 npm test                                  # vitest run (jsdom, fetch mocked)
 
-# --- E2E + responsive + screenshots ---
+# --- one-time: E2E database config ---
 cd ../e2e
-npm install
-npx playwright install --with-deps
-npm run test:e2e                          # boots client + server against the test DB, runs Playwright
+cp .env.e2e.example .env.e2e             # points DATABASE_URL at toktickit_e2e, VITE_API_BASE_URL at the server
+
+# --- E2E + responsive + screenshots ---
+npm run test:e2e                          # resets+seeds toktickit_e2e, boots the real client+server, runs Playwright
 
 # --- everything, from repo root ---
 cd ..
 npm run test:all                          # server + client + e2e
 ```
+
+`npm run test:e2e`'s `pretest:e2e` hook (`e2e/scripts/reset-e2e-db.ts`) creates `toktickit_e2e` if
+needed, applies migrations, truncates `Attachment`/`Ticket`/`TicketCounter` (restarting their
+identity sequences, so ticket data never accumulates across runs), and re-seeds the reference/
+requester fixtures, before Playwright boots the real client and server against it.
 
 All commands must pass from a clean checkout of `main` after the release PR is merged.
 
