@@ -351,6 +351,59 @@ test.describe("R-01 no horizontal scroll (tests.md:133, AC-39)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// R-01b: the app header bar spans the full viewport width
+// ---------------------------------------------------------------------------
+//
+// Regression for the `#root { max-width: 1120px }` bug: the header's
+// `--zen-primary` background (ui-spec.md §2) must reach both edges of the
+// window, not stop at the content container, at every viewport — including
+// windows wider than the 1120px container.
+
+test.describe("R-01b app header spans the viewport (ui-spec.md \u00a72, \u00a74)", () => {
+  for (const viewportName of VIEWPORT_NAMES) {
+    test(`app header bar is full-bleed at ${viewportName}`, async ({ page }) => {
+      await page.setViewportSize(VIEWPORTS[viewportName]);
+      await loginAsSeededRequester(page);
+      await goToPopulatedScreen(page, "my-tickets", viewportName);
+
+      const box = await page
+        .locator(".zen-app-shell__header")
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, width: r.width };
+        });
+      const vw = VIEWPORTS[viewportName].width;
+      expect(box.left).toBe(0);
+      expect(box.right).toBe(vw);
+      expect(box.width).toBe(vw);
+
+      // The header *content* still respects the centred container.
+      const innerWidth = await page
+        .locator(".zen-app-shell__header-inner")
+        .evaluate((el) => el.getBoundingClientRect().width);
+      expect(innerWidth).toBeLessThanOrEqual(1120);
+    });
+  }
+
+  test("the selection screen's slim top bar is also full-bleed (desktop)", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto("/select-requester");
+    await expect(page.locator("#requester-select")).toBeVisible();
+
+    const box = await page
+      .locator(".zen-selection-screen__topbar")
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, width: r.width };
+      });
+    expect(box.left).toBe(0);
+    expect(box.width).toBe(VIEWPORTS.desktop.width);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R-02: table -> cards
 // ---------------------------------------------------------------------------
 
