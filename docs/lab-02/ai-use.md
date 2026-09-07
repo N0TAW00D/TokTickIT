@@ -40,30 +40,36 @@ test infrastructure, verification by sabotage, debugging, responding to review, 
 
 ## My Reflection
 
-The workflow that worked for me was a spec-driven loop: write the frozen contract first
-(`specification.md`, `api-spec.md`, `ui-spec.md`, `tests.md`), then have an agent implement one
-small slice against it, then audit that slice before it went anywhere — and if the audit failed,
-send the slice back and go round again until it held. Freezing the docs up front was the part
-that paid off most: every later disagreement — with an agent or with the reviewer — could be
-settled by quoting a line of the contract instead of arguing about intent, and the agents
-couldn't quietly redesign a screen or an endpoint because the shape was already fixed.
+I set this project up so that I would control the work and not do the coding myself: I wrote the
+frozen contract first, then handed each Issue to a Sonnet agent as a small slice, audited its
+output before anything was pushed, and asked a teammate to do every merge. That structure was a
+deliberate choice to match the lab's own "AI agent + human engineer" model, and freezing
+`specification.md`, `api-spec.md`, `ui-spec.md` and `tests.md` up front is what made it hold
+together — when an agent or the reviewer and I disagreed, we could settle it by pointing at a
+line of the contract instead of arguing about what was meant, and the agents could not quietly
+redesign a screen or an endpoint because the shape was already fixed.
 
-The audit step earned its place. A passing test suite was not the same as a correct slice: the
-pagination page-reset had real gaps that every test still went green over, a date formatter shipped
-rendering "Sept" that the suite never noticed because the test built its expectation by calling the
-same broken function, and one of my own E2E tests asserted a condition that could never fail. I
-only caught those by deliberately breaking the implementation and checking the right test failed
-by name. But sabotage has a blind spot of its own — it proves a test is wired, not that its
-expected value is right — so a test that confidently asserts the wrong answer passes the audit and
-is still wrong.
+The loop that worked was spec → implement one slice → audit → and if the audit did not pass,
+send it back and go round again. The audit step is where the value was. A green test suite was
+not the same thing as a correct slice: the pagination page-reset had real gaps that every test
+passed over, a date formatter shipped rendering "Sept" because the test built its expectation by
+calling the same broken function, and one of my own end-to-end tests asserted a condition that
+could not fail. I only found those by deliberately breaking the implementation and checking that
+the right test failed by name. But that technique has its own limit — it proves a test is wired,
+not that its expected value is right — so a test that confidently asserts the wrong answer still
+passes the audit.
 
-Splitting the work into a controller plus single-slice subagents cost real time and produced a lot
-of small PRs to coordinate, and it added its own failure mode — a merge that landed on the wrong
-branch, branches going stale as others merged. What I got back was that the review was always
-against a settled base, and the audit stayed sequential and focused, which is where the value was.
+I spent a lot of the project pushing back on size and on scope: keep the PRs and the commits
+small, and check whether a piece of work is actually required by the labsheet before building it.
+That instinct was usually correct — a few things I questioned as over-engineered were trimmed —
+but the controller-plus-subagent split still cost real time and coordination, and it created its
+own failures: a PR that was approved but merged onto the wrong branch so its content never
+reached staging, and branches going stale as others merged ahead of them.
 
-The human reviewer still caught things neither the agent nor my audit did: that a `ui-spec` row
-state ("Upload failed — retry" with Retry and Dismiss) was simply never built, and that two of my
-E2E tests only passed in one execution order. The lesson I'm taking is that "the test documents
-the current behaviour" is not an acceptable answer when the behaviour disagrees with the frozen
-contract — that is a defect to fix, not to write down.
+The peer reviewer caught things that neither the agent nor my own audit did — a `ui-spec` row
+state ("Upload failed — retry" with Retry and Dismiss) that was simply never built, and two
+end-to-end tests that only passed in one execution order. Some of the review comments felt like
+small details at the time, but every one of them was addressed, and the ones that mattered were
+real. The lesson I take from this is that "the test documents the current behaviour" is not an
+acceptable answer when that behaviour disagrees with the frozen contract — that is a defect to
+fix, not something to write down.
