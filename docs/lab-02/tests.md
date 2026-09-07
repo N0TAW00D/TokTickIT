@@ -44,6 +44,9 @@ test passing, then `Pass`.
   — runs once via `e2e/scripts/reset-e2e-db.ts`, so ticket data does not accumulate across runs.
   Reference/requester rows are left intact there too.
 - Uploaded files during tests go to a temp directory cleared in `afterEach`.
+- Toolchain for every suite: Node `>=20.19.0`, npm `>=11.18.0` (enforced via each package's
+  `engines` + committed `engine-strict=true`). npm 11.18.0 is the first release with the
+  `npm install-scripts` command behind the committed `allowScripts` approvals — see §5.
 
 ### 1.4 Environment matrix (responsive)
 
@@ -238,6 +241,17 @@ and the approved illustrations (not memory). Record the result and attach screen
 > the `e2e/` workspace (created by Issue #14 and Issue #20) now exist. The commands below are the
 > actual working commands, verified against a clean checkout — see `README.md` for the full setup
 > walkthrough.
+
+**Toolchain.** The root, `server/`, `client/`, and `e2e/` packages each declare
+`engines` (Node `>=20.19.0`, npm `>=11.18.0`) and commit `.npmrc` with `engine-strict=true`, so a
+mismatched toolchain fails fast instead of silently. npm **11.18.0** is the first release that
+ships the `npm install-scripts` subcommand, which maintains the committed `allowScripts`
+approvals that let `esbuild` / `fsevents` / `prisma` / `@prisma/engines` run their install
+scripts on a fresh `npm install` (the `allowScripts` policy itself landed in npm 11.16.0 as
+`npm approve-scripts`; npm 12 makes install-script approval the default). Verified on npm
+11.19.0 / Node 26. On an older npm the committed approvals still take effect on a plain
+`npm install` / `npm run bootstrap`, but the `npm install-scripts` diagnostic is unavailable —
+upgrade npm rather than working around it.
 
 Run from the repository root.
 
