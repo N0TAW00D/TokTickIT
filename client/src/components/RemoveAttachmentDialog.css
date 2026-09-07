@@ -1,0 +1,62 @@
+/* Remove attachment confirmation dialog (ui-spec.md §10 "Remove flow"). */
+
+.zen-remove-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--zen-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--zen-space-group-gap);
+  z-index: 1000;
+}
+
+.zen-remove-dialog {
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 2 * var(--zen-space-group-gap));
+  overflow-y: auto;
+  background: var(--zen-surface);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+.zen-remove-dialog__body {
+  color: var(--zen-text);
+  font-size: var(--zen-font-size-body);
+  margin: 0 0 var(--zen-space-group-gap);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.zen-remove-dialog__conflict {
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border-radius: var(--zen-radius-control);
+  padding: 8px 12px;
+  margin-top: var(--zen-space-field-gap);
+  font-size: var(--zen-font-size-error);
+}
+
+.zen-remove-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: var(--zen-space-group-gap);
+}
+
+@media (max-width: 767px) {
+  .zen-remove-dialog {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+
+  .zen-remove-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-remove-dialog__actions .zen-btn {
+    width: 100%;
+  }
+}
