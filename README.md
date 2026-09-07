@@ -9,6 +9,29 @@ Full-stack app with a React + Vite client and an Express + Prisma server backed 
 
 ## Setup
 
+### 0. Install everything
+
+From the repository root:
+
+```bash
+npm run bootstrap
+```
+
+Installs `server/`, `client/`, and `e2e/` dependencies (each stays an independent npm package —
+this is not an npm workspace) and the Playwright Chromium browser, in that order. This is the one
+command a clean checkout needs before any `.env` copying or test run below; the per-package
+`npm install` steps in sections 1–4 do the same installs individually, for anyone who wants to run
+them by hand instead.
+
+`server/package.json`, `client/package.json`, and `e2e/package.json` each commit an `allowScripts`
+allowlist (npm 11 blocks a dependency's `preinstall`/`install`/`postinstall` scripts unless the
+project explicitly approves them — `npm install-scripts ls` shows what would otherwise be skipped).
+Because those approvals are committed rather than left to each developer's local npm config, plain
+`npm install` (what `bootstrap` and every step below run) already executes everything a fresh clone
+needs — no separate `npm install-scripts approve` step, and no manual `npm run db:generate`, either:
+`server/tests/setup/global-setup.ts` and `e2e/scripts/reset-e2e-db.ts` both run `prisma generate`
+themselves before they need the generated client.
+
 ### 1. Database
 
 ```bash
@@ -111,8 +134,9 @@ npm run test:all      # server unit/API tests, then client tests, then the e2e s
 
 Runs `test:server` (`cd server && npm test`), `test:client` (`cd client && npm test`), and
 `test:e2e` (`cd e2e && npm run test:e2e`) in that order, stopping at the first failure. This
-assumes each workspace's `npm install` (and, for `e2e`, `npx playwright install chromium`) has
-already been run at least once, per the steps above.
+assumes `npm run bootstrap` (section 0) — or the equivalent per-package `npm install` /
+`npx playwright install chromium` steps above — has already been run at least once, and that
+`server/.env.test` and `e2e/.env.e2e` have been copied from their `.example` files.
 
 ## Project structure
 
