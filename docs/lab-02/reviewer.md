@@ -4,16 +4,16 @@ Part 2 deliverable (`specification.md` §10.2). Every Lab 2 change reached `lab2
 through a peer-reviewed pull request; there were no direct commits to `main` or
 `lab2-staging`.
 
-> **Draft — not final.** Current through **PR #59**. PRs #21–#53 are merged; #54, #56–#59 are
-> open at the time of writing (#45 and #55 closed). Sections 2 and 3 track the open PRs' latest
-> state; both, and §5, need a final pass once the remaining PRs and the release PR merge; the
-> author reviews the drafted ai-use.md reflection and the §5 reciprocity note.
+> **Draft — not final.** Current through **PR #63**. PRs #21–#59 are merged; #60–#63 are open at
+> the time of writing (#45 and #55 closed). §2 and §3 track the open PRs' latest state; both, and
+> §5, get a final pass once the remaining PRs and the release PR merge, and once the author
+> reviews the drafted ai-use.md reflection and the §5 note.
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 2 pull request (#21–#59). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 2 pull request (#21–#63). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed the Lab 2 pull requests and merged them; the exceptions are #45 (closed, superseded by #50) and #55 (closed without review as out of scope). Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Reviewed in Lab 1 (#5–#12); not a reviewer on Lab 2. |
 
@@ -57,12 +57,16 @@ reviewer (an approval on the first pass is 1).
 | [#51](https://github.com/N0TAW00D/TokTickIT/pull/51) | Attachment download, image preview & Add Attachment on Ticket Detail (#17, client 4/4 — slice 14d) | Approved first pass | 1 |
 | [#52](https://github.com/N0TAW00D/TokTickIT/pull/52) | Refresh `tests.md` Final column after the #40–#49 merges (#20) | Approved first pass (reviewer noted a further refresh is still due) | 1 |
 | [#53](https://github.com/N0TAW00D/TokTickIT/pull/53) | E2E-03 cross-requester isolation spec (#20) | **Changes requested** (passed only in one execution order) → reworked (E2E-04's check made a before/after delta) → approved, merged | 2 |
-| [#54](https://github.com/N0TAW00D/TokTickIT/pull/54) | E2E-01 full attachment journey & E2E-02 failure / soft-removal (#20) | **Changes requested** (E2E-02's "Upload failed — retry" affordance not implemented) → fix in #59 | 1+ |
+| [#54](https://github.com/N0TAW00D/TokTickIT/pull/54) | E2E-01 full attachment journey & E2E-02 failure / soft-removal (#20) | **Changes requested** (E2E-02's "Upload failed — retry" affordance not implemented) → affordance built in #59, E2E-02 reworked to drive it → approved, merged | 2 |
 | [#55](https://github.com/N0TAW00D/TokTickIT/pull/55) | Add `@types/node` and `@types/pg` to the `e2e/` workspace (#20) | **Closed** without review — workspace hygiene only, not on any rubric path | — |
-| [#56](https://github.com/N0TAW00D/TokTickIT/pull/56) | Answer Part 8 evidence: Ticket Detail & attachment lifecycle (#20) | Approved first pass | 1 |
+| [#56](https://github.com/N0TAW00D/TokTickIT/pull/56) | Answer Part 8 evidence: Ticket Detail & attachment lifecycle (#20) | Approved first pass, merged | 1 |
 | [#57](https://github.com/N0TAW00D/TokTickIT/pull/57) | Add `docs/lab-02/reviewer.md` and `ai-use.md` (this record) (#20) | **Changes requested** (stale outcomes; reflection was a TODO) → outcomes updated, reflection drafted | 1+ |
 | [#58](https://github.com/N0TAW00D/TokTickIT/pull/58) | Refresh README e2e section and root `.gitignore` (#20) | **Changes requested** (README implied unmerged specs were on staging) → reworded | 1+ |
-| [#59](https://github.com/N0TAW00D/TokTickIT/pull/59) | Ticket Detail "Upload failed — retry" row with Retry and Dismiss (#17) — the affordance #54's E2E-02 needs | Review pending | — |
+| [#59](https://github.com/N0TAW00D/TokTickIT/pull/59) | Ticket Detail "Upload failed — retry" row with Retry and Dismiss (#17) — the affordance #54's E2E-02 needs | Approved first pass, merged | 1 |
+| [#60](https://github.com/N0TAW00D/TokTickIT/pull/60) | S-01 colour-token check; last `tests.md` §2 Pending row resolved (#20) | **Changes requested** (frozen test-file column; falsifiability) → reworked as a stylesheet check in `ui-style.test.tsx` → re-review pending | 1+ |
+| [#61](https://github.com/N0TAW00D/TokTickIT/pull/61) | Complete the `tests.md` §4 responsive & visual checklist (#20, Part 9) | **Changes requested** (viewport dimensions; a V-10 claim not in the screenshots) → corrected → re-review pending | 1+ |
+| [#62](https://github.com/N0TAW00D/TokTickIT/pull/62) | `docs/lab-02/submission.typ` — the Answer Part 1..9 document (#20) | **Changes requested** (placeholders; finalise after the release run) → held for the release pass | 1+ |
+| [#63](https://github.com/N0TAW00D/TokTickIT/pull/63) | Fix: the app header bar was not full-bleed (#20, Part 9) | **Changes requested** (add a regression assertion; shorten the comment) → done, R-01b header-bounds check added → re-review pending | 1+ |
 
 Notes:
 - **Formal `Changes requested` vs `Commented`.** Only #25, #31, #42, #44, #45, #47 and #53 carry a
@@ -260,7 +264,9 @@ Dismiss`); the immediate-upload path on Ticket Detail rendered only a `role="ale
 gap was noted when 14d was built but was not treated as a #51 blocker, which it should have been.
 The affordance is implemented in **#59** (`AttachmentSection` renders a per-file failed-upload row
 with those exact controls; `Retry` re-uploads, `Dismiss` drops the row; five component tests,
-sabotage-checked). #54's E2E-02 is being reworked to drive and assert it once #59 merges.
+sabotage-checked). #59 was approved and merged; #54's E2E-02 was then reworked to select the
+failed file, assert the `Retry` / `Dismiss` row, click `Retry`, and assert the real active row
+appears — and #54 merged.
 
 ## 4. Corrections issued by the author
 
@@ -279,7 +285,7 @@ left standing:
 
 ## 5. Direction of review
 
-Every Lab 2 pull request (#21–#59) was authored by `N0TAW00D` and reviewed by `Palapluem`.
+Every Lab 2 pull request (#21–#63) was authored by `N0TAW00D` and reviewed by `Palapluem`.
 Review within Lab 2 therefore flowed in one direction: this record holds the comments the
 author **received** and the author's **responses** to them, and no comments **given** by the
 author on a teammate's Lab 2 pull request. In Lab 1, review was reciprocal — `N0TAW00D`
