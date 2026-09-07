@@ -91,7 +91,9 @@ which creates `toktickit_e2e` if needed, applies all Prisma migrations, and seed
 Playwright. Playwright's `webServer` config (`e2e/playwright.config.ts`) boots the real API (`tsx
 src/index.ts`, `DATABASE_URL` pointed at `toktickit_e2e`) and the real client (`vite dev`,
 `VITE_API_BASE_URL` pointed at the API) itself — nothing needs to be started by hand first, and
-`reuseExistingServer` is disabled in CI so a stale server can never mask a broken one.
+`reuseExistingServer` is always `false` — locally and in CI — so a stray dev server or a stale
+process from another checkout on :3000/:5173 can never be silently adopted; if either port is
+already occupied, Playwright fails fast instead of running the suite against it.
 
 Only one spec exists so far, `e2e/lab-02/harness.smoke.spec.ts`: it proves the harness boots the
 whole stack by asserting the Requester Selection screen lists the seeded active Requesters (and

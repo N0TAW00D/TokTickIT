@@ -78,7 +78,22 @@ export default defineConfig({
       cwd: serverRoot,
       url: `${SERVER_URL}/api/health`,
       env: { ...process.env, DATABASE_URL },
-      reuseExistingServer: !process.env.CI,
+      // Never adopt whatever is already listening on :3000, locally or in
+      // CI. A developer's own `npm run dev` (pointed at `localdb`, the dev
+      // database) or a stale process left running in another worktree can
+      // easily already be bound to this port; silently reusing it would
+      // run the suite's writes against the wrong database and make the
+      // result depend on whatever happened to already be there instead of
+      // on this config. The alternative — accepting an existing server
+      // after verifying it reports the expected database — was considered
+      // and rejected: the app has no endpoint that reports which database
+      // it's connected to, and adding one only to serve this check is more
+      // surface area than simply never reusing. With this false,
+      // Playwright itself fails fast ("<url> is already used, make sure
+      // that nothing is running on the port") instead of hanging or
+      // silently proceeding, which is the same "fail loudly" property
+      // harness.smoke.spec.ts is written to rely on elsewhere.
+      reuseExistingServer: false,
       // A cold boot here is tsx transpiling + Prisma generating the client
       // adapter + opening the pg pool — comfortably more than Playwright's
       // 60s default on a first run.
@@ -103,7 +118,11 @@ export default defineConfig({
       cwd: clientRoot,
       url: CLIENT_URL,
       env: { ...process.env, VITE_API_BASE_URL: CLIENT_API_BASE_URL },
-      reuseExistingServer: !process.env.CI,
+      // Never reuse here either, for the same reason as the server entry
+      // above: a stray `vite dev` already on :5173 (someone's own dev
+      // server, or a leftover from another worktree) must not be silently
+      // adopted.
+      reuseExistingServer: false,
       timeout: 60_000,
     },
   ],
