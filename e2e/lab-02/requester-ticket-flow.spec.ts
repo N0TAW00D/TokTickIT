@@ -733,16 +733,14 @@ test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC
 // (BR-33). api-spec.md §4.4 (DELETE reason 3-200 trimmed) and §4.3
 // (410 ATTACHMENT_REMOVED).
 //
-// NOTE ON THE "retry affordance": ui-spec.md §10's state table names an
-// "Upload failed -- retry" per-row affordance with `Retry` + `Dismiss`
-// buttons, but the components as built on lab2-staging do NOT render that.
-// A failed upload from the Ticket Detail "+ Add attachment" control
-// (AttachmentSection.handleQueuedChange -> catch) renders a single
-// `role="alert"` callout ("Could not upload \"<file>\". Please check your
-// connection and try again.") and clears the queue; the user retries by
-// re-selecting the file through the same Add control. This test asserts the
-// affordance that actually exists (the role="alert" naming the file, then a
-// working re-add) — see the report for the human decision this needs.
+// The "retry affordance" is ui-spec.md §10's "Upload failed" row state:
+// `name + "Upload failed — retry", Retry + Dismiss`. A failed upload from
+// the Ticket Detail "+ Add attachment" control renders a per-file row with
+// exactly those controls (client/src/components/AttachmentSection.tsx);
+// `Retry` re-attempts the upload for that same file. This test drives that
+// row: fail the first POST, assert the failed row with its Retry/Dismiss,
+// click Retry (the intercept now lets the request through), and assert the
+// real active row appears.
 //
 // Requester: "Sarah Johnson", same rationale as E2E-01. The ticket and its
 // attachment are created here and every assertion is keyed to that
@@ -812,20 +810,26 @@ test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34,
     const ATTACHMENT_NAME = "e2e-02-evidence.pdf";
     const fixturePath = writePdfFixture(ATTACHMENT_NAME);
 
-    // --- first attempt: the upload fails ------------------------------
+    // --- first attempt: the upload fails, and the "Upload failed" row ----
+    // renders with its Retry + Dismiss controls (ui-spec.md §10 row table).
     await page
       .locator("#ticket-detail-attachments-input")
       .setInputFiles(fixturePath);
-    // The failure affordance that actually renders (see the block comment):
-    // a role="alert" callout naming the file. This is what the user acts on.
-    const uploadAlert = page
-      .getByRole("alert")
+
+    const failedRow = page
+      .locator(".zen-attachment-uploader__item--failed")
       .filter({ hasText: ATTACHMENT_NAME });
-    await expect(uploadAlert).toBeVisible();
-    await expect(uploadAlert).toContainText("Could not upload");
+    await expect(failedRow).toBeVisible();
+    await expect(failedRow).toContainText("Upload failed — retry");
+    const retryButton = failedRow.getByRole("button", { name: "Retry" });
+    await expect(retryButton).toBeVisible();
+    await expect(
+      failedRow.getByRole("button", { name: "Dismiss" }),
+    ).toBeVisible();
     expect(failedFirstUpload).toBe(true);
-    // BR-27: an upload that fails from Ticket Detail leaves the ticket's
-    // attachments untouched — no row, count unchanged.
+
+    // BR-27: an upload that fails leaves the ticket's attachments untouched
+    // — no active row, count unchanged.
     await expect(
       page.getByRole("heading", {
         name: "Attachments (0 active / 0 total)",
@@ -834,14 +838,18 @@ test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34,
     ).toBeVisible();
     await expect(page.locator(".zen-attachment-list__item")).toHaveCount(0);
 
-    // --- retry: re-select the same file, this POST reaches the server --
-    await page
-      .locator("#ticket-detail-attachments-input")
-      .setInputFiles(fixturePath);
+    // --- retry: click Retry on the failed row; this POST reaches the -----
+    // server (the intercept only aborts the first one), the failed row is
+    // replaced by a real active row and both counts advance (AC-21).
+    await retryButton.click();
+
     const attachmentRow = page
       .locator(".zen-attachment-list__item")
       .filter({ hasText: ATTACHMENT_NAME });
     await expect(attachmentRow).toHaveCount(1);
+    await expect(
+      page.locator(".zen-attachment-uploader__item--failed"),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("heading", {
         name: "Attachments (1 active / 1 total)",
