@@ -4,7 +4,11 @@ Full-stack app with a React + Vite client and an Express + Prisma server backed 
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ (developed and tested on Node 26)
+- npm 11.18+ (or npm 12.x) — required for the `npm install-scripts` command that backs the
+  committed `allowScripts` approvals; see [section 0](#0-install-everything). Check with
+  `npm --version`. Each package pins this in `engines` and commits `.npmrc` with
+  `engine-strict=true`, so an older npm is rejected rather than silently skipping build scripts.
 - Docker (for local PostgreSQL)
 
 ## Setup
@@ -24,11 +28,14 @@ command a clean checkout needs before any `.env` copying or test run below; the 
 them by hand instead.
 
 `server/package.json`, `client/package.json`, and `e2e/package.json` each commit an `allowScripts`
-allowlist (npm 11 blocks a dependency's `preinstall`/`install`/`postinstall` scripts unless the
-project explicitly approves them — `npm install-scripts ls` shows what would otherwise be skipped).
-Because those approvals are committed rather than left to each developer's local npm config, plain
-`npm install` (what `bootstrap` and every step below run) already executes everything a fresh clone
-needs — no separate `npm install-scripts approve` step, and no manual `npm run db:generate`, either:
+allowlist. npm gates a dependency's `preinstall`/`install`/`postinstall` scripts unless the project
+explicitly approves them: the policy landed in npm 11.16.0 (then `npm approve-scripts`), the
+`npm install-scripts` command that manages the field arrived in **npm 11.18.0**, and npm 12 makes
+approval the default. `npm install-scripts ls` shows what would otherwise be skipped. Verified on
+npm 11.19.0 / Node 26. Because those approvals are committed rather than left to each developer's
+local npm config, plain `npm install` (what `bootstrap` and every step below run) already executes
+everything a fresh clone needs — no separate `npm install-scripts approve` step, and no manual
+`npm run db:generate`, either:
 `server/tests/setup/global-setup.ts` and `e2e/scripts/reset-e2e-db.ts` both run `prisma generate`
 themselves before they need the generated client.
 
