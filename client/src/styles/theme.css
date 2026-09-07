@@ -135,23 +135,17 @@ body {
   overflow-x: hidden;
 }
 
-/* Container (ui-spec.md §3): centered, max-width 1120px, 24px desktop gutters
-   / 16px mobile. Overrides the scaffold's fixed 1126px bordered, centered-text
-   column, which would otherwise centre every form label and table cell. */
+/* Full-bleed mount point: the header bar and page background span the
+   viewport. The centred 1120px container (ui-spec.md §3) lives on
+   `.zen-app-shell__header-inner` / `__content` / `.zen-selection-screen__main`,
+   not here — so a window wider than 1120px shows no strip beside the header.
+   `text-align: left` overrides the scaffold's centred column. */
 #root {
   width: 100%;
-  max-width: var(--zen-container-max-width);
-  margin: 0 auto;
-  padding-inline: var(--zen-container-gutter-desktop);
+  margin: 0;
   border-inline: 0;
   text-align: left;
   box-sizing: border-box;
-}
-
-@media (max-width: 767px) {
-  #root {
-    padding-inline: var(--zen-container-gutter-mobile);
-  }
 }
 
 /* The scaffold sizes h1 at 56px / h2 at 24px; the spec's scale is page title
