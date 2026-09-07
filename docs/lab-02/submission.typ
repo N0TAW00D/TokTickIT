@@ -61,8 +61,8 @@
 
 *Workflow.* `lab2-staging` was cut from `main`. Every GitHub Issue (#13–#20) was implemented on
 its own `feat/…` / `docs/…` feature branch, merged into `lab2-staging` through a peer-reviewed
-pull request, and the whole of `lab2-staging` reaches `main` through one release PR. There are
-no direct commits to `main` or `lab2-staging`.
+pull request, and the whole of `lab2-staging` reached `main` through the single release PR
+#pr(64) (merged 2026-09-07). There are no direct commits to `main` or `lab2-staging`.
 
 - Full commit history: #link(repo + "/commits/main")[github.com/N0TAW00D/TokTickIT/commits/main]
 - Pull requests: #link(repo + "/pulls?q=is:pr")[all PRs] — 40+ Lab 2 PRs (#pr(21) onward)
@@ -82,20 +82,20 @@ ba1ef3c  Merge pull request #47 from N0TAW00D/feat/14c-remove-dialog
 ```
 
 The IDE Git-graph view of the same history, most-recent first. Every labelled node is a
-`Merge pull request #NN` commit onto `lab2-staging`; `main` sits at the Lab 1 release
-(`Merge pull request #12`) and receives the whole of `lab2-staging` through the single release
-PR (#pr(64)'s successor, opened `lab2-staging → main` once #pr(62) — this document — merges).
+`Merge pull request #NN` commit onto `lab2-staging`; the whole branch reaches `main` at the
+top through the #pr(64) release merge, and `main` was previously at the Lab 1 release
+(`Merge pull request #12`) at the bottom.
 
-#shot("submission/part-1-workflow/git-graph-1-recent.png", [Git graph, most recent — the
-`docs/20-submission-pdf` branch (this document) one commit ahead of `lab2-staging`, over the
-#pr(57)–#pr(63) merges.])
+#shot("submission/part-1-workflow/git-graph-1-recent.png", [Git graph, most recent — `main`
+(`origin/HEAD`) at the #pr(64) release merge of `lab2-staging`, above the #pr(57)–#pr(63)
+document / fix / token merges.])
 #shot("submission/part-1-workflow/git-graph-2-mid.png", [Git graph, middle — the #pr(38)–#pr(53)
 merge band: attachment lifecycle, My Tickets, E2E harness and responsive evidence.])
 #shot("submission/part-1-workflow/git-graph-3-early.png", [Git graph, earliest — #pr(21)
 (spec contract) through the #pr(36) merges, down to `main` at the Lab 1 release.])
 
 *Project board.* Swept 2026-09-07: Issues #1–#19 are *Done* and closed; #20 (this integration
-work) is the last card and moves to *Done* when the release PR merges. Columns:
+work) is the last card, moved to *Done* on the #pr(64) release merge. Columns:
 Backlog → Specified → Started → PR Review → (Fixing) → Done.
 
 #shot("submission/part-1-workflow/kanban-all-done.png", [GitHub Project "TokTickIT Individual
@@ -180,7 +180,7 @@ least one passing test.
 
 *Passing test output.*
 
-Run from a clean `lab2-staging` checkout (the exact tree this release PR merges into `main`):
+Run from `main` at the #pr(64) release merge (`77e3142`):
 
 #shot("submission/part-3-tests/test-server.png", [`npm run test:server` — Vitest + Supertest
 against `toktickit_test`: *13 files, 187 passed*.])
@@ -190,7 +190,19 @@ Library (jsdom): *11 files, 206 passed* — includes S-01's Zen Green token chec
 real API + `toktickit_e2e`: *77 passed* (harness smoke, E2E-01..E2E-05, R-01..R-06 + R-01b,
 Answer Part 6/7/8 evidence specs).])
 
-The root `npm run test:all` runs all three in order: *470 automated checks, all passing*.
+The root `npm run test:all` runs all three in order — re-run on `main` after the release merge:
+
+```
+$ git rev-parse --short HEAD
+77e3142
+$ npm run test:all
+ …
+ Test Files  13 passed (13)      Tests  187 passed (187)     # server
+ Test Files  11 passed (11)      Tests  206 passed (206)     # client
+  77 passed (40.8s)                                          # e2e
+```
+
+470 automated checks, all passing.
 
 
 = Answer Part 4: AI Use with Reflection
