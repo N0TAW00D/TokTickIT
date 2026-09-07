@@ -61,6 +61,42 @@
   min-width: 0;
 }
 
+/* No select may clip its own longest option (ui-spec.md:549 — "Filters,
+   sort, Clear Filters, and pagination are usable and unclipped at every
+   viewport").
+
+   A uniform `flex: 1 1 140px` gave all four controls the same 150.3px box.
+   Their natural widths — measured by cloning each select at
+   `width: max-content`, so the native dropdown arrow is included, not just
+   font metrics and padding — are:
+
+     Category  "Account and Access"     194px
+     Priority  "All Priorities"         132px
+     Status    "All Statuses"           132px
+     Sort      "Last updated (newest)"  209px
+
+   667px in total, against roughly 601px the row had: this cannot be solved
+   by redistributing between the four, so they keep their natural width and
+   the row wraps to a second line when the bar is too narrow
+   (`flex-wrap: wrap` is already set on the container above). Sizing to
+   fixed pixel bases was tried first and rejected — it silently re-clips as
+   soon as a Category or Related System name grows. */
+@media (min-width: 768px) {
+  .zen-my-tickets__filters > * {
+    flex: 0 1 auto;
+    min-width: max-content;
+  }
+
+  /* Keep the four on one line: without this the container is sized by its
+     `flex: 2 1 480px` basis, the controls wrap to a second row inside it,
+     and the search field beside them — aligned to `flex-end` — is stranded
+     against the bottom of a half-empty bar. Asking for their combined
+     natural width instead leaves the search field the remainder. */
+  .zen-my-tickets__filters {
+    min-width: max-content;
+  }
+}
+
 /* Mobile: controls wrap to full-width stacked selects (ui-spec.md §9, §11 —
    no horizontal page scroll at any viewport). */
 @media (max-width: 767px) {
@@ -99,6 +135,16 @@
 /* Own scroll container, not the page (ui-spec.md §11: no horizontal page
    scroll at any viewport) — a very wide table scrolls inside itself. */
 .zen-my-tickets__table-scroll {
+  /* Containing block for the `.zen-visually-hidden` spans inside the table
+     (the "Actions" header, the per-row link text). They are
+     `position: absolute`, so with no positioned ancestor they resolve
+     against the initial containing block and escape this container's
+     `overflow-x: auto` clipping — at the 900px tablet viewport that pushed
+     the document 105px past its client width. Measured document overflow at
+     my-tickets, before -> after: tablet 105 -> 0, desktop 0 -> 0,
+     mobile 0 -> 0. The wide table was never the cause; it scrolls inside
+     this container as intended. */
+  position: relative;
   overflow-x: auto;
   background: var(--zen-surface);
   border: 1px solid var(--zen-border);
@@ -115,7 +161,14 @@
 .zen-my-tickets__table th,
 .zen-my-tickets__table td {
   text-align: left;
-  padding: 12px 16px;
+  /* Horizontal padding trimmed from the original 16px so all eight columns
+     (plus the hidden-label Actions column) fit inside the 1120px container
+     without a horizontal scrollbar (ui-spec.md §3, §11) — see the
+     `.zen-my-tickets__truncate--*` widths below, sized against this
+     padding for the real seeded data (server/prisma/seed.ts's longest
+     Category, "Account and Access", and longest Related System, "Grade
+     Submission App"). */
+  padding: 12px 8px;
   border-bottom: 1px solid var(--zen-border);
   white-space: nowrap;
 }
@@ -207,12 +260,32 @@
 
 /* Long summaries / related-system names truncate with an ellipsis, never
    silently clip (ui-spec.md §9, §11) — the `title` attribute on the cell
-   carries the full text. */
+   carries the full text. Table-layout is `auto` (not `fixed`): a cell's
+   `max-width` still constrains that column's computed width under the
+   auto algorithm, which is what keeps these two columns from pushing the
+   rest of the row (Priority, Status, Last Updated) past the 1120px
+   container (ui-spec.md §3, §11) — confirmed against the real table via
+   Playwright `getBoundingClientRect`, not assumed. */
 .zen-my-tickets__truncate {
-  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Desktop-table-only widths, sized so all nine `<th>`/`<td>` columns fit
+   the 1022px content width the table's `.zen-my-tickets__table-scroll`
+   ancestor actually has at desktop (measured: 1120px container − 24px×2
+   outer gutter − 24px×2 `.zen-app-shell__content` inner gutter − 1px×2
+   scroll-container border). The other six columns' content is bounded
+   (ticket number / date formats, the fixed Priority/Status badge text)
+   and are left to size themselves; only Summary and Related System carry
+   effectively unbounded text. */
+.zen-my-tickets__table .zen-my-tickets__truncate--summary {
+  max-width: 132px;
+}
+
+.zen-my-tickets__table .zen-my-tickets__truncate--related-system {
+  max-width: 104px;
 }
 
 /* ---- Mobile cards ---- */
