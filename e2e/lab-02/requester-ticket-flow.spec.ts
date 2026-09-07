@@ -2,11 +2,11 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 
 // Requester ticketing E2E journey (docs/lab-02/tests.md §2, E2E-01..E2E-05).
 //
-// This commit adds E2E-04. E2E-05 lands next; E2E-01, E2E-02 and E2E-03 are
+// This slice adds ONLY E2E-04 and E2E-05. E2E-01, E2E-02 and E2E-03 are
 // earlier rows of the same table that depend on PRs not yet merged into
 // this stack (the attachment uploader, the full create+search+download
 // journey) and are written into this same file by another slice — room is
-// deliberately left for them above the `test.describe` blocks.
+// deliberately left for them above these two `test.describe` blocks.
 //
 // Driven against the REAL client + REAL server + the shared `toktickit_e2e`
 // Postgres database, exactly like e2e/lab-02/responsive.spec.ts and
@@ -216,5 +216,153 @@ test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
     const david = await requesterByName(api, "David Lee");
     expect(await ownedTicketCount(api, david.id)).toBe(0);
     await api.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E-05 (AC-29, AC-30) — empty vs no-results
+// ---------------------------------------------------------------------------
+//
+// specification.md AC-29: "Given the current Requester owns zero tickets,
+// when My Tickets loads, then the empty-state message and a Create Ticket
+// call-to-action are shown (not the no-results state)." AC-30: "Given a
+// filter/search that matches nothing, when applied, then the no-results
+// state is shown with filters still visible and a Clear Filters action."
+// BR-37: the two are different states with different messages; no-results
+// keeps the active filters visible and offers Clear Filters.
+//
+// ui-spec.md §9 pins: the empty state hides the search/filter bar entirely
+// (nothing to filter yet); the no-results state keeps it visible and
+// populated. All the on-screen copy asserted below ("You haven't created
+// any tickets yet.", "+ Create your first ticket", "No tickets match your
+// search or filters.", "Clear filters") is pinned verbatim by the frozen
+// ui-spec.md §9 States table.
+//
+// Requester: "Jennifer Anderson". NOT "Michael Brown" (whom
+// submission-evidence.spec.ts reserves as a never-write, always-empty
+// Requester and whose `beforeAll` throws if he owns any ticket) — this test
+// must create a ticket for its subject Requester, so it needs a different
+// one. submission-evidence.spec.ts only ever uses Jennifer Anderson for the
+// Create Ticket screen + her requesterId, never for My Tickets list/count
+// assertions, and responsive.spec.ts uses David Lee — so the one ticket
+// created here does not pollute either. `pretest:e2e` truncates
+// Ticket/Attachment/TicketCounter before every run, and this test asserts
+// its Requester's live ticket count is zero before trusting the empty state
+// rather than assuming a starting count.
+const EMPTY_STATE_REQUESTER = "Jennifer Anderson";
+
+test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
+  let requesterId: number;
+
+  test.beforeAll(async () => {
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    requesterId = (await requesterByName(api, EMPTY_STATE_REQUESTER)).id;
+    const owned = await ownedTicketCount(api, requesterId);
+    if (owned !== 0) {
+      throw new Error(
+        `E2E-05 needs "${EMPTY_STATE_REQUESTER}" (id ${requesterId}) to own zero tickets ` +
+          `for the empty-state assertion, but the API reports ${owned}. Another spec ` +
+          "created tickets for this Requester — pick a different genuinely-empty seeded " +
+          "active Requester for EMPTY_STATE_REQUESTER, or investigate what created them.",
+      );
+    }
+    await api.dispose();
+  });
+
+  test("a zero-ticket Requester sees the empty state; after creating one, a non-matching search shows the visibly-different no-results state", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, EMPTY_STATE_REQUESTER);
+
+    // --- AC-29: empty state -------------------------------------------------
+    // Landed on /tickets already (loginAs asserts the URL). The empty state
+    // is on screen BEFORE anything is trusted about it.
+    const emptyHeading = page.getByRole("heading", {
+      name: "You haven't created any tickets yet.",
+    });
+    await expect(emptyHeading).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "+ Create your first ticket" }),
+    ).toBeVisible();
+
+    // ui-spec.md §9 / AC-29: the search + filter bar is hidden entirely in
+    // the true-empty state. Capture the fact for the "visibly different"
+    // comparison below.
+    const searchBox = page.locator("#my-tickets-search");
+    await expect(searchBox).toHaveCount(0);
+    const noResultsMessage = page.getByText(
+      "No tickets match your search or filters.",
+    );
+    await expect(noResultsMessage).toHaveCount(0);
+    const emptyStateHadSearchBar = (await searchBox.count()) > 0;
+
+    // --- create exactly one ticket, through the real Create Ticket form ----
+    await page.goto("/tickets/new");
+    await expect
+      .poll(() => page.locator("#create-ticket-category option").count())
+      .toBeGreaterThan(1);
+    await expect
+      .poll(() => page.locator("#create-ticket-related-system option").count())
+      .toBeGreaterThan(1);
+    await page.locator("#create-ticket-category").selectOption({ index: 1 });
+    await page
+      .locator("#create-ticket-related-system")
+      .selectOption({ index: 1 });
+    const onlyTicketSummary = "E2E-05: the one and only ticket for this Requester";
+    await page.locator("#create-ticket-summary").fill(onlyTicketSummary);
+    await page
+      .locator("#create-ticket-description")
+      .fill(
+        "This description clears the twenty character minimum so the single seeding ticket is created through the real form and the real API.",
+      );
+    await clickSubmitTicket(page);
+    await expect(
+      page.getByRole("heading", { name: /^Ticket TKT-\d{4}-\d{6} created$/ }),
+    ).toBeVisible();
+
+    // --- AC-30: no-results state -----------------------------------------
+    await page.goto("/tickets");
+    // The Requester now genuinely owns a ticket: the list (not the empty
+    // state) is what renders, the search bar is present again, and the one
+    // row is the ticket just created.
+    await expect(searchBox).toBeVisible();
+    await expect
+      .poll(() => page.locator(".zen-my-tickets__table tbody tr").count())
+      .toBe(1);
+    await expect(
+      page.locator(".zen-my-tickets__table tbody tr").first(),
+    ).toContainText(onlyTicketSummary);
+
+    // A search that matches nothing (debounced 300ms in the app; a
+    // web-first assertion waits it out — no fixed sleep).
+    await searchBox.fill("zzz-no-ticket-will-ever-match-this-string-zzz");
+
+    await expect(noResultsMessage).toBeVisible();
+    // AC-30 / BR-37: filters stay visible and populated, and a Clear filters
+    // action is offered right in the no-results block (scoped to it — the
+    // My Tickets header also carries a "Clear filters" button whenever a
+    // filter is non-default, so an unscoped role query matches two).
+    await expect(searchBox).toBeVisible();
+    await expect(searchBox).toHaveValue(
+      "zzz-no-ticket-will-ever-match-this-string-zzz",
+    );
+    await expect(
+      page
+        .locator(".zen-no-results")
+        .getByRole("button", { name: "Clear filters" }),
+    ).toBeVisible();
+    // Not the empty state (AC-29 vs AC-30 are different states, BR-37).
+    await expect(emptyHeading).toHaveCount(0);
+    const noResultsStateHasSearchBar = await searchBox.isVisible();
+
+    // --- the two states are visibly different (BR-37, ui-spec.md §9) -------
+    // Empty: no search bar, "You haven't created any tickets yet." + a
+    // primary "create your first ticket" CTA, no no-results message.
+    // No-results: search bar present and populated, "No tickets match your
+    // search or filters." + Clear filters, no empty-state heading.
+    expect(emptyStateHadSearchBar).toBe(false);
+    expect(noResultsStateHasSearchBar).toBe(true);
+    expect(noResultsStateHasSearchBar).not.toBe(emptyStateHadSearchBar);
   });
 });
