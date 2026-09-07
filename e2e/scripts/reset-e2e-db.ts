@@ -93,6 +93,32 @@ function runInServer(command: string, args: string[], env: NodeJS.ProcessEnv): v
   });
 }
 
+/**
+ * Clears the tables E2E specs write to, restarting their identity
+ * sequences, so every `npm run test:e2e` run starts from the same empty
+ * state instead of accumulating tickets forever (confirmed: `toktickit_e2e`
+ * had reached 129+ rows before this existed). Mirrors
+ * server/tests/setup/reset-db.ts's per-test truncate exactly — same three
+ * tables, same TRUNCATE ... RESTART IDENTITY CASCADE statement — just run
+ * once per E2E run rather than once per test, since Playwright has no
+ * equivalent of Vitest's `beforeEach`. Category, RelatedSystem and
+ * RequesterUser are deliberately excluded: they are read-only reference
+ * fixtures (docs/lab-02/tests.md §1.3) that seed.ts upserts idempotently
+ * and specs must not depend on mutating.
+ */
+async function resetTransactionalData(e2eUrl: string): Promise<void> {
+  const client = new Client({ connectionString: e2eUrl });
+  await client.connect();
+  try {
+    await client.query(
+      'TRUNCATE TABLE "Attachment", "Ticket", "TicketCounter" RESTART IDENTITY CASCADE;'
+    );
+    console.log("Cleared Ticket, Attachment and TicketCounter.");
+  } finally {
+    await client.end();
+  }
+}
+
 async function main(): Promise<void> {
   const e2eUrl = loadE2eDatabaseUrl();
   assertIsE2eDatabase(e2eUrl);
@@ -112,6 +138,13 @@ async function main(): Promise<void> {
   // the equivalent non-destructive command instead, which needs none.
   runInServer("npx", ["prisma", "generate"], childEnv);
   runInServer("npx", ["prisma", "migrate", "deploy"], childEnv);
+
+  // Reset before seeding: seed.ts only upserts reference/requester rows so
+  // ordering relative to it doesn't matter functionally, but resetting
+  // first keeps the sequence "migrate -> clear -> seed" (schema, then
+  // data) easy to reason about.
+  await resetTransactionalData(e2eUrl);
+
   runInServer("npx", ["tsx", "prisma/seed.ts"], childEnv);
 
   console.log(`E2E database ready: ${e2eUrl}`);
