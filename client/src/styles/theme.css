@@ -27,6 +27,10 @@
   --zen-warning-bg: #fff4e5;
   --zen-success: #0b7a46;
   --zen-focus-ring: #0b7a46;
+  /* Modal backdrop (Remove attachment dialog, ui-spec.md §10 "Remove
+     flow"). A translucent dark-green tint rather than plain black, to
+     stay within the Zen Green palette. */
+  --zen-overlay: rgba(11, 27, 19, 0.55);
 
   /* ---- Priority badge — LOW (ui-spec.md §7.1) ----
      MEDIUM and HIGH reuse --zen-warning(-bg) and --zen-error(-bg) above;
