@@ -134,7 +134,7 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | C-30 | C | AC-38, BR-14 | Ticket Detail not found | `404` → "Ticket not found" state + Back to My Tickets link | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pass |
 | C-31 | C | FR-32 | Ticket Detail failure | `500`/network → `role="alert"` + Retry | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pass |
 | C-32 | C | AC-09, BR-11 | Ticket Detail on requester switch | with Ticket Detail open, changing the Requester navigates to `/tickets` (My Tickets) for the new id and does **not** re-fetch the foreign ticket | `client/tests/lab-02/RequesterTicketDetail.test.tsx` | Pass |
-| S-01 | S | AC-41, ui-spec §2 | color tokens applied | header element computed background = `--zen-primary`; primary button uses it; page bg = `--zen-page-bg` | `client/tests/lab-02/ui-style.test.tsx` | Pending |
+| S-01 | S | AC-41, ui-spec §2 | color tokens applied | header element computed background = `--zen-primary`; primary button uses it; page bg = `--zen-page-bg` | `client/tests/lab-02/ui-style.test.tsx` | Pass |
 | S-02 | S | AC-41, ui-spec §5.3 | read-only vs editable | read-only fields carry the read-only class/`readonly`/static markup; editable inputs do not | `client/tests/lab-02/ui-style.test.tsx` | Pass |
 | S-03 | S | ui-spec §5.2 | required asterisk + message coexist | required fields render `*`; on error the message **also** appears below the field | `client/tests/lab-02/ui-style.test.tsx` | Pass |
 | S-04 | S | ui-spec §5.2 | validation message placement | error node is `aria-describedby`-linked to its field and rendered adjacent, not only at top | `client/tests/lab-02/ui-style.test.tsx` | Pass |

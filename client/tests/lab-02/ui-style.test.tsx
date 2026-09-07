@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
@@ -10,6 +12,7 @@ import { LoadingState } from "../../src/components/LoadingState.tsx";
 import { EmptyState } from "../../src/components/EmptyState.tsx";
 import { NoResultsState } from "../../src/components/NoResultsState.tsx";
 import { ErrorState } from "../../src/components/ErrorState.tsx";
+import { AppShell } from "../../src/shell/AppShell.tsx";
 import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
 import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
 import {
@@ -450,6 +453,85 @@ function renderTicketDetail() {
     </RequesterProvider>,
   );
 }
+
+
+/** Every .css file under client/src, recursively — for the "no stray hex" check. */
+function cssFilesUnderSrc(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...cssFilesUnderSrc(full));
+    else if (entry.name.endsWith(".css")) out.push(full);
+  }
+  return out;
+}
+
+describe("S-01 Zen Green colour tokens applied (ui-spec.md §2, AC-41)", () => {
+  // vitest runs from client/, so src is at cwd/src.
+  const cssDir = join(process.cwd(), "src");
+
+  function readCss(rel: string): string {
+    return readFileSync(join(cssDir, rel), "utf8");
+  }
+
+  it("theme.css defines --zen-primary and --zen-page-bg with the ui-spec §2 values", () => {
+    // Loaded into a real <style> so jsdom's getComputedStyle resolves the
+    // custom-property *values* off :root (it does support that, unlike
+    // full var() substitution into `background-color`).
+    const style = document.createElement("style");
+    style.textContent = readCss("styles/theme.css");
+    document.head.appendChild(style);
+    try {
+      const root = getComputedStyle(document.documentElement);
+      expect(root.getPropertyValue("--zen-primary").trim()).toBe("#006b3c");
+      expect(root.getPropertyValue("--zen-page-bg").trim()).toBe("#f5f7f6");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("the app header, the primary button and the page background reference the tokens (not a hard-coded hex)", () => {
+    // ui-spec.md §2: "App header background" / "primary buttons" -> --zen-primary;
+    // --zen-page-bg is the page background.
+    const appShell = readCss("shell/AppShell.css");
+    expect(appShell).toMatch(
+      /\.zen-app-shell__header\s*\{[^}]*background:\s*var\(--zen-primary\)/,
+    );
+    expect(readCss("components/Button.css")).toMatch(
+      /\.zen-btn--primary\s*\{[^}]*background:\s*var\(--zen-primary\)/,
+    );
+    expect(readCss("styles/theme.css")).toMatch(
+      /\bbody\s*\{[^}]*background:\s*var\(--zen-page-bg\)/,
+    );
+  });
+
+  it("no stylesheet outside theme.css contains a hard-coded hex colour (ui-spec.md §2)", () => {
+    // "Components reference tokens only — no hard-coded hex outside this
+    // file." This is what makes S-01 fail if a component swaps
+    // `var(--zen-primary)` for `#006b3c`.
+    const hex = /#[0-9a-fA-F]{3,8}\b/;
+    const offenders: string[] = [];
+    for (const file of cssFilesUnderSrc(cssDir)) {
+      if (file.endsWith("styles/theme.css")) continue;
+      const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      if (hex.test(body)) offenders.push(file.slice(cssDir.length + 1));
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("the app header element renders with the token-styled class", () => {
+    render(
+      <RequesterProvider>
+        <MemoryRouter initialEntries={["/tickets"]}>
+          <AppShell>
+            <div />
+          </AppShell>
+        </MemoryRouter>
+      </RequesterProvider>,
+    );
+    expect(document.querySelector(".zen-app-shell__header")).toBeTruthy();
+  });
+});
 
 describe("S-06 badge consistency across list, card, and detail (ui-spec.md §7, AC-41)", () => {
   beforeEach(() => {
