@@ -2,11 +2,15 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 
 // Requester ticketing E2E journey (docs/lab-02/tests.md §2, E2E-01..E2E-05).
 //
-// This slice adds ONLY E2E-04 and E2E-05. E2E-01, E2E-02 and E2E-03 are
-// earlier rows of the same table that depend on PRs not yet merged into
-// this stack (the attachment uploader, the full create+search+download
-// journey) and are written into this same file by another slice — room is
-// deliberately left for them above these two `test.describe` blocks.
+// This slice adds E2E-03, E2E-04 and E2E-05. E2E-01 and E2E-02 are the
+// remaining rows of the same table; they depend on the Ticket Detail
+// attachment download wiring (a separate PR) and are added to this file by
+// a later slice.
+//
+// Every block here is independent of the others' execution order: each
+// asserts against the specific ticket it creates (by number and by URL),
+// never an absolute count, and E2E-04 checks its Requester's count as a
+// before/after delta.
 //
 // Driven against the REAL client + REAL server + the shared `toktickit_e2e`
 // Postgres database, exactly like e2e/lab-02/responsive.spec.ts and
@@ -98,6 +102,119 @@ async function ownedTicketCount(
 }
 
 // ---------------------------------------------------------------------------
+// E2E-03 (AC-03, AC-09, AC-37) — cross-requester isolation
+// ---------------------------------------------------------------------------
+//
+// docs/lab-02/tests.md E2E-03: create a ticket as Requester A -> Change
+// Requester to B -> B's My Tickets does not list A's ticket -> visiting
+// `/tickets/:idOfA` shows the "Ticket not found" state.
+//
+// specification.md AC-03 (a Requester only ever sees their own tickets),
+// AC-09 (changing the Requester reloads My Tickets for the new id), AC-37
+// (`GET /api/tickets/:id` for a ticket the caller does not own is a 404,
+// surfaced as "Ticket not found").
+//
+// Requester A is "David Lee" (this test creates one real ticket for him).
+// Requester B is "Michael Brown", who only *views* here and never has a
+// ticket created for him by any spec, so he is reliably empty. That lets
+// the isolation check anchor on his empty-state screen — a settled state
+// only reachable when his list genuinely has zero rows — BEFORE asserting
+// A's ticket is absent. Asserting `toHaveCount(0)` on the ticket number
+// alone would also pass transiently while B's list is still loading.
+
+test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
+  test("a ticket created by Requester A is absent from Requester B's list and 404s on direct navigation", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+
+    // --- Requester A creates a ticket through the real form ---------------
+    await loginAs(page, "David Lee");
+    await page.goto("/tickets/new");
+    await expect
+      .poll(() => page.locator("#create-ticket-category option").count())
+      .toBeGreaterThan(1);
+    await expect
+      .poll(() => page.locator("#create-ticket-related-system option").count())
+      .toBeGreaterThan(1);
+    await page.locator("#create-ticket-category").selectOption({ index: 1 });
+    await page
+      .locator("#create-ticket-related-system")
+      .selectOption({ index: 1 });
+    const summary = "E2E-03: David Lee's private ticket";
+    await page.locator("#create-ticket-summary").fill(summary);
+    await page
+      .locator("#create-ticket-description")
+      .fill(
+        "This ticket belongs to David Lee and must never appear for another Requester or load on direct navigation by one.",
+      );
+    await clickSubmitTicket(page);
+
+    // Success panel names the official number (ui-spec.md §8: "Ticket
+    // TKT-YYYY-NNNNNN created"). Capture it and the ticket's own URL.
+    const successHeading = page.getByRole("heading", {
+      name: /^Ticket TKT-\d{4}-\d{6} created$/,
+    });
+    await expect(successHeading).toBeVisible();
+    const ticketNumber = (await successHeading.textContent())!
+      .replace(/^Ticket /, "")
+      .replace(/ created$/, "")
+      .trim();
+
+    await page.getByRole("button", { name: "View ticket" }).click();
+    await expect(page).toHaveURL(/\/tickets\/\d+$/);
+    const ticketPath = new URL(page.url()).pathname; // /tickets/:idOfA
+    await expect(
+      page.getByRole("heading", { name: "Ticket Details" }),
+    ).toBeVisible();
+
+    // Requester A does see it in their own list.
+    await page.goto("/tickets");
+    await expect(
+      page.locator(`a[href="${ticketPath}"]`).first(),
+    ).toBeVisible();
+
+    // --- Change Requester to B (ui-spec.md §4 menu) ----------------------
+    await page.locator('button[aria-haspopup="menu"]').click();
+    await page.getByRole("menuitem", { name: "Change Requester" }).click();
+    await expect(page).toHaveURL(/\/select-requester$/);
+    await page
+      .getByLabel("Development Requester")
+      .selectOption({ label: "Michael Brown" });
+    await page.getByRole("button", { name: /Continue/ }).click();
+    await expect(page).toHaveURL(/\/tickets$/);
+
+    // --- AC-03: B's My Tickets does not list A's ticket ------------------
+    // Positive anchor first: Michael Brown owns zero tickets, so his list
+    // settles on the empty state (ui-spec.md §9). That heading is only
+    // reachable when `GET /api/tickets` for him returns zero rows — drop
+    // the server's caller-scoping and this list renders A's ticket instead
+    // and the empty-state assertion fails.
+    await expect(
+      page.getByRole("heading", {
+        name: "You haven't created any tickets yet.",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText(ticketNumber)).toHaveCount(0);
+    await expect(page.locator(`a[href="${ticketPath}"]`)).toHaveCount(0);
+
+    // --- AC-37: direct navigation to A's ticket 404s for B --------------
+    await page.goto(ticketPath);
+    await expect(
+      page.getByRole("heading", { name: "Ticket not found" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "This ticket doesn't exist or isn't associated with the current development requester.",
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Back to My Tickets/ }),
+    ).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // E2E-04 (AC-17, BR-26) — create failure preserves input
 // ---------------------------------------------------------------------------
 //
@@ -120,7 +237,14 @@ test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
   }) => {
     await page.setViewportSize(DESKTOP);
     // Any seeded active Requester works — this test never persists a ticket
-    // (the POST is intercepted and fails), so it cannot pollute other specs.
+    // (the POST is intercepted and fails). It asserts BR-26 by comparing
+    // this Requester's ticket count before and after the failed submit, so
+    // it does not care whether they already own tickets and does not
+    // depend on any other spec's execution order.
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const david = await requesterByName(api, "David Lee");
+    const countBefore = await ownedTicketCount(api, david.id);
+
     await loginAs(page, "David Lee");
 
     await page.goto("/tickets/new");
@@ -208,13 +332,11 @@ test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
     await expect(submit).toBeVisible();
     await expect(submit).toBeEnabled();
 
-    // Nothing was persisted (BR-26): with the intercept removed, a fresh
-    // reload of the same Requester's My Tickets still shows the empty state,
-    // i.e. the aborted attempt created no ticket.
+    // Nothing was persisted (BR-26): this Requester owns exactly as many
+    // tickets as before the aborted submit — asserted as a delta, not an
+    // absolute count, so the test holds whatever else they own.
     await page.unroute("**/api/tickets");
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const david = await requesterByName(api, "David Lee");
-    expect(await ownedTicketCount(api, david.id)).toBe(0);
+    expect(await ownedTicketCount(api, david.id)).toBe(countBefore);
     await api.dispose();
   });
 });
