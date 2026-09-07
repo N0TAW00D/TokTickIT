@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
 
 // Requester ticketing E2E journey (docs/lab-02/tests.md §2, E2E-01..E2E-05).
@@ -486,5 +489,451 @@ test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
     expect(emptyStateHadSearchBar).toBe(false);
     expect(noResultsStateHasSearchBar).toBe(true);
     expect(noResultsStateHasSearchBar).not.toBe(emptyStateHadSearchBar);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E-01 (AC-01, AC-15, AC-16, AC-23, AC-33) — full requester journey
+// ---------------------------------------------------------------------------
+//
+// tests.md §2 E2E-01: "select Requester -> create ticket + 1 attachment ->
+// confirmation shows official number -> find via search in My Tickets ->
+// open detail -> download attachment (200)."
+//
+// specification.md: AC-01 "one Ticket is saved and the official Ticket
+// Number is displayed"; AC-15 confirmation shows the returned Ticket Number
+// + "View ticket"/"Create another"; AC-16 the saved ticket's requesterId
+// equals the Requester selected before entering the app and its status is
+// NEW; AC-23 a search term matching a Ticket Number substring shows only
+// matching owned tickets; AC-33 "the file is served with a
+// Content-Disposition: attachment header" (api-spec.md §4.3: 200 + the raw
+// bytes + `Content-Disposition: attachment; filename="<originalFilename>"`).
+//
+// Requester: "Sarah Johnson" — a seeded active Requester that no other
+// describe block in this file seeds (E2E-04 uses David Lee, E2E-05 uses
+// Jennifer Anderson). submission-evidence.spec.ts also seeds Sarah but runs
+// as a separate file and asserts relative counts. Every assertion here is
+// keyed to the one ticket / attachment this test creates, by number and by
+// id — never an absolute count — so this block is order-independent.
+
+/** Repo path of this spec's directory (e2e/lab-02), for building fixtures. */
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Writes a small, valid PDF to the gitignored `e2e/test-results/` tree and
+ * returns its path — the same runtime-fixture approach
+ * submission-evidence.spec.ts uses (nothing binary is committed). A
+ * `%PDF-1.4 ... %%EOF` envelope is a real PDF as far as the server's
+ * content sniff is concerned: server/src/validation/attachmentFile.ts
+ * `sniffMimeType` keys `application/pdf` off the leading `%PDF-` bytes
+ * (api-spec.md §4.1 "checked by both extension and content sniff").
+ */
+function writePdfFixture(fileName: string): string {
+  const dir = path.resolve(here, "../test-results/attachment-journeys");
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, fileName);
+  fs.writeFileSync(
+    filePath,
+    `%PDF-1.4\n${"TokTickIT E2E attachment payload. ".repeat(64)}\n%%EOF\n`,
+  );
+  return filePath;
+}
+
+test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC-23, AC-33)", () => {
+  test("select Requester -> create a ticket with one attachment -> the confirmation shows the official ticket number -> find it via My Tickets search -> open its detail -> download the attachment (HTTP 200)", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Sarah Johnson");
+
+    // Sarah's seeded id, resolved through the real API, so the AC-16
+    // ownership check below compares against a known fact.
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const sarah = await requesterByName(api, "Sarah Johnson");
+
+    // --- create a ticket WITH one attachment, through the real form ------
+    await page.goto("/tickets/new");
+    await expect
+      .poll(() => page.locator("#create-ticket-category option").count())
+      .toBeGreaterThan(1);
+    await expect
+      .poll(() => page.locator("#create-ticket-related-system option").count())
+      .toBeGreaterThan(1);
+
+    await page.locator("#create-ticket-category").selectOption({ index: 1 });
+    await page
+      .locator("#create-ticket-related-system")
+      .selectOption({ index: 1 });
+    const summaryText = "E2E-01: full requester journey with one attachment";
+    await page.locator("#create-ticket-summary").fill(summaryText);
+    await page
+      .locator("#create-ticket-description")
+      .fill(
+        "This description is comfortably over the twenty character minimum so the ticket is genuinely valid and created through the real form and API.",
+      );
+
+    // One valid PDF selected through AttachmentUploader's real file input.
+    // setInputFiles is programmatic (bypasses the input's `accept` hint on
+    // purpose — the same path submission-evidence.spec.ts's demo-4 test
+    // uses). The queued row + the "Attachments (1/5)" count header prove it
+    // passed the component's client-side validation before submit
+    // (ui-spec.md §8: "Valid files show name + size + Remove. The count
+    // header reads Attachments (n/5)").
+    const ATTACHMENT_NAME = "e2e-01-report.pdf";
+    await page
+      .locator("#create-ticket-attachments-input")
+      .setInputFiles(writePdfFixture(ATTACHMENT_NAME));
+    await expect(
+      page.getByRole("heading", { name: "Attachments (1/5)", level: 2 }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator(
+          ".zen-attachment-uploader__item:not(.zen-attachment-uploader__item--rejected)",
+        )
+        .locator(".zen-attachment-uploader__name"),
+    ).toHaveText(ATTACHMENT_NAME);
+
+    // The POST /api/tickets response body is the source of truth for "the
+    // official Ticket Number" (AC-01) and the owner/status (AC-16) — capture
+    // it rather than trusting only the on-screen string.
+    const createResponsePromise = page.waitForResponse(
+      (res) =>
+        res.url().endsWith("/api/tickets") &&
+        res.request().method() === "POST",
+    );
+    await clickSubmitTicket(page);
+    const createResponse = await createResponsePromise;
+    expect(createResponse.status()).toBe(201);
+    const createdTicket: {
+      id: number;
+      ticketNumber: string;
+      status: string;
+      requester: { id: number };
+    } = await createResponse.json();
+
+    // AC-16: the saved ticket is owned by the Requester chosen before
+    // entering the app, and its status is NEW.
+    expect(createdTicket.requester.id).toBe(sarah.id);
+    expect(createdTicket.status).toBe("NEW");
+    expect(createdTicket.ticketNumber).toMatch(/^TKT-\d{4}-\d{6}$/);
+
+    // AC-01 / AC-15: the confirmation state shows that exact official
+    // number, plus the two frozen actions (ui-spec.md §8 "Success").
+    await expect(
+      page.getByRole("heading", {
+        name: `Ticket ${createdTicket.ticketNumber} created`,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "View ticket" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Create another" }),
+    ).toBeVisible();
+    // The lone attachment uploaded cleanly: no "could not be uploaded"
+    // warning callout (ui-spec.md §8 "Success with a failed attachment"
+    // renders a role="note"; the clean-success panel does not).
+    await expect(page.getByRole("note")).toHaveCount(0);
+
+    // --- find the ticket via search in My Tickets (AC-23) ---------------
+    await page.goto("/tickets");
+    const searchBox = page.locator("#my-tickets-search");
+    await expect(searchBox).toBeVisible();
+    const rows = page.locator(".zen-my-tickets__table tbody tr");
+    // Positive anchor before the filtered count assertion: the new ticket
+    // is genuinely present in the unfiltered, settled list first. (A past
+    // bug in this file asserted a filtered result before the list had
+    // finished loading and passed transiently.)
+    await expect(
+      page.getByRole("link", {
+        name: createdTicket.ticketNumber,
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await searchBox.fill(createdTicket.ticketNumber);
+    // Search is debounced 300ms in the app; the web-first assertions below
+    // wait it out — no fixed sleep.
+    await expect.poll(() => rows.count()).toBe(1);
+    await expect(rows.first()).toContainText(summaryText);
+    const ticketLink = page.getByRole("link", {
+      name: createdTicket.ticketNumber,
+      exact: true,
+    });
+    await expect(ticketLink).toBeVisible();
+
+    // --- open its detail ----------------------------------------------
+    await ticketLink.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/tickets/${createdTicket.id}$`),
+    );
+    await expect(
+      page.getByRole("heading", { name: "Ticket Details" }),
+    ).toBeVisible();
+
+    // The attachment uploaded during create is an active row here — the
+    // positive anchor before the download step.
+    const attachmentRow = page
+      .locator(".zen-attachment-list__item")
+      .filter({ hasText: ATTACHMENT_NAME });
+    await expect(attachmentRow).toHaveCount(1);
+    const downloadButton = attachmentRow.getByRole("button", {
+      name: "Download",
+    });
+    await expect(downloadButton).toBeVisible();
+
+    // --- download the attachment: prove HTTP 200 + the bytes flow ------
+    // tests.md §2 E2E-01 "download attachment (200)", AC-33 "served with a
+    // Content-Disposition: attachment header". Proven three ways against
+    // the real server's response, not the app's behaviour: (a) the GET
+    // /api/attachments/:id/download call is answered 200, (b) that
+    // response carries `Content-Disposition: attachment; filename="..."`
+    // (api-spec.md §4.3) — asserted on the header directly, since the
+    // client falls back to `originalFilename` when the header is missing
+    // so the download-event filename alone would not prove it — and (c)
+    // the app's scripted `<a download>` save
+    // (client/src/tickets/downloadFile.ts) surfaces to Playwright as a
+    // `download` event, i.e. the bytes actually reached the browser.
+    const downloadResponsePromise = page.waitForResponse((res) =>
+      /\/api\/attachments\/\d+\/download$/.test(res.url()),
+    );
+    const downloadEventPromise = page.waitForEvent("download");
+    await downloadButton.click();
+
+    const downloadResponse = await downloadResponsePromise;
+    expect(downloadResponse.request().method()).toBe("GET");
+    expect(downloadResponse.status()).toBe(200);
+    const contentDisposition =
+      downloadResponse.headers()["content-disposition"] ?? "";
+    expect(contentDisposition).toMatch(/^attachment;/);
+    expect(contentDisposition).toContain(`filename="${ATTACHMENT_NAME}"`);
+
+    const download = await downloadEventPromise;
+    expect(download.suggestedFilename()).toBe(ATTACHMENT_NAME);
+
+    await api.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E-02 (AC-21, AC-34, AC-36) — attachment failure + soft-removal journey
+// ---------------------------------------------------------------------------
+//
+// tests.md §2 E2E-02: "on Ticket Detail, an upload forced to fail shows the
+// retry affordance and a successful retry adds it; then remove an
+// attachment with a reason -> row shows 'Removed' + reason -> download
+// blocked in UI."
+//
+// specification.md: AC-21 "the user can retry the upload from Ticket
+// Detail"; AC-34 "the attachment is marked Removed with the date and
+// reason, disappears from the active list, and its download endpoint
+// returns 410"; AC-36 "its metadata (name, size, type, removed date,
+// reason) is visible and no download or preview control is offered"
+// (BR-33). api-spec.md §4.4 (DELETE reason 3-200 trimmed) and §4.3
+// (410 ATTACHMENT_REMOVED).
+//
+// The "retry affordance" is ui-spec.md §10's "Upload failed" row state:
+// `name + "Upload failed — retry", Retry + Dismiss`. A failed upload from
+// the Ticket Detail "+ Add attachment" control renders a per-file row with
+// exactly those controls (client/src/components/AttachmentSection.tsx);
+// `Retry` re-attempts the upload for that same file. This test drives that
+// row: fail the first POST, assert the failed row with its Retry/Dismiss,
+// click Retry (the intercept now lets the request through), and assert the
+// real active row appears.
+//
+// Requester: "Sarah Johnson", same rationale as E2E-01. The ticket and its
+// attachment are created here and every assertion is keyed to that
+// ticket/attachment id.
+
+test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34, AC-36)", () => {
+  test("a forced-fail upload on Ticket Detail shows the failure affordance and a retry adds the attachment; removing it with a reason shows the Removed row and blocks download", async ({
+    page,
+  }) => {
+    await page.setViewportSize(DESKTOP);
+    await loginAs(page, "Sarah Johnson");
+
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const sarah = await requesterByName(api, "Sarah Johnson");
+
+    // Seed one attachment-free ticket for Sarah through the real API, then
+    // drive the attachment journey through the UI on its detail screen.
+    const categories: Array<{ id: number }> = await (
+      await api.get("/api/categories")
+    ).json();
+    const relatedSystems: Array<{ id: number }> = await (
+      await api.get("/api/related-systems")
+    ).json();
+    const seedResponse = await api.post("/api/tickets", {
+      headers: { "X-Requester-Id": String(sarah.id) },
+      data: {
+        categoryId: categories[0].id,
+        relatedSystemId: relatedSystems[0].id,
+        requestedPriority: "MEDIUM",
+        summary: "E2E-02: attachment failure and soft-removal journey",
+        description:
+          "This ticket exists so the forced-fail upload, the retry, and the soft-removal flow can be driven end to end on its Ticket Detail screen.",
+      },
+    });
+    expect(seedResponse.status()).toBe(201);
+    const ticket: { id: number } = await seedResponse.json();
+
+    await page.goto(`/tickets/${ticket.id}`);
+    await expect(
+      page.getByRole("heading", { name: "Ticket Details" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (0 active / 0 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+
+    // Force the FIRST upload POST for this ticket to fail, then let every
+    // later one through to the real server. `route.abort` makes the client
+    // `fetch` reject, hitting AttachmentSection.handleQueuedChange's catch
+    // branch — the same path a genuinely failing upload takes. The real
+    // server process keeps running; only this one request never reaches it.
+    let failedFirstUpload = false;
+    await page.route(
+      `**/api/tickets/${ticket.id}/attachments`,
+      async (route) => {
+        if (route.request().method() === "POST" && !failedFirstUpload) {
+          failedFirstUpload = true;
+          await route.abort("failed");
+          return;
+        }
+        await route.continue();
+      },
+    );
+
+    const ATTACHMENT_NAME = "e2e-02-evidence.pdf";
+    const fixturePath = writePdfFixture(ATTACHMENT_NAME);
+
+    // --- first attempt: the upload fails, and the "Upload failed" row ----
+    // renders with its Retry + Dismiss controls (ui-spec.md §10 row table).
+    await page
+      .locator("#ticket-detail-attachments-input")
+      .setInputFiles(fixturePath);
+
+    const failedRow = page
+      .locator(".zen-attachment-uploader__item--failed")
+      .filter({ hasText: ATTACHMENT_NAME });
+    await expect(failedRow).toBeVisible();
+    await expect(failedRow).toContainText("Upload failed — retry");
+    const retryButton = failedRow.getByRole("button", { name: "Retry" });
+    await expect(retryButton).toBeVisible();
+    await expect(
+      failedRow.getByRole("button", { name: "Dismiss" }),
+    ).toBeVisible();
+    expect(failedFirstUpload).toBe(true);
+
+    // BR-27: an upload that fails leaves the ticket's attachments untouched
+    // — no active row, count unchanged.
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (0 active / 0 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+    await expect(page.locator(".zen-attachment-list__item")).toHaveCount(0);
+
+    // --- retry: click Retry on the failed row; this POST reaches the -----
+    // server (the intercept only aborts the first one), the failed row is
+    // replaced by a real active row and both counts advance (AC-21).
+    await retryButton.click();
+
+    const attachmentRow = page
+      .locator(".zen-attachment-list__item")
+      .filter({ hasText: ATTACHMENT_NAME });
+    await expect(attachmentRow).toHaveCount(1);
+    await expect(
+      page.locator(".zen-attachment-uploader__item--failed"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (1 active / 1 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+    await expect(
+      attachmentRow.getByRole("button", { name: "Download" }),
+    ).toBeVisible();
+
+    // --- remove that attachment with a reason (AC-34) ------------------
+    const REMOVAL_REASON = "E2E-02 removing the uploaded evidence file";
+    await attachmentRow.getByRole("button", { name: "Remove" }).click();
+    const dialog = page.getByRole("dialog", { name: "Remove attachment" });
+    await expect(dialog).toBeVisible();
+    // Target the textarea by its id — an implementation detail, but the
+    // "Reason for removal" label carries a trailing required-asterisk span
+    // so a strict label match is brittle. ui-spec.md §10 pins the field
+    // (required, 3-200 chars), not a DOM id.
+    await dialog.locator("#remove-attachment-reason").fill(REMOVAL_REASON);
+    await dialog
+      .getByRole("button", { name: "Remove attachment" })
+      .click();
+
+    // AC-34: the row moves to the Removed presentation and a role="status"
+    // toast confirms (ui-spec.md §10 "On success ... a role=\"status\"
+    // toast confirms").
+    await expect(
+      page.getByRole("status").filter({ hasText: ATTACHMENT_NAME }),
+    ).toBeVisible();
+    const removedRow = page.locator(".zen-attachment-list__item--removed");
+    await expect(removedRow).toHaveCount(1);
+    await expect(removedRow).toContainText(ATTACHMENT_NAME);
+    // ui-spec.md §10: removed rows read `Removed <date> · "<reason>"`. The
+    // date text is not a frozen literal; the ` · "<reason>"` shape is.
+    await expect(removedRow).toContainText("Removed");
+    await expect(removedRow).toContainText(`· "${REMOVAL_REASON}"`);
+    // AC-34: disappears from the active list.
+    await expect(
+      page.getByRole("heading", {
+        name: "Attachments (0 active / 1 total)",
+        level: 2,
+      }),
+    ).toBeVisible();
+
+    // AC-36 / BR-33: no download (nor preview / remove) control on the
+    // removed row — the UI offers no way to download it.
+    await expect(
+      removedRow.getByRole("button", { name: "Download" }),
+    ).toHaveCount(0);
+    await expect(
+      removedRow.getByRole("button", { name: "Preview" }),
+    ).toHaveCount(0);
+    await expect(
+      removedRow.getByRole("button", { name: "Remove" }),
+    ).toHaveCount(0);
+
+    // AC-34: the download endpoint itself now returns 410 for that
+    // attachment (api-spec.md §4.3 "410 ATTACHMENT_REMOVED"). Read the
+    // attachment's id from the real ticket state, then hit the endpoint
+    // directly — the UI has removed every affordance, so this is the
+    // remaining way to prove "download blocked".
+    const ticketState: {
+      attachments: Array<{
+        id: number;
+        isRemoved: boolean;
+        originalFilename: string;
+      }>;
+    } = await (
+      await api.get(`/api/tickets/${ticket.id}`, {
+        headers: { "X-Requester-Id": String(sarah.id) },
+      })
+    ).json();
+    const removed = ticketState.attachments.find(
+      (attachment) => attachment.originalFilename === ATTACHMENT_NAME,
+    );
+    expect(removed?.isRemoved).toBe(true);
+    const blockedDownload = await api.get(
+      `/api/attachments/${removed!.id}/download`,
+      { headers: { "X-Requester-Id": String(sarah.id) } },
+    );
+    expect(blockedDownload.status()).toBe(410);
+
+    await page.unroute(`**/api/tickets/${ticket.id}/attachments`);
+    await api.dispose();
   });
 });
