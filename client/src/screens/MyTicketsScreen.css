@@ -138,6 +138,16 @@
 /* Own scroll container, not the page (ui-spec.md §11: no horizontal page
    scroll at any viewport) — a very wide table scrolls inside itself. */
 .zen-my-tickets__table-scroll {
+  /* Containing block for the `.zen-visually-hidden` spans inside the table
+     (the "Actions" header, the per-row link text). They are
+     `position: absolute`, so with no positioned ancestor they resolve
+     against the initial containing block and escape this container's
+     `overflow-x: auto` clipping — at the 900px tablet viewport that pushed
+     the document 105px past its client width. Measured document overflow at
+     my-tickets, before -> after: tablet 105 -> 0, desktop 0 -> 0,
+     mobile 0 -> 0. The wide table was never the cause; it scrolls inside
+     this container as intended. */
+  position: relative;
   overflow-x: auto;
   background: var(--zen-surface);
   border: 1px solid var(--zen-border);
