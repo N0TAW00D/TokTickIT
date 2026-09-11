@@ -100,11 +100,58 @@ Backlog → Specified → Started → PR Review → (Fixing) → Done.
 Sprints" after the #pr(64) merge: Specified / Started / PR Review / Fixing all empty; every
 tracked Issue (#1–#4, #13–#20) in *Done* and closed.])
 
-*Reviewer record.* Rendered copy: `docs/lab-02/reviewer.md`
-(#link(repo + "/blob/main/docs/lab-02/reviewer.md")[view on GitHub]). It lists the reviewer
-identity, every PR with its outcome and round count, the substantive review findings with the
-author's responses, and the author's own retracted claims. Review within Lab 2 flowed one way
-(`N0TAW00D` → `Palapluem`); Lab 1 review was reciprocal (§5 of `reviewer.md`).
+*Reviewer record.* Full record with every PR row and finding:
+#link(repo + "/blob/main/docs/lab-02/reviewer.md")[`docs/lab-02/reviewer.md`]. Every Lab 2
+pull request (#pr(21)–#pr(64)) was authored by `N0TAW00D` and reviewed *and merged* by
+`Palapluem`; there were no direct commits to `main` or `lab2-staging`. Review within Lab 2
+flowed one way (`N0TAW00D` → `Palapluem`); Lab 1 review was reciprocal — `N0TAW00D` reviewed
+#6, #7, #8, #10 and #12 (§5 of `reviewer.md`).
+
+#table(
+  columns: (auto, 1fr, 1.4fr),
+  inset: 5pt,
+  align: (left + horizon, left, left),
+  stroke: 0.4pt + luma(200),
+  table.header([*Role*], [*GitHub / name*], [*Scope in Lab 2*]),
+  [Author], [`N0TAW00D` — Natthawat Primsirikunawut], [Authored every Lab 2 PR (#pr(21)–#pr(64))],
+  [Reviewer], [`Palapluem` — Wisit Suwannao], [Reviewed and merged every Lab 2 PR; exceptions #pr(45) and #pr(55), closed unmerged],
+  [Lab 1 only], [`THN4` — Thanatip Nitinantakul], [Reviewed Lab 1 PRs #5–#12; not a reviewer on Lab 2],
+)
+
+44 pull requests were opened for Lab 2 (#pr(21)–#pr(64)): 42 merged, 2 closed unmerged
+(#pr(45) superseded by #pr(50); #pr(55) out of scope). About 19 were approved on the first
+pass; the rest went through at least one `Changes requested` round. #pr(64) is the single
+release PR (`lab2-staging` → `main`), approved and merged 2026-09-07. The substantive
+findings and how each was resolved:
+
+#table(
+  columns: (auto, 1fr, 1.3fr),
+  inset: 5pt,
+  align: (center + horizon, left, left),
+  stroke: 0.4pt + luma(200),
+  table.header([*PR*], [*Reviewer finding*], [*Resolution*]),
+  [#pr(25)], [`sessionStorage` per §11.20 and an `STY-003` restyle demanded alongside a valid routing fix], [Routing fix accepted; the two spec citations were from another team's contract — reviewer verified and withdrew them in writing],
+  [#pr(29)], [Client discarded the server's per-field `VALIDATION_FAILED.fields[]`], [Typed error now carries `fields[]`, each mapped to its form field with focus moved to the first invalid],
+  [#pr(30)], [Blank `?page=` / `?pageSize=` / `?priority=` silently defaulted], [Every blank param except `search` (BR-16) is now a `400` per FR-29; re-verified],
+  [#pr(31)], [Active-attachment limit not concurrency-safe; temp upload dir not cleared per test], [`SELECT … FOR UPDATE` row lock + a race regression test; temp dir cleared in `afterEach`],
+  [#pr(32)], [`Content-Disposition` filename not escaped (CR/LF → `500`)], [RFC 6266 / 5987 encoding; audit also caught a `latin1` charset corruption the old test never asserted against],
+  [#pr(38)], [Debounce reset paging to page 1 on mount; whitespace search treated as active], [Debounce tracks the last committed normalized search in a ref; active-query test uses the trimmed value],
+  [#pr(39)], [Ticket Date rendered in UTC, not Asia/Bangkok (BR-04 / A-11)], [Shared `Intl.DateTimeFormat` tz formatter + month table; duplicate formatter removed; test expectations hardcoded],
+  [#pr(40)], [Only MIME validated, not extension; warning callout used `role="alert"`], [Case-insensitive extension allowlist; `role="note"` per ui-spec §5.4; mirror test so the MIME gate stays guarded],
+  [#pr(42)], [E2E reused stale servers / shared rows; `npm install-scripts` not reproducible], [`reuseExistingServer: false`, per-run DB reset, `engines` + committed `.npmrc engine-strict`; re-verified from a clean checkout],
+  [#pr(44)], [My Tickets table clipped the Status badge; R-01 responsive check was unfalsifiable], [Ellipsis + `title` truncation; R-01 now measures `documentElement` — exposed a real 105 px tablet overflow, since fixed],
+  [#pr(47)], [Rendered Download / Preview buttons inert; no Add-Attachment control], [PR re-scoped to the Remove flow; download, preview lightbox and Add-Attachment moved to slice 14d (#pr(51))],
+  [#pr(53)], [E2E-03 / E2E-04 passed only in one execution order], [E2E-04 now captures the requester's ticket count before the failed submit and asserts it unchanged — order-independent],
+  [#pr(54)], [The "Upload failed — retry" row (Retry / Dismiss) was never implemented], [Affordance built in #pr(59); E2E-02 reworked to select the failed file and drive Retry / Dismiss],
+  [#pr(60)], [Colour check edited a frozen test file and was not falsifiable], [Reworked as a computed-stylesheet assertion in `ui-style.test.tsx` (`rgb(0, 107, 60)` / `rgb(245, 247, 246)`)],
+  [#pr(63)], [Header full-bleed fix shipped without a regression assertion], [R-01b header-bounds check added; review comment shortened as asked],
+)
+
+*Corrections the author issued.* On #pr(32) / #pr(33) the "pre-existing, parallel-agent"
+explanation for the flaky suite was wrong (cause: supertest ephemeral servers, fixed in
+#pr(34)); on #pr(34) the residual flake was overstated (a 30-run stress showed 0 failures);
+on #pr(44) an earlier "the `overflow-x: hidden` backstop is verified not a mask" claim was
+retracted with the disproof. Each retraction was posted on the PR rather than left standing.
 
 *README and `.gitignore`.* Rendered: #link(repo + "/blob/main/README.md")[`README.md`] and
 #link(repo + "/blob/main/.gitignore")[`.gitignore`]. `README.md` documents the one-command
@@ -144,6 +191,40 @@ companion contracts are `api-spec.md` (every endpoint, status code and error bod
 (the Zen Green token set and per-screen component rules), and `tests.md` (the planned-test
 table + AC traceability).
 
+*Numbered contract items* (first of each family — full lists at the link above):
+
+#table(
+  columns: (auto, 1fr),
+  inset: 5pt,
+  align: (left + horizon, left),
+  stroke: 0.4pt + luma(200),
+  table.header([*ID*], [*Statement*]),
+  [FR-01], [The system provides a Development Requester Selection screen listing only *active* Requesters loaded from PostgreSQL, ordered by name. _(… through FR-37)_],
+  [BR-01], [The official Ticket Number is backend-generated and unique — `TKT-<YYYY>-<NNNNNN>`, `YYYY` the creation year in Asia/Bangkok time, `NNNNNN` a zero-padded per-year sequence from `000001`. _(… through BR-42)_],
+  [AC-01], [Given valid Ticket data, when the Requester submits the form, then one Ticket is saved and the official Ticket Number is displayed. _(… through AC-43)_],
+)
+
+*Definition of Done* (`specification.md` §10) — every box holds on the final `main`:
+
+- *§10.1 Product.* All FR-01..FR-37 in scope (nothing from §3.2); every AC-01..AC-43 linked to
+  passing test evidence in `tests.md`; Prisma schema per §7 + one additive migration + idempotent
+  seed; every API endpoint matches `api-spec.md` for success / validation / ownership / missing /
+  error, exact status codes; ownership enforced in the *backend* on every Requester-scoped
+  endpoint; all attachment rules server-side (type, size, 5-active limit, soft removal, `410` on
+  removed, safe stored names, files outside web root); unique backend `TKT-YYYY-NNNNNN` with the
+  concurrency backstop; every screen implements initial / loading / validation / submitting /
+  success / failure (+ empty / no-results for lists); Zen Green tokens + UI-style + visual
+  checklist pass; responsive verified at desktop / tablet / mobile with committed screenshots;
+  full suite (unit / API / UI / UI-style / responsive / E2E) green from documented commands, no
+  test skipped / disabled / `.only`; every failure + boundary state demonstrated and captured;
+  `README.md` and `.gitignore` current.
+- *§10.2 Course delivery.* `lab2-staging` cut from `main`; feature branch per Issue; peer-reviewed
+  PR into `lab2-staging`; one release PR to `main`; no direct commits. Project board all-Done with
+  the Backlog → Specified → Started → PR Review → (Fixing) → Done columns. `reviewer.md` complete
+  (identity, PR links, comments, responses, approvals). `ai-use.md` complete (LLM + 6–10 prompts +
+  reflection). The four `docs/lab-02/` contracts present, rendered, approved, with the
+  before-implementation proof. One PDF with headings "Answer Part 1" … "Answer Part 9".
+
 *The contract existed before implementation.* The four `docs/lab-02/` files were first committed
 on *2026-09-01* (commit `7947a36`, "add md specification … to shape the development guidelines")
 and merged to `lab2-staging` via #pr(21) on *2026-09-01 15:54 UTC*. The first line of screen or
@@ -162,9 +243,10 @@ $ git log --reverse --format='%ci  %h  %s' --since=2026-09-01 -- server/src clie
 #shot("submission/part-2-spec/pr-timeline-early.png", [GitHub PR list, oldest first: #pr(21)
 (the spec / API / UI / test-plan contract) *merged last week*; the first implementation PRs
 #pr(22)–#pr(39) *merged yesterday* — the contract landed before any implementation branch.])
-#shot("submission/part-2-spec/pr-timeline-recent.png", [GitHub PR list after the #pr(64) release
-merge (top: #pr(64) *merged · Approved*): 1 open (#pr(62), this document), 51 closed — the full
-peer-reviewed Lab 2 PR set.])
+#shot("submission/part-2-spec/pr-timeline-recent.png", [GitHub PR list right after the #pr(64)
+release merge (top: #pr(64) *merged · Approved*). The one open PR at this capture, #pr(62)
+(this document), was itself reviewed and merged immediately after — every Lab 2 PR is now
+closed, all peer-reviewed.])
 
 
 = Answer Part 3: Test-Driven Development and Traceability
@@ -175,8 +257,28 @@ peer-reviewed Lab 2 PR set.])
 acceptance-criterion traceability matrix (§3 — every AC maps to ≥ 1 planned test), the real
 automated-test file path for every row, and the *Final* pass column.
 
-*Final status.* Every §2 row is *Pass*. `tests.md` §3 shows each AC-01…AC-43 tracing to at
-least one passing test.
+*Planned-test table* (`tests.md` §2) — 88 rows across 6 levels, every row `Pass` on `main`:
+
+#table(
+  columns: (auto, auto, 1fr, auto),
+  inset: 5pt,
+  align: (left + horizon, left + horizon, left, center + horizon),
+  stroke: 0.4pt + luma(200),
+  table.header([*Level*], [*IDs*], [*Automated test files*], [*Final*]),
+  [Unit], [UNIT-01..06], [`server/tests/lab-02/{ticket-number,validation}.test.ts`], [6 / 6],
+  [API / integration], [API-01..32], [`server/tests/lab-02/{create-ticket,my-tickets,ticket-detail,attachments,reference-data,requesters}.api.test.ts`], [32 / 32],
+  [UI component], [C-01..32], [`client/tests/lab-02/*.test.tsx`], [32 / 32],
+  [UI style], [S-01..07], [`client/tests/lab-02/ui-style.test.tsx`], [7 / 7],
+  [Responsive], [R-01..06], [`e2e/lab-02/responsive.spec.ts`], [6 / 6],
+  [End-to-end], [E2E-01..05], [`e2e/lab-02/requester-ticket-flow.spec.ts`], [5 / 5],
+)
+
+*Acceptance-criterion traceability* (`tests.md` §3): every AC-01…AC-43 maps to ≥ 1 passing
+test — e.g. AC-01 → API-05 + E2E-01; AC-03 → API-20 + E2E-03; AC-37 → API-20 + API-26 + E2E-03;
+AC-39 → R-01..R-04; AC-41 → S-01 + S-02 + S-06. Five business rules with no dedicated AC
+(BR-24, BR-27, BR-28, BR-41, BR-42) are covered as well.
+
+*Final status.* Every §2 row is *Pass*, re-confirmed on `main` at `77e3142` (`tests.md` §6).
 
 *Passing test output.*
 
@@ -320,9 +422,39 @@ Folded into Answer Part 6 (screenshots 1–6 below).
 = Answer Part 9: Zen Green UI and Responsive Evidence
 
 *Rendered / linked:* `docs/lab-02/ui-spec.md`
-(#link(repo + "/blob/main/docs/lab-02/ui-spec.md")[GitHub]) — the colour-token set (§2), typography
-and layout (§3), field / control / feedback rules (§5), badges (§7), and per-screen specs
-(§6, §8, §9, §10) with responsive behaviour and the visual-inspection checklist (§14).
+(#link(repo + "/blob/main/docs/lab-02/ui-spec.md")[GitHub]) — colour tokens (§2), typography and
+layout (§3), the application shell (§4), field / control / feedback rules (§5), per-screen specs
+(§6, §8, §9, §10), badges (§7), and the visual-inspection checklist (§14).
+
+*Zen Green colour tokens* (`ui-spec.md` §2 — S-01 asserts the computed values in real Chromium):
+
+#table(
+  columns: (auto, auto, 1fr),
+  inset: 5pt,
+  align: (left + horizon, left + horizon, left),
+  stroke: 0.4pt + luma(200),
+  table.header([*Token*], [*Value*], [*Role*]),
+  [`--zen-primary`], [`#006B3C`], [App header, primary buttons, strong emphasis],
+  [`--zen-secondary`], [`#0B7A46`], [Active tab, focus ring, links, secondary-button border/text],
+  [`--zen-pale`], [`#EAF6EF`], [Selected rows, success background, subtle emphasis],
+  [`--zen-page-bg`], [`#F5F7F6`], [Page background],
+  [`--zen-surface`], [`#FFFFFF`], [Cards, form surfaces, table background],
+  [`--zen-border`], [`#D7E0DB`], [Card border, input border, table rules],
+  [`--zen-text` / `--zen-text-muted`], [`#1B2B23` / `#5B6B62`], [Primary text / labels, counters, metadata],
+  [`--zen-readonly-bg` / `-text`], [`#EEF3F0` / `#3A4A42`], [Read-only / disabled field],
+  [`--zen-error` / `--zen-error-bg`], [`#B3261E` / `#FCECEA`], [Error text + border / error callout],
+  [`--zen-warning` / `--zen-warning-bg`], [`#8A5A00` / `#FFF4E5`], [Warning text / warning callout],
+  [`--zen-focus-ring`], [`#0B7A46`], [2px outline + 2px offset on `:focus-visible`],
+)
+
+*Component and feedback rules* (`ui-spec.md` §5): buttons are `primary` (one filled
+`--zen-primary` per view) / `secondary` (white, `--zen-secondary` border) / `tertiary` (text only,
+e.g. Clear Filters) / `destructive` (`--zen-error`) / `disabled` (`--zen-readonly-bg`,
+`aria-disabled`, inert). Fields: `--zen-surface` + `--zen-border` at 40px when editable, static
+`--zen-readonly-bg` text when read-only (still SR-announced), `--zen-error` border +
+`aria-invalid` + a message directly below the field when invalid (asterisk ≠ message). Feedback
+blocks: Loading `role="status"`, Error `role="alert"` + Retry, Success `role="status"` on
+`--zen-pale`, Warning `role="note"` used sparingly.
 
 *Desktop / tablet / mobile screenshots* (`artifacts/lab-02/screenshots/{screen}/{viewport}.png`).
 Each screen: desktop full-width, then tablet and mobile below.
