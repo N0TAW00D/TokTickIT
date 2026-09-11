@@ -1,14 +1,12 @@
 # Lab 2 — Peer Review Record
 
 Part 2 deliverable (`specification.md` §10.2). Every Lab 2 change reached `lab2-staging`
-through a peer-reviewed pull request; there were no direct commits to `main` or
-`lab2-staging`.
+through a peer-reviewed pull request, and `lab2-staging` reached `main` through one
+peer-reviewed release PR (#64); there were no direct commits to `main` or `lab2-staging`.
 
-> **Draft — not final.** Current through **PR #63**. Merged: #21–#56, #59, #60, #63 (#45 and
-> #55 were closed unmerged). Still open at the time of writing: #57 (this PR), #58, #61 and #62 —
-> their table rows in §2 show the current `Changes requested` / re-review state. §2 and §3 track the open PRs' latest state; both, and
-> §5, get a final pass once the remaining PRs and the release PR merge, and once the author
-> reviews the drafted ai-use.md reflection and the §5 note.
+Final, current through the release. Feature PRs #21–#63 targeted `lab2-staging`: #21–#44,
+#46–#54, #56–#63 merged; #45 and #55 were closed unmerged (superseded / out of scope). The
+release PR #64 (`lab2-staging` → `main`) was approved by `Palapluem` and merged 2026-09-07.
 
 ## 1. Reviewer identity
 
@@ -61,17 +59,18 @@ reviewer (an approval on the first pass is 1).
 | [#54](https://github.com/N0TAW00D/TokTickIT/pull/54) | E2E-01 full attachment journey & E2E-02 failure / soft-removal (#20) | **Changes requested** (E2E-02's "Upload failed — retry" affordance not implemented) → affordance built in #59, E2E-02 reworked to drive it → approved, merged | 2 |
 | [#55](https://github.com/N0TAW00D/TokTickIT/pull/55) | Add `@types/node` and `@types/pg` to the `e2e/` workspace (#20) | **Closed** without review — workspace hygiene only, not on any rubric path | — |
 | [#56](https://github.com/N0TAW00D/TokTickIT/pull/56) | Answer Part 8 evidence: Ticket Detail & attachment lifecycle (#20) | Approved first pass, merged | 1 |
-| [#57](https://github.com/N0TAW00D/TokTickIT/pull/57) | Add `docs/lab-02/reviewer.md` and `ai-use.md` (this record) (#20) | **Changes requested** (stale outcomes; reflection was a TODO) → outcomes updated, reflection drafted | 1+ |
-| [#58](https://github.com/N0TAW00D/TokTickIT/pull/58) | Refresh README e2e section and root `.gitignore` (#20) | **Changes requested** (README implied unmerged specs were on staging) → reworded | 1+ |
+| [#57](https://github.com/N0TAW00D/TokTickIT/pull/57) | Add `docs/lab-02/reviewer.md` and `ai-use.md` (this record) (#20) | **Changes requested** (stale outcomes; reflection was a TODO) → outcomes updated, reflection drafted → approved, merged | 4 |
+| [#58](https://github.com/N0TAW00D/TokTickIT/pull/58) | Refresh README e2e section and root `.gitignore` (#20) | **Changes requested** (README implied unmerged specs were on staging) → reworded → approved, merged | 3 |
 | [#59](https://github.com/N0TAW00D/TokTickIT/pull/59) | Ticket Detail "Upload failed — retry" row with Retry and Dismiss (#17) — the affordance #54's E2E-02 needs | Approved first pass, merged | 1 |
 | [#60](https://github.com/N0TAW00D/TokTickIT/pull/60) | S-01 colour-token check; last `tests.md` §2 Pending row resolved (#20) | **Changes requested** (frozen test-file column; falsifiability) → reworked as a stylesheet check in `ui-style.test.tsx` → approved, merged | 2 |
-| [#61](https://github.com/N0TAW00D/TokTickIT/pull/61) | Complete the `tests.md` §4 responsive & visual checklist (#20, Part 9) | **Changes requested** (viewport dimensions; a V-10 claim not in the screenshots) → corrected → re-review pending | 1+ |
-| [#62](https://github.com/N0TAW00D/TokTickIT/pull/62) | `docs/lab-02/submission.typ` — the Answer Part 1..9 document (#20) | **Changes requested** (placeholders; finalise after the release run) → held for the release pass | 1+ |
+| [#61](https://github.com/N0TAW00D/TokTickIT/pull/61) | Complete the `tests.md` §4 responsive & visual checklist (#20, Part 9) | **Changes requested** (viewport dimensions; a V-10 claim not in the screenshots) → corrected → approved, merged | 3 |
+| [#62](https://github.com/N0TAW00D/TokTickIT/pull/62) | `docs/lab-02/submission.typ` — the Answer Part 1..9 document (#20) | **Changes requested** ×5 (placeholders; finalise against merged main; evidence captures) → finalised against main → approved, merged | 7 |
 | [#63](https://github.com/N0TAW00D/TokTickIT/pull/63) | Fix: the app header bar was not full-bleed (#20, Part 9) | **Changes requested** (add a regression assertion; shorten the comment) → done, R-01b header-bounds check added → approved, merged | 2 |
+| [#64](https://github.com/N0TAW00D/TokTickIT/pull/64) | Release integration — `lab2-staging` → `main` (#20) | Approved, merged 2026-09-07 | 1 |
 
 Notes:
-- **Formal `Changes requested` vs `Commented`.** Only #25, #31, #42, #44, #45, #47 and #53 carry a
-  formal `CHANGES_REQUESTED` review event. #38, #39 and #40 were `COMMENTED` reviews that
+- **Formal `Changes requested` vs `Commented`.** #25, #31, #42, #44, #45, #47, #53, #54, #57, #58,
+  #60, #61, #62 and #63 carry a formal `CHANGES_REQUESTED` review event. #38, #39 and #40 were `COMMENTED` reviews that
   nonetheless carried blocking findings; the author fixed them and Palapluem merged on his judgment
   as merger (posting a plain "Approved." / "LGTM" comment, not a second formal review). The table
   above describes what the review events actually say, not a uniform "changes requested → approved".
@@ -286,7 +285,7 @@ left standing:
 
 ## 5. Direction of review
 
-Every Lab 2 pull request (#21–#63) was authored by `N0TAW00D` and reviewed by `Palapluem`.
+Every Lab 2 pull request (#21–#64) was authored by `N0TAW00D` and reviewed by `Palapluem`.
 Review within Lab 2 therefore flowed in one direction: this record holds the comments the
 author **received** and the author's **responses** to them, and no comments **given** by the
 author on a teammate's Lab 2 pull request. In Lab 1, review was reciprocal — `N0TAW00D`
