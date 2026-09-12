@@ -25,8 +25,8 @@
 
 For each implementation Issue (#14–#20): write the planned tests for that Issue first and confirm
 they **fail for the expected reason**, implement the smallest correct behavior, refactor while green.
-The `Final` column below is `Pending` until the Issue's PR is merged into `lab2-staging` with the
-test passing, then `Pass`.
+The `Final` column below was `Pending` until the Issue's PR merged into `lab2-staging` with the
+test passing, then `Pass`. Every §2 row is now `Pass`, re-confirmed on `main` — see §6.
 
 ### 1.3 Test database
 
@@ -147,9 +147,9 @@ Type key: U = unit, A = API/integration, C = UI component, S = UI style, R = res
 | R-04 | R | AC-39 | no clipped label / hidden primary action | on each screen×viewport the primary action and every field label are visible in the layout box | `e2e/lab-02/responsive.spec.ts` | Pass |
 | R-05 | R | §8.8, A-13 | screenshot capture | writes `artifacts/lab-02/screenshots/{create-ticket,my-tickets,ticket-detail}/{desktop,tablet,mobile}.png` | `e2e/lab-02/responsive.spec.ts` | Pass |
 | R-06 | R | AC-40, ui-spec §12 | keyboard traversal | tabbing through Create Ticket / My Tickets / Ticket Detail reaches every interactive control in DOM order and each shows a `:focus-visible` ring (computed outline ≠ none) | `e2e/lab-02/responsive.spec.ts` | Pass |
-| E2E-01 | E | AC-01, AC-15, AC-16, AC-23, AC-33 | full requester journey | select Requester → create ticket + 1 attachment → confirmation shows official number → find via search in My Tickets → open detail → download attachment (200) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
-| E2E-02 | E | AC-21, AC-34, AC-36 | attachment failure + soft-removal journey | on Ticket Detail, an upload forced to fail shows the retry affordance and a successful retry adds it; then remove an attachment with a reason → row shows "Removed" + reason → download blocked in UI | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
-| E2E-03 | E | AC-03, AC-09, AC-37 | cross-requester isolation | create ticket as A → Change Requester to B → B's My Tickets does not list A's ticket → visiting `/tickets/:idOfA` shows "Ticket not found" | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pending |
+| E2E-01 | E | AC-01, AC-15, AC-16, AC-23, AC-33 | full requester journey | select Requester → create ticket + 1 attachment → confirmation shows official number → find via search in My Tickets → open detail → download attachment (200) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
+| E2E-02 | E | AC-21, AC-34, AC-36 | attachment failure + soft-removal journey | on Ticket Detail, an upload forced to fail shows the retry affordance and a successful retry adds it; then remove an attachment with a reason → row shows "Removed" + reason → download blocked in UI | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
+| E2E-03 | E | AC-03, AC-09, AC-37 | cross-requester isolation | create ticket as A → Change Requester to B → B's My Tickets does not list A's ticket → visiting `/tickets/:idOfA` shows "Ticket not found" | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
 | E2E-04 | E | AC-17, BR-26 | create failure preserves input | fill valid form, stop API, submit → safe error, values still present, submit re-enabled | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
 | E2E-05 | E | AC-29, AC-30 | empty vs no-results | fresh Requester → empty state; after creating one, a non-matching search → no-results state (visibly different) | `e2e/lab-02/requester-ticket-flow.spec.ts` | Pass |
 
@@ -305,16 +305,18 @@ All commands must pass from a clean checkout of `main` after the release PR is m
 
 ## 6. Final Results
 
-Filled in as Issues merge into `lab2-staging`, then re-confirmed on `main`.
+Re-confirmed on `main` at `77e3142` (the PR #64 release merge). The doc-only commits after
+`77e3142` do not touch any test or source file.
 
-| Suite | Command | Tests | Pass | Fail | Skipped | Run on | Evidence |
-|---|---|---|---|---|---|---|---|
-| Server unit + API | `cd server && npm test` | — | — | — | 0 (required) | _pending_ | _screenshot / CI link_ |
-| Client component + style | `cd client && npm test` | — | — | — | 0 (required) | _pending_ | _screenshot / CI link_ |
-| E2E + responsive | `cd e2e && npm run test:e2e` | — | — | — | 0 (required) | _pending_ | _screenshot / CI link_ |
+| Suite | Command | Files | Tests | Pass | Fail | Skipped | Run on | Evidence |
+|---|---|---|---|---|---|---|---|---|
+| Server unit + API | `cd server && npm test` | 13 | 187 | 187 | 0 | 0 | `main` `77e3142` | `artifacts/lab-02/screenshots/submission/part-3-tests/test-server.png` |
+| Client component + style | `cd client && npm test` | 11 | 206 | 206 | 0 | 0 | `main` `77e3142` | `artifacts/lab-02/screenshots/submission/part-3-tests/test-client.png` |
+| E2E + responsive | `cd e2e && npm run test:e2e` | 4 | 77 | 77 | 0 | 0 | `main` `77e3142` | `artifacts/lab-02/screenshots/submission/part-3-tests/test-e2e.png` |
+| **Total** | `npm run test:all` | 28 | **470** | **470** | 0 | 0 | `main` `77e3142` | — |
 
 Definition-of-Done gate (from `specification.md` §10.1): no test skipped, disabled, `.only`, or
-commented out; every AC row above shows a passing test; screenshots committed.
+commented out; every AC row above shows a passing test; screenshots committed. All hold.
 
 ---
 
