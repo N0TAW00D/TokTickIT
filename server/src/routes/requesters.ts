@@ -8,8 +8,12 @@ export const requestersRouter: Router = Router();
 
 requestersRouter.get('/', async (_req: Request, res: Response) => {
   try {
-    const requesters = await prisma.requesterUser.findMany({
-      where: { isActive: true },
+    // Lab 3 renames RequesterUser to User and adds IT Staff/Administrator
+    // rows to the same table (docs/lab-03/specification.md §7.4 item 1) —
+    // the role filter keeps this Lab 2 endpoint returning only Requesters,
+    // as it always has.
+    const requesters = await prisma.user.findMany({
+      where: { isActive: true, role: 'REQUESTER' },
       select: { id: true, name: true, email: true },
       orderBy: { name: 'asc' },
     });

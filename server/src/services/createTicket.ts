@@ -136,6 +136,11 @@ export async function createTicket(input: CreateTicketInput) {
             categoryId: input.categoryId,
             relatedSystemId: input.relatedSystemId,
             requestedPriority: input.requestedPriority,
+            // itPriority is initialised to a copy of requestedPriority
+            // (docs/lab-03/specification.md §7.4 item 5, BR-22) and changed
+            // afterwards only by IT Staff or Administrator — not by this
+            // creation path.
+            itPriority: input.requestedPriority,
             summary: input.summary,
             description: input.description,
             status: 'NEW',

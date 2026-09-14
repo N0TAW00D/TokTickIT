@@ -62,7 +62,7 @@ export async function requesterContext(req: Request, res: Response, next: NextFu
   }
 
   // A syntactically valid positive integer can still be larger than the
-  // Postgres `int4` that backs `RequesterUser.id`. Querying with it makes the
+  // Postgres `int4` that backs `User.id`. Querying with it makes the
   // driver raise "out of range", which would surface as a 500 for what is
   // really bad client input. Such an id cannot reference any row, so §1.2's
   // table puts it in the existence branch: 400 INVALID_REQUESTER.
@@ -72,8 +72,12 @@ export async function requesterContext(req: Request, res: Response, next: NextFu
   }
 
   try {
-    const requester = await prisma.requesterUser.findUnique({
-      where: { id },
+    // Lab 3 renames RequesterUser to User and adds IT Staff/Administrator
+    // rows to the same table (docs/lab-03/specification.md §7.4 item 1) —
+    // the role filter keeps X-Requester-Id resolving only to a Requester,
+    // as it always has, and not to a staff/admin id that happens to exist.
+    const requester = await prisma.user.findUnique({
+      where: { id, role: 'REQUESTER' },
       select: { id: true, name: true, email: true, isActive: true },
     });
 
