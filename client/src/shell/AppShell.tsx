@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { RequesterBadge } from "./RequesterBadge";
+import { UserBadge } from "./UserBadge";
 import "./AppShell.css";
 
 export interface AppShellProps {
@@ -57,8 +58,16 @@ export function AppShell({ children }: AppShellProps) {
             ))}
           </nav>
 
+          {/* ui-spec.md §4.1's UserBadge is rendered alongside, not in
+              place of, RequesterBadge — see UserBadge.tsx's doc comment for
+              why (#68 judgment call: the Requester flow still identifies
+              itself via RequesterContext until #70 rewires it onto the
+              session). UserBadge renders nothing until a real authenticated
+              user exists, so this is a no-op on every screen #68 doesn't
+              touch. */}
           <div className="zen-app-shell__requester zen-app-shell__requester--inline">
             <RequesterBadge />
+            <UserBadge />
           </div>
 
           <button
@@ -92,6 +101,7 @@ export function AppShell({ children }: AppShellProps) {
             ))}
             <div className="zen-app-shell__requester zen-app-shell__requester--mobile">
               <RequesterBadge onNavigate={closeMenu} />
+              <UserBadge onNavigate={closeMenu} />
             </div>
           </nav>
         )}
