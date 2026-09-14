@@ -38,12 +38,17 @@ beforeAll(async () => {
     take: 2,
   });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
-  const requesters = await prisma.requesterUser.findMany({
-    where: { isActive: true },
+  // Lab 3 renames RequesterUser to User and adds other roles to the same
+  // table (specification.md §7.4 item 1); the role filter keeps this
+  // picking Requesters, as the positional requesters[0]/[1] use below needs.
+  const requesters = await prisma.user.findMany({
+    where: { isActive: true, role: 'REQUESTER' },
     orderBy: { id: 'asc' },
     take: 2,
   });
-  const inactiveRequester = await prisma.requesterUser.findFirstOrThrow({ where: { isActive: false } });
+  const inactiveRequester = await prisma.user.findFirstOrThrow({
+    where: { isActive: false, role: 'REQUESTER' },
+  });
 
   categoryAId = categories[0]!.id;
   categoryBId = categories[1]!.id;
@@ -77,6 +82,11 @@ async function seedTicket(overrides: SeedTicketOverrides = {}) {
       summary: overrides.summary ?? `Seed ticket ${ticketSeq}`,
       description: overrides.description ?? 'x'.repeat(25),
       requestedPriority: overrides.requestedPriority ?? 'MEDIUM',
+      // Lab 3 (specification.md §7.1/BR-22) adds itPriority as NOT NULL,
+      // initialised to a copy of requestedPriority. This fixture bypasses
+      // the createTicket service, so it must set it directly to satisfy the
+      // constraint; it is not exercising any Lab 3 behavior.
+      itPriority: overrides.requestedPriority ?? 'MEDIUM',
       status: overrides.status ?? 'NEW',
     },
   });

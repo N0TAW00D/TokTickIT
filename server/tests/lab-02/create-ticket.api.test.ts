@@ -27,8 +27,12 @@ let inactiveRequesterId: number;
 beforeAll(async () => {
   const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
-  const requester = await prisma.requesterUser.findFirstOrThrow({ where: { isActive: true } });
-  const inactiveRequester = await prisma.requesterUser.findFirstOrThrow({ where: { isActive: false } });
+  // Lab 3 renames RequesterUser to User and adds other roles to the same
+  // table (specification.md §7.4 item 1); the role filter keeps this
+  // picking Requesters specifically, since X-Requester-Id now only
+  // resolves to role REQUESTER rows.
+  const requester = await prisma.user.findFirstOrThrow({ where: { isActive: true, role: 'REQUESTER' } });
+  const inactiveRequester = await prisma.user.findFirstOrThrow({ where: { isActive: false, role: 'REQUESTER' } });
 
   activeCategoryId = category.id;
   activeCategoryName = category.name;

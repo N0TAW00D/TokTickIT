@@ -35,8 +35,11 @@ describe('GET /api/requesters', () => {
     const names = (res.body as Array<{ name: string }>).map((r) => r.name);
     expect(names).not.toContain('Robert Wilson');
 
-    const inactive = await prisma.requesterUser.findFirstOrThrow({
-      where: { isActive: false },
+    // Lab 3 renames RequesterUser to User and adds an inactive IT Staff
+    // seed row to the same table (specification.md §7.4 item 1, §7.5); the
+    // role filter keeps this the inactive Requester specifically.
+    const inactive = await prisma.user.findFirstOrThrow({
+      where: { isActive: false, role: 'REQUESTER' },
     });
     const ids = (res.body as Array<{ id: number }>).map((r) => r.id);
     expect(ids).not.toContain(inactive.id);
@@ -60,10 +63,11 @@ describe('GET /api/requesters', () => {
 
 // Covers docs/lab-02/tests.md API-04: GET /api/requesters failure/empty
 // shape — DB error -> 500 {error:"INTERNAL"} generic; empty table -> 200 [].
-// RequesterUser is shared seed reference data that reset-db.ts deliberately
-// never truncates and the suite above depends on, so the empty-table case
-// is proven by stubbing prisma.requesterUser.findMany to resolve [] rather
-// than by deleting the seeded rows.
+// User (renamed from RequesterUser, specification.md §7.4 item 1) is shared
+// seed reference data that reset-db.ts deliberately never truncates and the
+// suite above depends on, so the empty-table case is proven by stubbing
+// prisma.user.findMany to resolve [] rather than by deleting the seeded
+// rows.
 describe('API-04: GET /api/requesters failure/empty shape', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -71,7 +75,7 @@ describe('API-04: GET /api/requesters failure/empty shape', () => {
 
   it('DB error: returns the standard INTERNAL error body without leaking the thrown error', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(prisma.requesterUser, 'findMany').mockRejectedValue(new Error('boom'));
+    vi.spyOn(prisma.user, 'findMany').mockRejectedValue(new Error('boom'));
 
     const res = await request(testServer.server).get('/api/requesters');
 
@@ -84,7 +88,7 @@ describe('API-04: GET /api/requesters failure/empty shape', () => {
   });
 
   it('empty table: returns 200 []', async () => {
-    vi.spyOn(prisma.requesterUser, 'findMany').mockResolvedValue([]);
+    vi.spyOn(prisma.user, 'findMany').mockResolvedValue([]);
 
     const res = await request(testServer.server).get('/api/requesters');
 
@@ -177,8 +181,8 @@ describe('requesterContext middleware', () => {
   });
 
   it('rejects a header for an inactive Requester with 400 INVALID_REQUESTER', async () => {
-    const inactive = await prisma.requesterUser.findFirstOrThrow({
-      where: { isActive: false },
+    const inactive = await prisma.user.findFirstOrThrow({
+      where: { isActive: false, role: 'REQUESTER' },
     });
 
     const res = await request(testAppServer.server)
@@ -190,8 +194,8 @@ describe('requesterContext middleware', () => {
   });
 
   it('lets an active Requester through and exposes it to the downstream handler', async () => {
-    const active = await prisma.requesterUser.findFirstOrThrow({
-      where: { isActive: true },
+    const active = await prisma.user.findFirstOrThrow({
+      where: { isActive: true, role: 'REQUESTER' },
     });
 
     const res = await request(testAppServer.server)

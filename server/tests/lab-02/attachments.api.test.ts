@@ -56,7 +56,13 @@ beforeAll(async () => {
 
   const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
-  const requesters = await prisma.requesterUser.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } });
+  // Lab 3 renames RequesterUser to User and adds other roles to the same
+  // table (specification.md §7.4 item 1); the role filter keeps this
+  // picking Requesters, as the positional requesters[0]/[1] use below needs.
+  const requesters = await prisma.user.findMany({
+    where: { isActive: true, role: 'REQUESTER' },
+    orderBy: { id: 'asc' },
+  });
 
   if (requesters.length < 2) {
     throw new Error('Need at least 2 active seeded Requesters for attachment ownership tests');
