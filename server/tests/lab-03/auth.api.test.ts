@@ -417,6 +417,17 @@ describe('GET /api/auth/me', () => {
     expect(res.body.error).toBe('UNAUTHENTICATED');
   });
 
+  it('a malformed percent-encoded session cookie is the same 401 UNAUTHENTICATED as no cookie at all, not a 500 or a crash', async () => {
+    const noSession = await request(testServer.server).get('/api/auth/me');
+
+    const malformedCases = [`${SESSION_COOKIE_NAME}=abc%zz`, `${SESSION_COOKIE_NAME}=%`];
+    for (const cookie of malformedCases) {
+      const res = await request(testServer.server).get('/api/auth/me').set('Cookie', cookie);
+      expect(res.status, cookie).toBe(401);
+      expect(res.body, cookie).toEqual(noSession.body);
+    }
+  });
+
   it('AC-60: a role change by an Administrator takes effect on the caller\'s very next request, without re-login (BR-39)', async () => {
     const user = await createUser({ role: 'REQUESTER' });
     const cookie = await loginAndGetCookie(user.email, DEFAULT_PASSWORD);

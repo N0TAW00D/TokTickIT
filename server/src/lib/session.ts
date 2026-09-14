@@ -61,6 +61,14 @@ export function clearSessionCookie(req: Request, res: Response): void {
  * single, simply-shaped cookie value (an unpadded base64url token, which by
  * construction never contains `;`, `,`, or whitespace — the characters that
  * make hand-rolled cookie parsing generally unsafe for arbitrary values).
+ *
+ * `decodeURIComponent` throws a `URIError` on malformed percent-encoding
+ * (e.g. a value ending in a lone `%`, or containing `%zz`) — a client can
+ * send that in an arbitrary `Cookie` header, so a caught, malformed
+ * `toktickit.sid` value is treated exactly like no cookie at all (`null`)
+ * rather than throwing out of this function. It is functionally absent
+ * either way: there is no decoded value to hash and look up
+ * (api-spec.md §1.2, "reject if absent or expired").
  */
 export function readSessionCookie(req: Request): string | null {
   const header = req.headers.cookie;
@@ -71,7 +79,11 @@ export function readSessionCookie(req: Request): string | null {
     if (eq === -1) continue;
     const name = part.slice(0, eq).trim();
     if (name === SESSION_COOKIE_NAME) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return null;
+      }
     }
   }
   return null;
