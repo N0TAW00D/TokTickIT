@@ -47,12 +47,35 @@ cp .env.example .env
 npm install
 npm run db:start     # starts PostgreSQL via docker-compose
 npm run db:migrate   # applies all Prisma migrations (creates tables from empty)
-npm run db:seed      # loads reference data + Development Requesters (idempotent, safe to re-run)
+npm run db:seed      # loads reference data, Users and example Tickets (idempotent, safe to re-run)
 ```
 
 `db:migrate` and `db:seed` both target the database in `server/.env` (the dev database,
-`localdb` by default). Re-running `db:seed` never creates duplicate rows — it `upsert`s every
-row by its natural key (see `server/prisma/seed.ts`).
+`localdb` by default). Re-running `db:seed` never creates duplicate rows — it upserts every
+row by its natural key (email for Users, ticketNumber for Tickets — see
+`server/prisma/seed.ts`).
+
+#### Seeded accounts (local development only)
+
+`db:seed` creates one `User` row per seeded account, covering all three Lab 3 roles: 4 active +
+1 inactive Requester, 3 active + 1 inactive IT Staff, and 2 active Administrators (one more than
+the handout's stated minimum, so self-deactivation and last-active-Administrator can each be
+tested independently — see `docs/lab-03/specification.md` §7.5). Every seeded account shares one
+password:
+
+```
+DevPassword123!
+```
+
+This is a **fake, local-development-only** password — not a real secret, and it grants access to
+no non-local system (`specification.md` AC-58). Seeded accounts are flagged
+`mustChangePassword: false`, so they can log in and use the app immediately without going through
+the forced first-login change flow. An account created by an Administrator, or a Lab 2
+`RequesterUser` row carried forward by the Lab 3 migration, is different: both start with
+`mustChangePassword: true` and must choose a new password at first login — the migration backfills
+their password hash from this same `DevPassword123!` constant purely so that first login is
+actually possible (see
+`server/prisma/migrations/20260914120000_evolve_user_model_roles_sessions/migration.sql`).
 
 ### 2. Server
 
@@ -88,6 +111,24 @@ npm run db:test:reset
 The test setup refuses to run if `server/.env.test` is missing, or if it points at the same
 database as `server/.env`, or at a database whose name doesn't contain `test` — this is a
 safety net against accidentally wiping the dev database.
+
+#### Lab 2-era fixture database (migration tests)
+
+`server/tests/lab-03/migration.test.ts` (`docs/lab-03/tests.md` MIG-01..MIG-06) needs a database
+holding *only* Lab 2-era schema and data, so it can apply the Lab 3 migration to it and prove the
+`RequesterUser` → `User` rename and column backfills preserve every row. That test provisions this
+database itself (in its own `beforeAll`), so `npm test` needs no extra setup — but the same
+provisioning is also available as its own command, alongside `db:test:reset`, for inspecting that
+database by hand:
+
+```bash
+npm run db:test:lab2-fixture
+```
+
+This always drops and recreates a dedicated `toktickit_test_lab2fixture` database (derived from
+`server/.env.test`, so the same safety checks apply), applies only the two Lab 2 migrations, and
+hand-seeds it with representative Lab 2-era rows — never the Lab 3 migration, which is exactly
+what the test then applies and asserts against.
 
 ### 3. Client
 
