@@ -517,7 +517,7 @@ exist (§9).
 | Lab 2 | Lab 3 |
 |---|---|
 | `X-Requester-Id` header on every scoped route | **Removed.** Identity is the session (§1.2). |
-| `GET /api/requesters` | **Deleted.** Repeals `L2-BR-35`. |
+| `GET /api/requesters` | **Deleted.** `L2-BR-35` is *not* repealed — it also governs `GET /api/categories` and `GET /api/related-systems`, both of which are retained unchanged; only the requesters clause becomes moot with the endpoint's removal. |
 | `400 MISSING_REQUESTER` / `INVALID_REQUESTER` | **Removed** — replaced by `401 UNAUTHENTICATED`. |
 | Ticket routes open to any caller with a valid header | Require a session; ownership from the authenticated user (BR-03). |
 | `GET /api/tickets/:id` returns Lab 2 fields | Adds `itPriority`, `owner`, `requesterResolvedAt` for IT Staff and Administrator; a Requester never sees `itPriority`. |
