@@ -1,0 +1,7 @@
+/* Role badge (ui-spec.md §3.3). Shares the badge shell every other badge
+   uses (Badge.css) so radius/padding/font stay identical. */
+
+.zen-badge--role {
+  background: var(--zen-role-bg);
+  color: var(--zen-role-text);
+}
