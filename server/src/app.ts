@@ -5,10 +5,24 @@ import { relatedSystemsRouter } from './routes/relatedSystems.ts';
 import { requestersRouter } from './routes/requesters.ts';
 import { ticketsRouter } from './routes/tickets.ts';
 import { attachmentsRouter } from './routes/attachments.ts';
+import { authRouter } from './routes/auth.ts';
 
 const app: Express = express();
 
-app.use(cors());
+// Lab 3 session cookies (api-spec.md §1.2) travel on `fetch` requests from
+// the client dev server, which runs on a different port than this API —
+// cross-origin, though same-site (both localhost), which is what makes
+// `SameSite=Lax` viable at all (D-04). A browser only sends/accepts a
+// cookie on a cross-origin `fetch` when the response carries a specific
+// `Access-Control-Allow-Origin` (never `*`) plus
+// `Access-Control-Allow-Credentials: true`, and the request itself used
+// `credentials: 'include'` — so the previously wide-open `cors()` (which
+// reflects any origin but never sets the credentials header) is replaced
+// with an explicit, credentialed origin. CLIENT_ORIGIN defaults to Vite's
+// own default dev port so local `npm run dev` on both sides works with no
+// extra configuration; override it for any other deployment.
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
 
 // Routes that must NEVER go through the global JSON body parser below.
 //
@@ -80,5 +94,6 @@ app.use('/api/related-systems', relatedSystemsRouter);
 app.use('/api/requesters', requestersRouter);
 app.use('/api/tickets', ticketsRouter);
 app.use('/api/attachments', attachmentsRouter);
+app.use('/api/auth', authRouter);
 
 export default app;
