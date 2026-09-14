@@ -64,14 +64,26 @@ const VOLUNTARY_USER: AuthUser = {
 function renderForced() {
   return render(
     <AuthProvider>
-      <AuthBootstrap user={FORCED_USER}>
-        <MemoryRouter initialEntries={["/change-password"]}>
-          <Routes>
-            <Route path="/change-password" element={<ChangePasswordScreen />} />
-            <Route path="/" element={<h1>Landing</h1>} />
-          </Routes>
-        </MemoryRouter>
-      </AuthBootstrap>
+      {/* AuthBootstrap wraps only the /change-password route's element (not
+          the whole router, as renderVoluntary below does) — logging out
+          clears AuthContext's user, which would otherwise unmount
+          AuthBootstrap's children (it renders null once `current` is
+          falsy again) and tear down the MemoryRouter mid-navigation before
+          the Logout regression test below can observe the /login route. */}
+      <MemoryRouter initialEntries={["/change-password"]}>
+        <Routes>
+          <Route
+            path="/change-password"
+            element={
+              <AuthBootstrap user={FORCED_USER}>
+                <ChangePasswordScreen />
+              </AuthBootstrap>
+            }
+          />
+          <Route path="/login" element={<h1>Login route</h1>} />
+          <Route path="/" element={<h1>Landing</h1>} />
+        </Routes>
+      </MemoryRouter>
     </AuthProvider>,
   );
 }
@@ -134,6 +146,26 @@ describe("forced mode (mustChangePassword: true)", () => {
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({ newPassword: "BrandNewPassword1", confirmPassword: "BrandNewPassword1" });
     expect(body).not.toHaveProperty("currentPassword");
+  });
+});
+
+describe("forced mode: Logout escape hatch (regression — forced mode must not strand the user with no way out)", () => {
+  it("shows a Logout button reachable without opening a menu, and clicking it logs out and redirects to /login", async () => {
+    const fetchMock = mockChangePasswordFetch(() => jsonResponse(204, {}));
+    renderForced();
+    await screen.findByText(/choose a new password before continuing/i);
+
+    const logoutButton = screen.getByRole("button", { name: /^logout$/i });
+    fireEvent.click(logoutButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_BASE_URL}/api/auth/logout`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Login route" })).toBeInTheDocument();
   });
 });
 

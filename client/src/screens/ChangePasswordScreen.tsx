@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   changePassword,
   ChangePasswordValidationError,
+  logout as logoutRequest,
   WrongPasswordError,
 } from "../auth/api";
 import "./ChangePasswordScreen.css";
@@ -62,7 +63,7 @@ const SUCCESS_REDIRECT_DELAY_MS = 1200;
  */
 export function ChangePasswordScreen() {
   const navigate = useNavigate();
-  const { user, patchUser } = useAuth();
+  const { user, patchUser, setUser } = useAuth();
   // Captured ONCE, from the value `user.mustChangePassword` had when this
   // screen instance mounted — deliberately not read live on every render.
   // A successful forced-path submission calls patchUser({
@@ -80,6 +81,7 @@ export function ChangePasswordScreen() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitState, setSubmitState] = useState<SubmitState>({ phase: "idle" });
   const submitLockRef = useRef(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     if (submitState.phase !== "success") return;
@@ -214,6 +216,22 @@ export function ChangePasswordScreen() {
     navigate(-1);
   }
 
+  // Forced mode's only escape route (see the comment on the slim topbar
+  // below): a user who can't or doesn't want to complete the forced change
+  // has no Cancel here, so Logout must stay reachable. Same pattern as
+  // UserBadge's own handleLogout (../shell/UserBadge.tsx) — clears
+  // client-held user state and redirects to /login regardless of whether
+  // the server call itself succeeded (logoutRequest never throws).
+  function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    logoutRequest().finally(() => {
+      setUser(null);
+      setLoggingOut(false);
+      navigate("/login", { replace: true });
+    });
+  }
+
   const submitting = submitState.phase === "submitting";
   const success = submitState.phase === "success";
 
@@ -313,13 +331,28 @@ export function ChangePasswordScreen() {
   // Forced mode is reached while every other route redirects here
   // (RequireAuth) — the shell's own nav/UserBadge would just be dead links
   // in that state, so it renders the same slim, wordmark-only layout the
-  // Login screen uses instead of AppShell. Voluntary mode is reached FROM
-  // the shell (UserBadge menu), so it keeps the shell around it.
+  // Login screen uses instead of AppShell (not full AppShell: that would
+  // also re-introduce UserBadge's own "Change Password" menu item, which is
+  // exactly the screen already showing). But a user who can't or doesn't
+  // want to complete the forced change — wrong new password twice, changed
+  // their mind about which account — still needs a way out, so this slim
+  // bar carries a standalone Logout button (UserBadge's exact
+  // logout/redirect pattern, just not behind a menu). Voluntary mode is
+  // reached FROM the shell (UserBadge menu), so it keeps the shell — and
+  // UserBadge's own Logout — around it.
   if (forced) {
     return (
       <div className="zen-change-password-screen">
         <header className="zen-change-password-screen__topbar">
           <span className="zen-change-password-screen__wordmark">⌚ TokTickIT</span>
+          <button
+            type="button"
+            className="zen-change-password-screen__logout"
+            onClick={handleLogout}
+            disabled={loggingOut}
+          >
+            {loggingOut ? "Logging out…" : "Logout"}
+          </button>
         </header>
         <main className="zen-change-password-screen__main">{form}</main>
       </div>
