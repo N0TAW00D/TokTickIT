@@ -12,6 +12,7 @@
     "db:seed": "npx prisma db seed",
     "db:generate": "npx prisma generate",
     "db:test:reset": "tsx scripts/test-db-reset.ts",
+    "db:test:lab2-fixture": "tsx scripts/test-db-lab2-fixture.ts",
     "db:test": "npm run db:test:reset"
   },
   "keywords": [],
