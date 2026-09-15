@@ -171,8 +171,8 @@ export interface FetchMyTicketsParams {
 
 /**
  * `GET /api/tickets` (api-spec.md §3.2): the calling Requester's own
- * tickets, identified via the `X-Requester-Id` header (§1.2) exactly like
- * `createTicket` below — never scoped by anything sent in the query.
+ * tickets, identified via the session cookie (`credentials: "include"`,
+ * api-spec.md §1.2) — never scoped by anything sent in the query.
  *
  * A blank/whitespace-only `search` is dropped rather than sent, matching
  * the server's own "blank search ⇒ ignored" rule (BR-16) so an empty
@@ -180,7 +180,6 @@ export interface FetchMyTicketsParams {
  * omitting the param entirely.
  */
 export async function fetchMyTickets(
-  requesterId: number,
   params: FetchMyTicketsParams = {},
 ): Promise<TicketListResponse> {
   const query = new URLSearchParams();
@@ -201,7 +200,7 @@ export async function fetchMyTickets(
   const queryString = query.toString();
   const response = await fetch(
     `${API_BASE_URL}/api/tickets${queryString ? `?${queryString}` : ""}`,
-    { headers: { "X-Requester-Id": String(requesterId) } },
+    { credentials: "include" },
   );
   if (!response.ok) {
     throw new Error(`Failed to load tickets (status ${response.status})`);
@@ -232,20 +231,17 @@ export class TicketNotFoundError extends Error {
 
 /**
  * `GET /api/tickets/:id` (api-spec.md §3.3): one ticket owned by the
- * calling Requester, identified via the `X-Requester-Id` header (§1.2)
- * exactly like `createTicket`/`fetchMyTickets`.
+ * calling Requester, identified via the session cookie
+ * (`credentials: "include"`) exactly like `createTicket`/`fetchMyTickets`.
  *
  * A `404` raises `TicketNotFoundError`; every other failure (network error,
  * 400, 500) raises a generic `Error`.
  */
 export async function fetchTicketDetail(
-  requesterId: number,
   ticketId: number,
 ): Promise<TicketDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}`, {
-    headers: {
-      "X-Requester-Id": String(requesterId),
-    },
+    credentials: "include",
   });
   if (response.status === 404) {
     throw new TicketNotFoundError();
@@ -258,22 +254,21 @@ export async function fetchTicketDetail(
 
 /**
  * `POST /api/tickets` (api-spec.md §3.1): create one ticket for the current
- * Requester, identified via the `X-Requester-Id` header (§1.2) rather than
- * the request body.
+ * Requester, identified via the session cookie (`credentials: "include"`)
+ * rather than the request body.
  *
  * A `400 VALIDATION_FAILED` response raises `CreateTicketValidationError`
  * with its `fields[]` preserved; every other failure (network error, 5xx,
  * or a `400` of a different `error` code) raises a generic `Error`.
  */
 export async function createTicket(
-  requesterId: number,
   payload: CreateTicketRequest,
 ): Promise<CreateTicketResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      "X-Requester-Id": String(requesterId),
     },
     body: JSON.stringify(payload),
   });
@@ -366,8 +361,8 @@ function readErrorMessage(body: unknown, status: number): string {
 
 /**
  * `POST /api/tickets/:id/attachments` (api-spec.md §4.1): upload one file
- * to a ticket owned by the calling Requester, identified via the
- * `X-Requester-Id` header (§1.2) exactly like `createTicket` above.
+ * to a ticket owned by the calling Requester, identified via the session
+ * cookie (`credentials: "include"`) exactly like `createTicket` above.
  *
  * The request body is `multipart/form-data` with a single `file` part —
  * `Content-Type` (including its boundary) is left for the browser/runtime
@@ -379,7 +374,6 @@ function readErrorMessage(body: unknown, status: number): string {
  * generic `Error`.
  */
 export async function uploadAttachment(
-  requesterId: number,
   ticketId: number,
   file: File,
 ): Promise<AttachmentResponse> {
@@ -390,7 +384,7 @@ export async function uploadAttachment(
     `${API_BASE_URL}/api/tickets/${ticketId}/attachments`,
     {
       method: "POST",
-      headers: { "X-Requester-Id": String(requesterId) },
+      credentials: "include",
       body: formData,
     },
   );
@@ -454,17 +448,16 @@ export class RemoveAttachmentError extends Error {
 /**
  * `DELETE /api/attachments/:id` (api-spec.md §4.4): soft-remove one
  * attachment on a ticket owned by the calling Requester, identified via
- * the `X-Requester-Id` header (§1.2) exactly like `uploadAttachment`
- * above. `reason` is sent as-is (trimmed) — the caller (the Remove
- * dialog) is expected to have already validated it client-side so this
- * request is only made once it passes.
+ * the session cookie (`credentials: "include"`) exactly like
+ * `uploadAttachment` above. `reason` is sent as-is (trimmed) — the caller
+ * (the Remove dialog) is expected to have already validated it
+ * client-side so this request is only made once it passes.
  *
  * `400 VALIDATION_FAILED` and `409 ALREADY_REMOVED` raise the matching
  * `RemoveAttachmentError` code; every other failure (network error,
  * `404`, `5xx`) raises a generic `Error`.
  */
 export async function removeAttachment(
-  requesterId: number,
   attachmentId: number,
   reason: string,
 ): Promise<TicketAttachment> {
@@ -472,9 +465,9 @@ export async function removeAttachment(
     `${API_BASE_URL}/api/attachments/${attachmentId}`,
     {
       method: "DELETE",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        "X-Requester-Id": String(requesterId),
       },
       body: JSON.stringify({ reason }),
     },
@@ -561,20 +554,19 @@ export interface AttachmentDownload {
 /**
  * `GET /api/attachments/:id/download` (api-spec.md §4.3): fetch the raw
  * bytes of an **active** attachment on an owned ticket, identified via the
- * `X-Requester-Id` header (§1.2) exactly like the calls above. The bytes
- * come back as a `Blob` together with the filename parsed from
+ * session cookie (`credentials: "include"`) exactly like the calls above.
+ * The bytes come back as a `Blob` together with the filename parsed from
  * `Content-Disposition`.
  *
  * A `410` raises `AttachmentRemovedError`; every other failure (`404`,
  * `5xx`, network error) raises a generic `Error`.
  */
 export async function downloadAttachment(
-  requesterId: number,
   attachmentId: number,
 ): Promise<AttachmentDownload> {
   const response = await fetch(
     `${API_BASE_URL}/api/attachments/${attachmentId}/download`,
-    { headers: { "X-Requester-Id": String(requesterId) } },
+    { credentials: "include" },
   );
 
   if (!response.ok) {

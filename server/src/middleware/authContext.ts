@@ -10,12 +10,11 @@ import type { Role } from '../generated/prisma/client.ts';
 // Scope note for future issues (#69-#73): `authenticate`, `passwordChangeGate`
 // and `requireRole` are all written to be reusable by any future router, not
 // just this one — see each function's own doc comment. Issue #68 mounted
-// `authenticate`/`passwordChangeGate` only on `/api/auth/*`; issue #69 adds
-// `requireRole` here (same reusability goal) without mounting it anywhere
-// new either — the ticket, staff-queue and admin-user routes stay on
-// `requesterContext`/`X-Requester-Id` until #70/#71/#73 rewire them onto
-// real session auth and mount `authenticate`, `passwordChangeGate` and
-// `requireRole`, in that order, on each of their own routers.
+// `authenticate`/`passwordChangeGate` only on `/api/auth/*`; issue #69 added
+// `requireRole` here without mounting it anywhere new; issue #70 mounts all
+// three, in this order, on `src/routes/tickets.ts` and
+// `src/routes/attachments.ts` (deleting `requesterContext`/`X-Requester-Id`
+// in the process). The staff-queue and admin-user routes still await #71/#73.
 
 export interface AuthenticatedUser {
   id: number;

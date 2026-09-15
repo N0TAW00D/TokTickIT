@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -8,7 +8,6 @@ import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { AttachmentSection } from "../components/AttachmentSection";
-import { useRequester } from "../requester/RequesterContext";
 import {
   fetchTicketDetail,
   TicketNotFoundError,
@@ -103,28 +102,14 @@ type DetailState =
 export function TicketDetailScreen() {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { requesterId } = useRequester();
 
   const parsedId = params.id !== undefined ? Number(params.id) : NaN;
   const validId = Number.isInteger(parsedId) && parsedId > 0;
 
   const [state, setState] = useState<DetailState>({ phase: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
-  // Captures the Requester in effect when this screen first mounted, so a
-  // later change can be detected without re-fetching for it (see below).
-  const initialRequesterIdRef = useRef(requesterId);
 
   useEffect(() => {
-    if (requesterId === null) return;
-
-    // BR-11/AC-09: if the current Requester changes while this screen is
-    // open, the ticket is now foreign — the screen does not re-fetch it and
-    // instead leaves immediately for My Tickets under the new Requester.
-    if (requesterId !== initialRequesterIdRef.current) {
-      navigate("/tickets", { replace: true });
-      return;
-    }
-
     if (!validId) {
       setState({ phase: "not-found" });
       return;
@@ -133,7 +118,7 @@ export function TicketDetailScreen() {
     let cancelled = false;
     setState({ phase: "loading" });
 
-    fetchTicketDetail(requesterId, parsedId)
+    fetchTicketDetail(parsedId)
       .then((ticket) => {
         if (!cancelled) setState({ phase: "loaded", ticket });
       })
@@ -153,7 +138,7 @@ export function TicketDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [requesterId, parsedId, validId, reloadToken, navigate]);
+  }, [parsedId, validId, reloadToken]);
 
   function handleRetry() {
     setReloadToken((token) => token + 1);
@@ -231,7 +216,7 @@ export function TicketDetailScreen() {
       {state.phase === "not-found" && (
         <EmptyState
           title="Ticket not found"
-          description="This ticket doesn't exist or isn't associated with the current development requester."
+          description="This ticket doesn't exist or isn't associated with your account."
           action={
             <Button variant="primary" onClick={handleBack}>
               <span aria-hidden="true">&larr; </span>
@@ -300,7 +285,6 @@ export function TicketDetailScreen() {
             </h2>
             <AttachmentSection
               attachments={state.ticket.attachments}
-              requesterId={requesterId as number}
               ticketId={state.ticket.id}
               onAttachmentRemoved={handleAttachmentRemoved}
               onAttachmentAdded={handleAttachmentAdded}

@@ -1,6 +1,6 @@
 import multer, { MulterError } from 'multer';
 import { Router, type Request, type Response } from 'express';
-import { requesterContext } from '../middleware/requesterContext.ts';
+import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError, TICKET_INCLUDE } from '../services/createTicket.ts';
@@ -47,8 +47,8 @@ const PG_INT4_MAX = 2_147_483_647;
  *   any row) — that's a *lookup* failure, which is what BR-36 and AC-43
  *   actually describe, so it is `404 NOT_FOUND` (checked separately, after
  *   this shape check passes, in `resolveReferences`). This mirrors the
- *   existing `requesterContext` middleware's treatment of an out-of-range
- *   `X-Requester-Id`.
+ *   int4-range treatment of `categoryId`/`relatedSystemId` a few lines
+ *   below in this same file.
  */
 function validateReferenceIdShape(raw: unknown, field: 'categoryId' | 'relatedSystemId'): FieldError | null {
   if (typeof raw !== 'number' || !Number.isInteger(raw)) {
@@ -87,7 +87,7 @@ function internalError(res: Response): void {
   res.status(500).json({ error: 'INTERNAL', message: 'An unexpected error occurred.' });
 }
 
-ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.post('/', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // express.json() (app.ts) parses in "strict" mode, which already rejects
   // a bare top-level primitive (e.g. `42`) as a parse error — caught by the
   // handler mounted right after it (app.ts) — before this guard ever runs.
@@ -102,10 +102,11 @@ ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) =>
 
   const body = req.body;
 
-  // The owner is always the header-resolved Requester (A-01) — a
+  // The owner is always the authenticated Requester (BR-03, BR-14) — a
   // `requesterId` in the body, if present, is read nowhere below and is
-  // therefore silently ignored, per api-spec.md §3.1.
-  const requesterId = req.requester!.id;
+  // therefore silently ignored, per api-spec.md §3 (Lab 3 change:
+  // identity comes from the session, not X-Requester-Id).
+  const requesterId = req.authUser!.id;
 
   const categoryIdError = validateReferenceIdShape(body.categoryId, 'categoryId');
   const relatedSystemIdError = validateReferenceIdShape(body.relatedSystemId, 'relatedSystemId');
@@ -131,9 +132,8 @@ ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) =>
   ).value;
 
   // Out-of-int4-range ids cannot reference any row; querying with them would
-  // raise a driver-level range error instead of a clean "not found" (same
-  // reasoning as requesterContext's X-Requester-Id bounds check). Treat them
-  // as a lookup failure here rather than letting that surface as a 500.
+  // raise a driver-level range error instead of a clean "not found". Treat
+  // them as a lookup failure here rather than letting that surface as a 500.
   if (Math.abs(categoryId) > PG_INT4_MAX || Math.abs(relatedSystemId) > PG_INT4_MAX) {
     notFound(res);
     return;
@@ -181,7 +181,7 @@ function invalidQuery(res: Response, fields: FieldError[]): void {
   });
 }
 
-ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.get('/', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // req.query values are always string | string[] | ParsedQs | ParsedQs[] |
   // undefined; parseTicketListQuery treats anything other than a single
   // plain string as a shape failure for that param (no silent coercion —
@@ -220,7 +220,7 @@ ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => 
       // BR-15: always server-side scoped to the caller, unconditionally and
       // first — no filter below can widen the scope past this Requester,
       // regardless of what the query string asks for.
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       // BR-16: case-insensitive substring match on ticketNumber OR summary.
       // Blank/whitespace-only search was already normalized to `undefined`
       // by the parser, so its presence here always means a real search.
@@ -320,7 +320,7 @@ const TICKET_DETAIL_ATTACHMENT_SELECT = {
   createdAt: true,
 } as const;
 
-ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
   // treated as a resource that does not exist, never a 400 — same helper
   // the attachments route below already uses for its own `:id`.
@@ -340,7 +340,7 @@ ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) 
     // BR-14/BR-42's byte-identical requirement can't drift apart if there is
     // only one code path that ever produces the 404.
     const ticket = await prisma.ticket.findFirst({
-      where: { id: ticketId, requesterId: req.requester!.id },
+      where: { id: ticketId, requesterId: req.authUser!.id },
       include: {
         ...TICKET_INCLUDE,
         attachments: {
@@ -483,7 +483,7 @@ function ticketNotFound(res: Response): void {
   });
 }
 
-ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.post('/:id/attachments', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const ticketId = parseTicketIdParam(String(req.params.id));
   if (ticketId === null) {
     ticketNotFound(res);
@@ -504,7 +504,7 @@ ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, re
     internalError(res);
     return;
   }
-  if (ownerId === null || ownerId !== req.requester!.id) {
+  if (ownerId === null || ownerId !== req.authUser!.id) {
     ticketNotFound(res);
     return;
   }
@@ -542,7 +542,7 @@ ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, re
   try {
     const attachment = await uploadAttachment({
       ticketId,
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       buffer: file.buffer,
       mimeType: typeResult.value.mimeType,
       extension: typeResult.value.extension,

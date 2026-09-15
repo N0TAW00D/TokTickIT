@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router, type Request, type Response } from 'express';
-import { requesterContext } from '../middleware/requesterContext.ts';
+import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
 import { AttachmentAlreadyRemovedError, removeAttachment } from '../services/removeAttachment.ts';
@@ -122,7 +122,7 @@ function attachmentToJson(attachment: {
 // GET /api/attachments/:id (api-spec.md §4.2)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const attachmentId = parseAttachmentIdParam(String(req.params.id));
   if (attachmentId === null) {
     attachmentNotFound(res);
@@ -132,7 +132,7 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
   try {
     // Both active and removed attachments are returned here (§4.2, BR-33) —
     // getOwnedAttachment doesn't filter on isRemoved, only on ownership.
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+    const attachment = await getOwnedAttachment(attachmentId, req.authUser!.id);
     res.status(200).json(attachmentToJson(attachment));
   } catch (error) {
     if (error instanceof AttachmentNotFoundError) {
@@ -148,7 +148,7 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
 // GET /api/attachments/:id/download (api-spec.md §4.3)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.get('/:id/download', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const attachmentId = parseAttachmentIdParam(String(req.params.id));
   if (attachmentId === null) {
     attachmentNotFound(res);
@@ -156,7 +156,7 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
   }
 
   try {
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+    const attachment = await getOwnedAttachment(attachmentId, req.authUser!.id);
 
     // BR-33: a soft-removed attachment's download endpoint returns 410, not
     // the file — checked only after ownership is confirmed, so a stranger
@@ -210,7 +210,7 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
 // DELETE /api/attachments/:id (api-spec.md §4.4)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.delete('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // Path-shape check first, same precedence as the other two routes and as
   // routes/tickets.ts's POST /:id/attachments: a non-integer id is 404
   // regardless of the request body (§1.4 — "the route matched, the resource
@@ -242,7 +242,7 @@ attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Res
   try {
     const updated = await removeAttachment({
       attachmentId,
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       reason: reasonResult.value,
     });
     res.status(200).json(attachmentToJson(updated));

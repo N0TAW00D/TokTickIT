@@ -4,7 +4,8 @@
 // Owns the ownership check, the active-attachment-count limit, and the
 // write-then-record ordering BR-27 requires. Field-shape/type/size
 // validation (validation/attachmentFile.ts, multer's own size limit) and
-// the X-Requester-Id resolution happen before this is ever called — the
+// identity resolution (session auth, via `authenticate`/
+// `requireRole('REQUESTER')`) happen before this is ever called — the
 // router (src/routes/tickets.ts) is what wires those together and maps the
 // errors thrown here onto HTTP status codes.
 
