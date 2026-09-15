@@ -422,6 +422,34 @@ describe('POST /api/tickets/:id/requester-resolved', () => {
     expect(afterSecond.requesterResolvedAt!.getTime()).toBeGreaterThan(afterFirst.requesterResolvedAt!.getTime());
   });
 
+  it('ui-spec.md §7: the indication survives a reload — GET /api/tickets/:id reflects requesterResolvedAt and owner for the Requester', async () => {
+    const requester = await createUser('REQUESTER');
+    const ticket = await createTicket(requester.id);
+    const cookie = await loginAndGetCookie(requester.email);
+
+    const before = await request(testServer.server)
+      .get(`/api/tickets/${ticket.id}`)
+      .set('Cookie', cookie);
+    expect(before.status).toBe(200);
+    expect(before.body.requesterResolvedAt).toBeNull();
+    expect(before.body.owner).toBeNull();
+    expect(before.body).not.toHaveProperty('itPriority');
+
+    const resolveRes = await request(testServer.server)
+      .post(`/api/tickets/${ticket.id}/requester-resolved`)
+      .set('Cookie', cookie)
+      .set('Content-Type', 'application/json')
+      .send();
+    expect(resolveRes.status).toBe(204);
+
+    const after = await request(testServer.server)
+      .get(`/api/tickets/${ticket.id}`)
+      .set('Cookie', cookie);
+    expect(after.status).toBe(200);
+    expect(after.body.requesterResolvedAt).toEqual(expect.any(String));
+    expect(after.body.status).toBe(ticket.status);
+  });
+
   // AC-25: "Given a Requester, when they attempt to set a Ticket to
   // Resolved or Closed by any endpoint, then it is refused." The only
   // resolution-adjacent endpoint a Requester can reach at all, on this

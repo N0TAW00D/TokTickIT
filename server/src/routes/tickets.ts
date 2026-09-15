@@ -344,6 +344,11 @@ ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUEST
       where: { id: ticketId, requesterId: req.authUser!.id },
       include: {
         ...TICKET_INCLUDE,
+        // ui-spec.md §7: Ticket Owner shows as a read-only row
+        // ("Unassigned" or the owner's name) — IT Priority is deliberately
+        // NOT selected/returned here, since it is never shown to the
+        // Requester (api-spec.md §9: "a Requester never sees itPriority").
+        owner: { select: { id: true, name: true } },
         attachments: {
           // BR-33: both active and soft-removed attachments are listed here
           // (unlike GET /api/tickets's activeAttachmentCount, which counts
@@ -375,6 +380,12 @@ ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUEST
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       attachments: ticket.attachments,
+      // api-spec.md §9 (Lab 3 change): null when unassigned — the client
+      // renders that as "Unassigned" (ui-spec.md §7).
+      owner: ticket.owner,
+      // BR-26: null until the Requester has indicated the problem appears
+      // resolved; never cleared by this route.
+      requesterResolvedAt: ticket.requesterResolvedAt,
     });
   } catch (error) {
     console.error('Error fetching ticket:', error);

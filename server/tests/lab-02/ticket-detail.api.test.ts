@@ -186,6 +186,12 @@ describe('GET /api/tickets/:id', () => {
       description: ticket.description,
       createdAt: ticket.createdAt.toISOString(),
       updatedAt: ticket.updatedAt.toISOString(),
+      // Lab 3 additions to this Lab 2 response (api-spec.md §9, #70): a
+      // read-only Ticket Owner row and the "Problem Appears Resolved"
+      // indication, both null on a freshly-seeded ticket. itPriority is
+      // deliberately absent — a Requester never sees it (ui-spec.md §7).
+      owner: null,
+      requesterResolvedAt: null,
       attachments: [
         {
           id: active.id,
