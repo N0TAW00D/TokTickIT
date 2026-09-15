@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { prisma } from '../lib/prisma.ts';
 
 // GET /api/related-systems — api-spec.md §2.2. Not Requester-scoped: no
-// requesterContext middleware is mounted here, so the X-Requester-Id header
-// is ignored, per §1.2.
+// authentication middleware is mounted here at all — it is public reference
+// data, per §1.2.
 export const relatedSystemsRouter: Router = Router();
 
 relatedSystemsRouter.get('/', async (req: Request, res: Response) => {
