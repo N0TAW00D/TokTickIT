@@ -13,19 +13,16 @@ export interface UserBadgeProps {
 /**
  * Authenticated user identity + menu (ui-spec.md §4.1). Shows the user's
  * name (real text, not just an avatar, so it's announced and findable by
- * search — same rationale `RequesterBadge`'s own comment gives) and a
- * `RoleBadge`, with a menu offering Change Password and Logout.
+ * search) and a `RoleBadge`, with a menu offering Change Password and
+ * Logout.
  *
- * ui-spec.md §4.1 says this "Replaces RequesterBadge"; issue #68 renders it
- * ALONGSIDE `RequesterBadge` in `AppShell` instead (judgment call — see
- * AppShell.tsx's comment): the Requester ticket screens still identify the
- * caller via `X-Requester-Id`/`RequesterContext` until #70 rewires them
- * onto the session and deletes the selector (specification.md §7.4 item
- * 8), so removing `RequesterBadge` now would leave those screens with no
- * way to see/change which Requester they're acting as. This component
- * renders nothing (`null`) until a real authenticated user exists, so on
- * every screen #68 doesn't touch it is invisible today, exactly as if it
- * had never been added.
+ * ui-spec.md §4.1: "Replaces RequesterBadge" — issue #70 deletes the Lab 2
+ * Development Requester selector (`RequesterBadge`/`RequesterContext`/
+ * `X-Requester-Id`, specification.md §7.4 item 8) entirely, so this is now
+ * the only identity badge `AppShell` renders. This component renders
+ * nothing (`null`) until a real authenticated user exists — e.g. Lab 2's
+ * `AppShell.test.tsx`, which still mounts `AppShell` with no `AuthProvider`
+ * in the tree.
  */
 export function UserBadge({ onNavigate }: UserBadgeProps) {
   // Non-throwing: AppShell renders this unconditionally, and Lab 2's

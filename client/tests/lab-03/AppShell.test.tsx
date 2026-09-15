@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { AppShell } from "../../src/shell/AppShell.tsx";
 import { AuthProvider, useAuth } from "../../src/auth/AuthContext.tsx";
-import { RequesterProvider } from "../../src/requester/RequesterContext.tsx";
 import type { AuthUser, Role } from "../../src/auth/api.ts";
 
 // Covers docs/lab-03/ui-spec.md §4.2 (role-specific navigation) and
@@ -40,23 +39,18 @@ function renderShellForRole(role: Role) {
   return render(
     <AuthProvider>
       <AuthBootstrap user={makeUser(role)}>
-        {/* AppShell always mounts RequesterBadge regardless of the
-            authenticated role — a pre-existing #68 requirement (see
-            AppShell.tsx's own comment), unrelated to nav. */}
-        <RequesterProvider>
-          <MemoryRouter initialEntries={["/tickets"]}>
-            <Routes>
-              <Route
-                path="/tickets"
-                element={
-                  <AppShell>
-                    <h1>Screen content</h1>
-                  </AppShell>
-                }
-              />
-            </Routes>
-          </MemoryRouter>
-        </RequesterProvider>
+        <MemoryRouter initialEntries={["/tickets"]}>
+          <Routes>
+            <Route
+              path="/tickets"
+              element={
+                <AppShell>
+                  <h1>Screen content</h1>
+                </AppShell>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
       </AuthBootstrap>
     </AuthProvider>,
   );
