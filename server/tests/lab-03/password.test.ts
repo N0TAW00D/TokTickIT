@@ -13,8 +13,8 @@ import {
 // UNIT-02/UNIT-03 (below) are #68's — password policy (length 8-128) and
 // the same-as-current check, both from validation/passwordPolicy.ts.
 // UNIT-10 and UNIT-11 (email normalisation, comment/note body validation)
-// remain out of scope for this file: UNIT-10 is #67's email lower-casing
-// and UNIT-11 belongs to #70's comments/notes.
+// remain out of scope for this file: UNIT-10 is #67's email lower-casing;
+// UNIT-11 lives in tests/lab-03/comment-validation.test.ts (#70) instead.
 describe('password hashing (BR-06, UNIT-01)', () => {
   const PLAINTEXT = 'CorrectHorseBatteryStaple1';
 
