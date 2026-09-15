@@ -111,12 +111,26 @@ describe("RequireRole — disallowed role (ui-spec.md §4.3 forbidden state)", (
     expect(screen.queryByRole("heading", { name: "Protected content" })).not.toBeInTheDocument();
   });
 
-  it("AC-18: never mounts the wrapped screen, so its data-fetch effect never runs", async () => {
-    const onMount = vi.fn();
+  it("AC-18: never mounts the wrapped screen, so its data-fetch effect never runs and no protected request is issued", async () => {
+    // Intercept fetch so the assertion covers the actual network boundary
+    // (AC-18: "no request to a protected endpoint is issued"), not just the
+    // onMount callback as a proxy for it — a forbidden screen that somehow
+    // fetched without mounting would still fail this.
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) } as Response),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // Mirrors what a real protected screen's data-fetch effect would do —
+    // only reachable if ProtectedScreen actually mounts.
+    const onMount = vi.fn(() => {
+      void fetch("/api/protected-resource");
+    });
     renderGuard(makeUser("REQUESTER"), ["ADMINISTRATOR"], onMount);
 
     await screen.findByRole("heading", { name: "You don't have access to this page" });
     expect(onMount).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("links back to the caller's OWN landing page — a Requester forbidden from an Admin route links to My Tickets", async () => {
