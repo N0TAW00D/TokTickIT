@@ -210,11 +210,15 @@ export async function fetchMyTickets(
 
 /**
  * `GET /api/tickets/:id` (api-spec.md §3.3) response: same shape as the
- * `POST /api/tickets` `201` body, plus a populated `attachments` array. The
- * Requester Ticket Detail screen (ui-spec.md §10) ignores `attachments` —
- * that section belongs to a later slice.
+ * `POST /api/tickets` `201` body, plus a populated `attachments` array and
+ * (Lab 3) `owner`/`requesterResolvedAt` — `owner` is `null` when
+ * unassigned (ui-spec.md §7: rendered as "Unassigned"); `itPriority` is
+ * deliberately never included for a Requester caller (api-spec.md §9).
  */
-export type TicketDetailResponse = CreateTicketResponse;
+export interface TicketDetailResponse extends CreateTicketResponse {
+  owner: { id: number; name: string } | null;
+  requesterResolvedAt: string | null;
+}
 
 /**
  * Thrown by `fetchTicketDetail` on a `404` (api-spec.md §3.3). An unknown
@@ -587,4 +591,131 @@ export async function downloadAttachment(
     response.headers.get("Content-Disposition"),
   );
   return { blob, filename };
+}
+
+// ---------------------------------------------------------------------------
+// Public Comments and "Problem Appears Resolved" (api-spec.md §3.1-3.3)
+// ---------------------------------------------------------------------------
+
+/** One entry in a comment thread (api-spec.md §3.1) — `author.role` is one of the three Lab 3 roles. */
+export interface CommentEntry {
+  id: number;
+  body: string;
+  createdAt: string;
+  author: { id: number; name: string; role: "REQUESTER" | "IT_STAFF" | "ADMINISTRATOR" };
+}
+
+/**
+ * `GET /api/tickets/:id/comments` (api-spec.md §3.1): the owning Requester,
+ * any IT Staff, or any Administrator, via the session cookie. Ordered
+ * `createdAt` ascending, matching the server's own ordering.
+ */
+export async function fetchComments(ticketId: number): Promise<CommentEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/comments`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load comments (status ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
+ * Thrown by `postComment` for a `400 VALIDATION_FAILED` (empty,
+ * whitespace-only, or over 2000 characters — BR-17, AC-22, AC-23).
+ */
+export class PostCommentValidationError extends Error {
+  readonly fields: CreateTicketFieldError[];
+
+  constructor(fields: CreateTicketFieldError[]) {
+    super("Comment failed validation.");
+    this.name = "PostCommentValidationError";
+    this.fields = fields;
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/comments` (api-spec.md §3.2): post one Public
+ * Comment as the calling Requester or IT Staff member, via the session
+ * cookie. `author`/`createdAt` come from the server (BR-16) regardless of
+ * what this call sends — there is nothing to send but `body`.
+ *
+ * A `400 VALIDATION_FAILED` raises `PostCommentValidationError`; every
+ * other failure (network error, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function postComment(ticketId: number, body: string): Promise<CommentEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/comments`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 400) {
+      const errorBody = await readErrorBody(response);
+      if (
+        typeof errorBody === "object" &&
+        errorBody !== null &&
+        (errorBody as Record<string, unknown>).error === "VALIDATION_FAILED" &&
+        Array.isArray((errorBody as Record<string, unknown>).fields)
+      ) {
+        const fields = ((errorBody as Record<string, unknown>).fields as unknown[]).filter(isFieldError);
+        throw new PostCommentValidationError(fields);
+      }
+    }
+    throw new Error(`Failed to post comment (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * ui-spec.md §7's frozen conflict-banner copy. The server's own `409
+ * INVALID_STATE` message (api-spec.md §3.3) is a generic description, not
+ * this exact UI string — `RequesterResolvedConflictError` always carries
+ * this literal text regardless of what the response body says, so the
+ * banner's wording can't drift if the server's message ever changes.
+ */
+export const REQUESTER_RESOLVED_CONFLICT_MESSAGE =
+  "This ticket has been updated by IT Staff. Refresh to see its current state.";
+
+/**
+ * Thrown by `postRequesterResolved` for a `409 INVALID_STATE` (api-spec.md
+ * §3.3) — IT Staff moved the ticket on (to Resolved, Closed or Cancelled)
+ * since the page loaded. ui-spec.md §7's conflict banner is wired to this
+ * error specifically.
+ */
+export class RequesterResolvedConflictError extends Error {
+  constructor() {
+    super(REQUESTER_RESOLVED_CONFLICT_MESSAGE);
+    this.name = "RequesterResolvedConflictError";
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/requester-resolved` (api-spec.md §3.3): the owning
+ * Requester indicates the problem appears resolved. No request body. Does
+ * not change the Ticket's status (BR-26) — the caller re-reads
+ * `requesterResolvedAt` from a subsequent `fetchTicketDetail` to reflect
+ * it, since this call itself returns no body.
+ *
+ * A `409 INVALID_STATE` raises `RequesterResolvedConflictError`; every
+ * other failure (network error, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function postRequesterResolved(ticketId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/requester-resolved`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      throw new RequesterResolvedConflictError();
+    }
+    throw new Error(`Failed to record the resolution indication (status ${response.status})`);
+  }
 }

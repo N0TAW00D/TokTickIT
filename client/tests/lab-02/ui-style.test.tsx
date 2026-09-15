@@ -360,6 +360,13 @@ function s06JsonResponse(status: number, body: unknown): Promise<Response> {
  */
 function mockS06Fetch() {
   const fetchMock = vi.fn((input: string) => {
+    // Issue #70's Public Comments thread fires its own GET .../comments on
+    // mount — checked before the detail-ticket prefix match below, which
+    // would otherwise also match this URL and hand MessageThread a Ticket
+    // object instead of an array.
+    if (input === `${API_BASE_URL}/api/tickets/${TICKET_ID}/comments`) {
+      return s06JsonResponse(200, []);
+    }
     if (input.startsWith(`${API_BASE_URL}/api/tickets/${TICKET_ID}`)) {
       return s06JsonResponse(200, S06_DETAIL_TICKET);
     }

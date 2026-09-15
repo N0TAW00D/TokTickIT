@@ -70,8 +70,15 @@ function jsonResponse(status: number, body: unknown): Promise<Response> {
   } as Response);
 }
 
+// Issue #70 adds the Public Comments thread (MessageThread) to this screen,
+// which fires its own GET .../comments request on mount — routed here to an
+// empty thread by default so every existing ticket-detail-only test (which
+// never cared about comments) keeps working unmodified.
 function mockFetch(handler?: () => Promise<Response>) {
-  const fetchMock = vi.fn(() => (handler ?? (() => jsonResponse(200, TICKET)))());
+  const fetchMock = vi.fn((input: string) => {
+    if (input.endsWith("/comments")) return jsonResponse(200, []);
+    return (handler ?? (() => jsonResponse(200, TICKET)))();
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -237,11 +244,15 @@ describe("Ticket Detail failure state", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    fetchMock.mockImplementation(() => jsonResponse(200, TICKET));
+    fetchMock.mockImplementation((input: string) =>
+      input.endsWith("/comments") ? jsonResponse(200, []) : jsonResponse(200, TICKET),
+    );
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
 
     await screen.findByText(TICKET.ticketNumber);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Ticket retry + the comments thread's own fetch, once the screen
+    // reaches "loaded" and MessageThread mounts (issue #70).
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("shows the same failure state on a 500 response", async () => {
