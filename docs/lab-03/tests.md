@@ -173,7 +173,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | C-06 | C | AC-07, AC-08 | Change validation | Length, confirm mismatch and same-as-current each produce a field message | `client/tests/lab-03/ChangePassword.test.tsx` | Planned |
 | C-07 | C | AC-17 | Role navigation | Each role renders only its own destinations; others are **absent**, not disabled | `client/tests/lab-03/AppShell.test.tsx` | Planned |
 | C-08 | C | — | User badge | Shows name and `RoleBadge`; menu offers Change Password and Logout; no "Change Requester" | `client/tests/lab-03/AppShell.test.tsx` | Planned |
-| C-09 | C | AC-18 | Forbidden route | Forbidden state renders and, via request interception, no protected request is issued | `client/tests/lab-03/AppShell.test.tsx` | Planned |
+| C-09 | C | AC-18 | Forbidden route | Forbidden state renders and, via request interception, no protected request is issued | `client/tests/lab-03/RequireRole.test.tsx` | Planned |
 | C-10 | C | AC-32 | Unassigned token | Unassigned row carries `data-owner="unassigned"` and the text "Unassigned"; assigned rows carry the name | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |
 | C-11 | C | AC-33 | Queue states | Loading, empty, no-results, forbidden and failure each render distinctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |
 | C-12 | C | — | Queue controls | Search, each filter and sort call the API with the documented query parameters | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |

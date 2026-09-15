@@ -3,16 +3,19 @@ import { prisma } from '../lib/prisma.ts';
 import { hashSessionToken, readSessionCookie } from '../lib/session.ts';
 import type { Role } from '../generated/prisma/client.ts';
 
-// Session resolution and the password-change gate (api-spec.md §1.2, §1.5;
-// BR-39, FR-06, AC-70). Mounted on every `/api/auth/*` route except login,
-// which is deliberately public.
+// Session resolution, the password-change gate, and role-based authorization
+// (api-spec.md §1.2, §1.4, §1.5; BR-39, FR-06, FR-10, AC-70). Mounted on
+// every `/api/auth/*` route except login, which is deliberately public.
 //
-// Scope note for future issues (#69-#72): `authenticate` and
-// `passwordChangeGate` are written to be reusable by any future router, not
-// just this one — see `passwordChangeGate`'s doc comment. Issue #68 mounts
-// them only on `/api/auth/*`; the ticket, staff-queue and admin-user routes
-// stay on `requesterContext`/`X-Requester-Id` until #69/#70 rewire them onto
-// real session auth, which is explicitly out of this issue's scope.
+// Scope note for future issues (#69-#73): `authenticate`, `passwordChangeGate`
+// and `requireRole` are all written to be reusable by any future router, not
+// just this one — see each function's own doc comment. Issue #68 mounted
+// `authenticate`/`passwordChangeGate` only on `/api/auth/*`; issue #69 adds
+// `requireRole` here (same reusability goal) without mounting it anywhere
+// new either — the ticket, staff-queue and admin-user routes stay on
+// `requesterContext`/`X-Requester-Id` until #70/#71/#73 rewire them onto
+// real session auth and mount `authenticate`, `passwordChangeGate` and
+// `requireRole`, in that order, on each of their own routers.
 
 export interface AuthenticatedUser {
   id: number;
@@ -124,4 +127,62 @@ export function passwordChangeGate(req: Request, res: Response, next: NextFuncti
     return;
   }
   next();
+}
+
+/**
+ * Role-based authorization gate (issue #69; specification.md FR-10; §4.1's
+ * matrix; api-spec.md §1.4 and §8's `FORBIDDEN` row). Always mount it
+ * directly after `authenticate` and `passwordChangeGate`, in that order —
+ * by the time this runs, `req.authUser` is expected to already be
+ * populated and the caller already admitted through the password-change
+ * gate, so this checks ONLY role membership:
+ *
+ *   router.get('/staff/tickets', authenticate, passwordChangeGate, requireRole('IT_STAFF'), handler)
+ *
+ * This implements exactly case 1 of the three-case `403`/`404` precedence
+ * in specification.md §8.2 / api-spec.md §1.4: **"Role-gated collection the
+ * caller's role may never reach -> `403` before any lookup. No record is
+ * addressed, so nothing can leak."** A Requester calling
+ * `GET /api/staff/tickets` is the worked example there — `requireRole` is
+ * what answers that `403`, before the route handler ever runs a query.
+ *
+ * It deliberately does NOT attempt case 2 ("record-addressed, caller has no
+ * read path -> `404`") or case 3 ("record-addressed, caller can read but
+ * lacks this write -> `403`"). Both are resource-specific: whether a
+ * Requester "owns" a given Ticket, or whether an Administrator "may read" a
+ * given User, is domain logic that belongs next to the record lookup
+ * itself, in whichever router actually queries that record (`GET
+ * /api/tickets/:id` for #70, `PATCH /api/tickets/:id/status` for #71,
+ * `GET/POST /api/users` for #73). A generic
+ * `requireOwnerOr404(predicate)`-style helper was considered and rejected
+ * here: with no real caller to write it against yet, it would be
+ * unverifiable premature abstraction rather than tested code — see
+ * server/tests/lab-03/authorization.api.test.ts's header comment for the
+ * full reasoning. Build that helper, if one turns out to be honestly
+ * shared, in the issue that has a first real record-addressed route to
+ * prove it against.
+ */
+export function requireRole(...allowedRoles: Role[]) {
+  const allowed = new Set<Role>(allowedRoles);
+  return function requireRoleMiddleware(req: Request, res: Response, next: NextFunction): void {
+    if (!req.authUser) {
+      // Defensive only: requireRole is documented and tested to run after
+      // `authenticate`, which always either populates `req.authUser` or
+      // responds with 401 itself before calling `next()`. Reaching this
+      // branch means some future router mounted requireRole out of order —
+      // fail closed as unauthenticated rather than crash or fall through.
+      unauthenticated(res);
+      return;
+    }
+
+    if (!allowed.has(req.authUser.role)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'You do not have permission to perform this action.',
+      });
+      return;
+    }
+
+    next();
+  };
 }
