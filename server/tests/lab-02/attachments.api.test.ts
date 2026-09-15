@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
+import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 
 // Covers docs/lab-02/api-spec.md §4.1-4.4 (attachment upload, metadata,
 // download, and soft removal) and tests.md API-22..API-31.
@@ -24,7 +26,9 @@ let tempUploadsDir: string;
 let realUploadsDirFilesBefore: string[];
 
 let requesterAId: number;
+let requesterAEmail: string;
 let requesterBId: number;
+let requesterBEmail: string;
 let activeCategoryId: number;
 let activeRelatedSystemId: number;
 
@@ -71,7 +75,35 @@ beforeAll(async () => {
   activeCategoryId = category.id;
   activeRelatedSystemId = relatedSystem.id;
   requesterAId = requesters[0]!.id;
+  requesterAEmail = requesters[0]!.email;
   requesterBId = requesters[1]!.id;
+  requesterBEmail = requesters[1]!.email;
+});
+
+/** Pulls the `name=value` pair for the session cookie out of a Set-Cookie response header, for reuse on the next request. */
+function extractSessionCookiePair(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
+  const raw = setCookie?.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!raw) {
+    throw new Error('Response carried no toktickit.sid cookie');
+  }
+  return raw.split(';')[0];
+}
+
+async function loginAndGetCookie(email: string, password: string): Promise<string> {
+  const res = await request(server).post('/api/auth/login').set('Content-Type', 'application/json').send({ email, password });
+  expect(res.status, 'test fixture login must succeed').toBe(200);
+  return extractSessionCookiePair(res);
+}
+
+// reset-db.ts truncates Session before every test, so both Requesters'
+// cookies must be obtained fresh per test, not once in beforeAll.
+let requesterACookie: string;
+let requesterBCookie: string;
+
+beforeEach(async () => {
+  requesterACookie = await loginAndGetCookie(requesterAEmail, LOCAL_DEV_PASSWORD);
+  requesterBCookie = await loginAndGetCookie(requesterBEmail, LOCAL_DEV_PASSWORD);
 });
 
 afterEach(() => {
@@ -103,10 +135,10 @@ afterAll(async () => {
   });
 });
 
-async function createTicket(requesterId: number): Promise<number> {
+async function createTicket(cookie: string): Promise<number> {
   const res = await request(server)
     .post('/api/tickets')
-    .set('X-Requester-Id', String(requesterId))
+    .set('Cookie', cookie)
     .send({
       categoryId: activeCategoryId,
       relatedSystemId: activeRelatedSystemId,
@@ -149,17 +181,17 @@ function padded(header: Buffer, size: number): Buffer {
   return Buffer.concat([header, Buffer.alloc(size - header.length, 0x41)]);
 }
 
-function upload(ticketId: number, requesterId: number) {
+function upload(ticketId: number, cookie: string) {
   return request(server)
     .post(`/api/tickets/${ticketId}/attachments`)
-    .set('X-Requester-Id', String(requesterId));
+    .set('Cookie', cookie);
 }
 
 describe('POST /api/tickets/:id/attachments', () => {
   describe('API-22: type rules (AC-18, BR-21)', () => {
     it('rejects a .exe file with 415 UNSUPPORTED_TYPE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', Buffer.from([0x4d, 0x5a, 0x90, 0x00]), {
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', Buffer.from([0x4d, 0x5a, 0x90, 0x00]), {
         filename: 'malware.exe',
       });
       expect(res.status).toBe(415);
@@ -168,8 +200,8 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('rejects a .txt file with 415 UNSUPPORTED_TYPE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', Buffer.from('plain text content', 'ascii'), {
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', Buffer.from('plain text content', 'ascii'), {
         filename: 'notes.txt',
       });
       expect(res.status).toBe(415);
@@ -177,8 +209,8 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('rejects a PNG renamed to .pdf (extension/content mismatch) with 415 UNSUPPORTED_TYPE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', pngBuffer(1000), { filename: 'renamed.pdf' });
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', pngBuffer(1000), { filename: 'renamed.pdf' });
       expect(res.status).toBe(415);
       expect(res.body.error).toBe('UNSUPPORTED_TYPE');
     });
@@ -189,8 +221,8 @@ describe('POST /api/tickets/:id/attachments', () => {
       ['image/webp', 'image.webp', () => webpBuffer(1000)],
       ['application/pdf', 'report.pdf', () => pdfBuffer(1000)],
     ] as const)('accepts a genuine %s file and returns 201', async (mimeType, filename, makeBuffer) => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', makeBuffer(), { filename });
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', makeBuffer(), { filename });
       expect(res.status).toBe(201);
       expect(res.body.mimeType).toBe(mimeType);
     });
@@ -198,8 +230,8 @@ describe('POST /api/tickets/:id/attachments', () => {
 
   describe('API-23: attachment size (AC-19, BR-22)', () => {
     it('accepts a file of exactly 5 MB with 201', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(5 * 1024 * 1024), {
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(5 * 1024 * 1024), {
         filename: 'exactly-5mb.pdf',
       });
       expect(res.status).toBe(201);
@@ -207,8 +239,8 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('rejects a file of 5 MB + 1 byte with 413 FILE_TOO_LARGE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(5 * 1024 * 1024 + 1), {
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(5 * 1024 * 1024 + 1), {
         filename: 'over-5mb.pdf',
       });
       expect(res.status).toBe(413);
@@ -219,16 +251,16 @@ describe('POST /api/tickets/:id/attachments', () => {
 
   describe('API-24: attachment active-count limit (AC-20, BR-23)', () => {
     it('allows 5 active attachments, then rejects the 6th with 409 ATTACHMENT_LIMIT', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const uploadedIds: number[] = [];
 
       for (let i = 0; i < 5; i++) {
-        const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `file-${i}.pdf` });
+        const res = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), { filename: `file-${i}.pdf` });
         expect(res.status, `upload #${i + 1}`).toBe(201);
         uploadedIds.push(res.body.id as number);
       }
 
-      const sixth = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: 'file-6.pdf' });
+      const sixth = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), { filename: 'file-6.pdf' });
       expect(sixth.status).toBe(409);
       expect(sixth.body.error).toBe('ATTACHMENT_LIMIT');
 
@@ -239,12 +271,12 @@ describe('POST /api/tickets/:id/attachments', () => {
       // now that DELETE /api/attachments/:id (slice 9b) exists.
       const removeRes = await request(server)
         .delete(`/api/attachments/${uploadedIds[0]}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Freeing a slot to prove the limit re-opens' });
       expect(removeRes.status).toBe(200);
 
-      const seventh = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: 'file-7.pdf' });
+      const seventh = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), { filename: 'file-7.pdf' });
       expect(seventh.status).toBe(201);
 
       const activeCountAfter = await prisma.attachment.count({ where: { ticketId, isRemoved: false } });
@@ -252,7 +284,7 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('holds the limit under genuinely concurrent uploads: one below the limit, 3 requests race for the last slot, exactly 1 succeeds and the rest are 409 (never 500)', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
 
       // Snapshot the uploads dir before this test writes anything, so the
       // orphan-file check below can identify exactly the files *this test*
@@ -263,7 +295,7 @@ describe('POST /api/tickets/:id/attachments', () => {
       // Get to one below the limit sequentially — only the final slot is
       // contested.
       for (let i = 0; i < 4; i++) {
-        const res = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `seed-${i}.pdf` });
+        const res = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), { filename: `seed-${i}.pdf` });
         expect(res.status, `seed upload #${i + 1}`).toBe(201);
       }
 
@@ -276,7 +308,7 @@ describe('POST /api/tickets/:id/attachments', () => {
       const raceSize = 3;
       const responses = await Promise.all(
         Array.from({ length: raceSize }, (_, i) =>
-          upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), { filename: `race-${i}.pdf` })
+          upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), { filename: `race-${i}.pdf` })
         )
       );
 
@@ -310,8 +342,8 @@ describe('POST /api/tickets/:id/attachments', () => {
 
   describe('API-25: attachment storage safety (BR-27, BR-29)', () => {
     it('stores the file as <uuid>.<ext> under the uploads dir, and never exposes storedFilename in the response', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
 
       expect(res.status).toBe(201);
       expect(res.body).not.toHaveProperty('storedFilename');
@@ -327,8 +359,8 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('strips path components from originalFilename and truncates to 255 chars (BR-29)', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId)
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie)
         .attach('file', jpegBuffer(1000), { filename: '../../etc/passwd.jpg' });
 
       expect(res.status).toBe(201);
@@ -337,12 +369,12 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it("bumps the parent ticket's updatedAt on a successful upload (BR-07)", async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const before = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
 
       await new Promise((resolve) => setTimeout(resolve, 10)); // ensure a distinguishable timestamp
 
-      const res = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
+      const res = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
       expect(res.status).toBe(201);
 
       const after = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
@@ -350,7 +382,7 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('BR-27 ordering: writes the file before the row, and on a post-write metadata failure deletes the orphaned file and leaves no row', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
 
       const filesBefore = readdirSync(tempUploadsDir);
       const attachmentCountBefore = await prisma.attachment.count({ where: { ticketId } });
@@ -365,7 +397,7 @@ describe('POST /api/tickets/:id/attachments', () => {
       expect(vi.isMockFunction(prisma.$transaction)).toBe(true);
 
       try {
-        const res = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
+        const res = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
         expect(res.status).toBe(500);
         expect(res.body.error).toBe('INTERNAL');
       } finally {
@@ -382,12 +414,12 @@ describe('POST /api/tickets/:id/attachments', () => {
 
   describe('API-26: attachment ownership (AC-37, BR-14)', () => {
     it("B uploading to A's ticket returns 404, byte-identical to uploading to an unknown ticket id", async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
 
-      const notOwnedRes = await upload(ticketId, requesterBId).attach('file', jpegBuffer(1000), {
+      const notOwnedRes = await upload(ticketId, requesterBCookie).attach('file', jpegBuffer(1000), {
         filename: 'photo.jpg',
       });
-      const unknownRes = await upload(999_999, requesterAId).attach('file', jpegBuffer(1000), {
+      const unknownRes = await upload(999_999, requesterACookie).attach('file', jpegBuffer(1000), {
         filename: 'photo.jpg',
       });
 
@@ -401,25 +433,25 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('a non-integer ticket id is treated as not found, not a 400 (api-spec.md §1.4)', async () => {
-      const res = await upload(NaN, requesterAId).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
+      const res = await upload(NaN, requesterACookie).attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
       // supertest interpolates NaN as the literal string "NaN" in the URL.
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
     it("B reading A's attachment returns 404, byte-identical to reading an unknown attachment id", async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), {
         filename: 'photo.jpg',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const notOwnedRes = await request(server)
         .get(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterBId));
+        .set('Cookie', requesterBCookie);
       const unknownRes = await request(server)
         .get('/api/attachments/999999')
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(notOwnedRes.status).toBe(404);
       expect(unknownRes.status).toBe(404);
@@ -428,18 +460,18 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it("B downloading A's attachment returns 404, byte-identical to downloading an unknown attachment id", async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), {
         filename: 'photo.jpg',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const notOwnedRes = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterBId));
+        .set('Cookie', requesterBCookie);
       const unknownRes = await request(server)
         .get('/api/attachments/999999/download')
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(notOwnedRes.status).toBe(404);
       expect(unknownRes.status).toBe(404);
@@ -448,20 +480,20 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it("B deleting A's attachment returns 404, byte-identical to deleting an unknown attachment id, and A's attachment stays active", async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', jpegBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', jpegBuffer(1000), {
         filename: 'photo.jpg',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const notOwnedRes = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterBId))
+        .set('Cookie', requesterBCookie)
         .set('Content-Type', 'application/json')
         .send({ reason: "B trying to remove A's attachment" });
       const unknownRes = await request(server)
         .delete('/api/attachments/999999')
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Removing an attachment that does not exist' });
 
@@ -482,10 +514,10 @@ describe('POST /api/tickets/:id/attachments', () => {
   // MALFORMED_BODY.
   describe('missing/wrong content type and missing file part (§1.4a) — no tests.md API-xx row', () => {
     it('a JSON body (not multipart/form-data) returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const res = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ file: 'not-a-file' });
 
@@ -497,36 +529,36 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('a multipart request with no "file" part returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).field('note', 'no file attached here');
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).field('note', 'no file attached here');
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('NO_FILE');
     });
 
     it('an empty file part returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const res = await upload(ticketId, requesterAId).attach('file', Buffer.alloc(0), { filename: 'empty.pdf' });
+      const ticketId = await createTicket(requesterACookie);
+      const res = await upload(ticketId, requesterACookie).attach('file', Buffer.alloc(0), { filename: 'empty.pdf' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('NO_FILE');
     });
 
-    it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
-      const ticketId = await createTicket(requesterAId);
+    it('missing/unknown session behaves like every other 🔒 endpoint (401 UNAUTHENTICATED)', async () => {
+      const ticketId = await createTicket(requesterACookie);
 
       const missing = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
         .attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
-      expect(missing.status).toBe(400);
-      expect(missing.body.error).toBe('MISSING_REQUESTER');
+      expect(missing.status).toBe(401);
+      expect(missing.body.error).toBe('UNAUTHENTICATED');
 
       const invalid = await request(server)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', '999999')
+        .set('Cookie', `${SESSION_COOKIE_NAME}=does-not-exist`)
         .attach('file', jpegBuffer(1000), { filename: 'photo.jpg' });
-      expect(invalid.status).toBe(400);
-      expect(invalid.body.error).toBe('INVALID_REQUESTER');
+      expect(invalid.status).toBe(401);
+      expect(invalid.body.error).toBe('UNAUTHENTICATED');
     });
   });
 
@@ -551,10 +583,10 @@ describe('POST /api/tickets/:id/attachments', () => {
     }
 
     it('an invalid JSON body with Content-Type: application/json returns 400 NO_FILE, not MALFORMED_BODY', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const res = await request(app)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send('{"file": ');
 
@@ -565,12 +597,12 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('a JSON body over 100kb (express.json()\'s default limit) returns 400 NO_FILE, not a bare 413', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const oversizedJson = JSON.stringify({ padding: 'A'.repeat(200 * 1024) });
 
       const res = await request(app)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send(oversizedJson);
 
@@ -581,10 +613,10 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('a valid JSON object body with Content-Type: application/json returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const res = await request(app)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ file: 'not-a-file' });
 
@@ -595,10 +627,10 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('a text/plain body returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const res = await request(app)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'text/plain')
         .send('just some plain text');
 
@@ -609,10 +641,10 @@ describe('POST /api/tickets/:id/attachments', () => {
     });
 
     it('no body and no Content-Type returns 400 NO_FILE', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const res = await request(app)
         .post(`/api/tickets/${ticketId}/attachments`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expectNoFileShape(res);
 
@@ -628,15 +660,15 @@ describe('GET /api/attachments/:id', () => {
   // closes that gap the same way the §1.4a block above does for NO_FILE.
   describe('metadata shape (api-spec.md §4.2) — no tests.md API-xx row', () => {
     it('returns the same 9-key shape as the upload 201 body, including ticketId', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const res = await request(server)
         .get(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(res.status).toBe(200);
       expect(Object.keys(res.body).sort()).toEqual(
@@ -655,8 +687,8 @@ describe('GET /api/attachments/:id', () => {
     });
 
     it('returns a removed attachment too, with its removal metadata populated (BR-33)', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -671,7 +703,7 @@ describe('GET /api/attachments/:id', () => {
 
       const res = await request(server)
         .get(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(res.status).toBe(200);
       expect(res.body.isRemoved).toBe(true);
@@ -680,27 +712,27 @@ describe('GET /api/attachments/:id', () => {
     });
 
     it('a non-integer attachment id is treated as not found, not a 400 (api-spec.md §1.4)', async () => {
-      const res = await request(server).get('/api/attachments/abc').set('X-Requester-Id', String(requesterAId));
+      const res = await request(server).get('/api/attachments/abc').set('Cookie', requesterACookie);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
-    it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+    it('missing/unknown session behaves like every other 🔒 endpoint (401 UNAUTHENTICATED)', async () => {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const missing = await request(server).get(`/api/attachments/${attachmentId}`);
-      expect(missing.status).toBe(400);
-      expect(missing.body.error).toBe('MISSING_REQUESTER');
+      expect(missing.status).toBe(401);
+      expect(missing.body.error).toBe('UNAUTHENTICATED');
 
       const invalid = await request(server)
         .get(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', '999999');
-      expect(invalid.status).toBe(400);
-      expect(invalid.body.error).toBe('INVALID_REQUESTER');
+        .set('Cookie', `${SESSION_COOKIE_NAME}=does-not-exist`);
+      expect(invalid.status).toBe(401);
+      expect(invalid.body.error).toBe('UNAUTHENTICATED');
     });
   });
 });
@@ -708,9 +740,9 @@ describe('GET /api/attachments/:id', () => {
 describe('GET /api/attachments/:id/download', () => {
   describe('API-27: download of an active attachment (AC-33, FR-20)', () => {
     it('returns 200 with the correct headers and bytes identical to the uploaded file', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const originalBytes = pdfBuffer(12_345);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', originalBytes, {
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', originalBytes, {
         filename: 'battery-report.pdf',
       });
       expect(uploadRes.status).toBe(201);
@@ -718,7 +750,7 @@ describe('GET /api/attachments/:id/download', () => {
 
       const res = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .buffer(true)
         .parse((response, callback) => {
           const chunks: Buffer[] = [];
@@ -755,15 +787,15 @@ describe('GET /api/attachments/:id/download', () => {
      * the payload, in addition to whatever it asserts about the header.
      */
     async function uploadAndDownload(filename: string) {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
       const originalBytes = pdfBuffer(64);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', originalBytes, { filename });
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', originalBytes, { filename });
       expect(uploadRes.status).toBe(201);
       const attachmentId = uploadRes.body.id as number;
 
       const downloadRes = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .buffer(true)
         .parse((response, callback) => {
           const chunks: Buffer[] = [];
@@ -851,15 +883,15 @@ describe('GET /api/attachments/:id/download', () => {
 
   describe('API-28: download of a removed attachment (AC-34, BR-33)', () => {
     it('returns 410 ATTACHMENT_REMOVED after the attachment is soft-removed', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const beforeRemoval = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
       expect(beforeRemoval.status).toBe(200);
 
       // Soft-removed directly (DELETE /api/attachments/:id is a later
@@ -873,7 +905,7 @@ describe('GET /api/attachments/:id/download', () => {
 
       const afterRemoval = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(afterRemoval.status).toBe(410);
       expect(afterRemoval.body.error).toBe('ATTACHMENT_REMOVED');
@@ -883,8 +915,8 @@ describe('GET /api/attachments/:id/download', () => {
 
   describe('file missing on disk (api-spec.md §4.3) — no tests.md API-xx row', () => {
     it('returns 500 INTERNAL, not 404, when the metadata row exists but the file does not', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -897,7 +929,7 @@ describe('GET /api/attachments/:id/download', () => {
 
       const res = await request(server)
         .get(`/api/attachments/${attachmentId}/download`)
-        .set('X-Requester-Id', String(requesterAId));
+        .set('Cookie', requesterACookie);
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('INTERNAL');
@@ -908,8 +940,8 @@ describe('GET /api/attachments/:id/download', () => {
 describe('DELETE /api/attachments/:id', () => {
   describe('API-29: soft removal happy path (AC-34, BR-31)', () => {
     it('sets isRemoved/removedAt/removedReason/removedById, drops from the active count, and bumps the ticket updatedAt', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'screenshot.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -919,7 +951,7 @@ describe('DELETE /api/attachments/:id', () => {
 
       const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Uploaded the wrong screenshot' });
 
@@ -949,8 +981,8 @@ describe('DELETE /api/attachments/:id', () => {
       ['201 characters (over the 200 maximum)', 'a'.repeat(201)],
       ['whitespace-only', '   '],
     ] as const)('rejects a reason that is %s with 400 VALIDATION_FAILED, and the attachment stays active', async (_label, reason) => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -958,7 +990,7 @@ describe('DELETE /api/attachments/:id', () => {
       const body = reason === undefined ? {} : { reason };
       const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send(body);
 
@@ -973,39 +1005,39 @@ describe('DELETE /api/attachments/:id', () => {
     });
 
     it('accepts a reason of exactly 3 characters and exactly 200 characters', async () => {
-      const ticketId = await createTicket(requesterAId);
+      const ticketId = await createTicket(requesterACookie);
 
-      const shortReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const shortReasonUpload = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'a.pdf',
       });
       const shortRes = await request(server)
         .delete(`/api/attachments/${shortReasonUpload.body.id}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'abc' });
       expect(shortRes.status).toBe(200);
 
-      const longReasonUpload = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const longReasonUpload = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'b.pdf',
       });
       const longRes = await request(server)
         .delete(`/api/attachments/${longReasonUpload.body.id}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'a'.repeat(200) });
       expect(longRes.status).toBe(200);
     });
 
     it('a non-JSON content type returns 400 MALFORMED_BODY and leaves the attachment active', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const res = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .send('reason=whatever');
 
       expect(res.status).toBe(400);
@@ -1018,22 +1050,22 @@ describe('DELETE /api/attachments/:id', () => {
 
   describe('API-31: removing an already-removed attachment (BR-32)', () => {
     it('the second removal returns 409 ALREADY_REMOVED', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
 
       const first = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'First removal' });
       expect(first.status).toBe(200);
 
       const second = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Second removal attempt' });
 
@@ -1046,8 +1078,8 @@ describe('DELETE /api/attachments/:id', () => {
     });
 
     it('holds BR-32 under genuinely concurrent DELETEs on one active attachment: exactly one 200, the rest 409 ALREADY_REMOVED (never 500), and the stored reason is the winner\'s, not overwritten by a loser', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'contested.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -1064,7 +1096,7 @@ describe('DELETE /api/attachments/:id', () => {
         reasons.map((reason) =>
           request(server)
             .delete(`/api/attachments/${attachmentId}`)
-            .set('X-Requester-Id', String(requesterAId))
+            .set('Cookie', requesterACookie)
             .set('Content-Type', 'application/json')
             .send({ reason })
         )
@@ -1106,16 +1138,16 @@ describe('DELETE /api/attachments/:id', () => {
     it('a non-integer attachment id is treated as not found, not a 400', async () => {
       const res = await request(server)
         .delete('/api/attachments/abc')
-        .set('X-Requester-Id', String(requesterAId))
+        .set('Cookie', requesterACookie)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Does not matter' });
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
-    it('missing/invalid X-Requester-Id header behaves like every other 🔒 endpoint', async () => {
-      const ticketId = await createTicket(requesterAId);
-      const uploadRes = await upload(ticketId, requesterAId).attach('file', pdfBuffer(1000), {
+    it('missing/unknown session behaves like every other 🔒 endpoint (401 UNAUTHENTICATED)', async () => {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
       });
       const attachmentId = uploadRes.body.id as number;
@@ -1124,16 +1156,16 @@ describe('DELETE /api/attachments/:id', () => {
         .delete(`/api/attachments/${attachmentId}`)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Does not matter' });
-      expect(missing.status).toBe(400);
-      expect(missing.body.error).toBe('MISSING_REQUESTER');
+      expect(missing.status).toBe(401);
+      expect(missing.body.error).toBe('UNAUTHENTICATED');
 
       const invalid = await request(server)
         .delete(`/api/attachments/${attachmentId}`)
-        .set('X-Requester-Id', '999999')
+        .set('Cookie', `${SESSION_COOKIE_NAME}=does-not-exist`)
         .set('Content-Type', 'application/json')
         .send({ reason: 'Does not matter' });
-      expect(invalid.status).toBe(400);
-      expect(invalid.body.error).toBe('INVALID_REQUESTER');
+      expect(invalid.status).toBe(401);
+      expect(invalid.body.error).toBe('UNAUTHENTICATED');
     });
   });
 });

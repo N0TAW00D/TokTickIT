@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 import type { Priority } from '../../src/validation/ticketFields.js';
 import { useTestServer } from '../setup/http-server.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
+import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 
 // See tests/setup/http-server.ts for why requests go through one shared,
 // already-listening server rather than `request(app)`.
@@ -12,8 +14,13 @@ const testServer = useTestServer(app);
 
 // Covers docs/lab-02/api-spec.md §3.2 (GET /api/tickets) and tests.md
 // API-10..API-18. reset-db.ts (tests/setup/reset-db.ts) truncates
-// Ticket/Attachment/TicketCounter before every test in this file, so each
-// test starts from an empty Ticket table.
+// Ticket/Attachment/TicketCounter/Session before every test in this file,
+// so each test starts from an empty Ticket table.
+//
+// Lab 3 (#70) rewires ownership from the deleted `X-Requester-Id` header
+// onto the authenticated session (BR-03) — every request below now
+// authenticates via a real `POST /api/auth/login` and attaches the
+// resulting session cookie, rather than an identity header.
 //
 // Fixtures are seeded directly via `prisma.ticket.create`/`$executeRaw`
 // (bypassing POST /api/tickets) rather than through real HTTP requests, so
@@ -26,8 +33,9 @@ let categoryAId: number;
 let categoryBId: number;
 let relatedSystemId: number;
 let requesterAId: number;
+let requesterAEmail: string;
 let requesterBId: number;
-let inactiveRequesterId: number;
+let inactiveRequesterEmail: string;
 
 let ticketSeq = 0;
 
@@ -54,8 +62,38 @@ beforeAll(async () => {
   categoryBId = categories[1]!.id;
   relatedSystemId = relatedSystem.id;
   requesterAId = requesters[0]!.id;
+  requesterAEmail = requesters[0]!.email;
   requesterBId = requesters[1]!.id;
-  inactiveRequesterId = inactiveRequester.id;
+  inactiveRequesterEmail = inactiveRequester.email;
+});
+
+/** Pulls the `name=value` pair for the session cookie out of a Set-Cookie response header, for reuse on the next request. */
+function extractSessionCookiePair(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
+  const raw = setCookie?.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!raw) {
+    throw new Error('Response carried no toktickit.sid cookie');
+  }
+  return raw.split(';')[0];
+}
+
+async function loginAndGetCookie(email: string, password: string): Promise<string> {
+  const res = await request(testServer.server)
+    .post('/api/auth/login')
+    .set('Content-Type', 'application/json')
+    .send({ email, password });
+  expect(res.status, 'test fixture login must succeed').toBe(200);
+  return extractSessionCookiePair(res);
+}
+
+// reset-db.ts truncates Session before every test, so Requester A's cookie
+// must be obtained fresh per test, not once in beforeAll. B never makes a
+// real HTTP request in this file (B's tickets are seeded directly via
+// Prisma to prove ownership isolation), so only A needs a session here.
+let requesterACookie: string;
+
+beforeEach(async () => {
+  requesterACookie = await loginAndGetCookie(requesterAEmail, LOCAL_DEV_PASSWORD);
 });
 
 interface SeedTicketOverrides {
@@ -122,11 +160,10 @@ async function seedAttachment(ticketId: number, overrides: { isRemoved?: boolean
   });
 }
 
-function listTickets(requesterId: number, query: Record<string, string> = {}) {
+function listTickets(cookie: string | undefined, query: Record<string, string> = {}) {
   const qs = new URLSearchParams(query).toString();
-  return request(testServer.server)
-    .get(`/api/tickets${qs ? `?${qs}` : ''}`)
-    .set('X-Requester-Id', String(requesterId));
+  const req = request(testServer.server).get(`/api/tickets${qs ? `?${qs}` : ''}`);
+  return cookie === undefined ? req : req.set('Cookie', cookie);
 }
 
 type ListItem = { id: number; ticketNumber: string; activeAttachmentCount: number };
@@ -149,13 +186,13 @@ describe('GET /api/tickets', () => {
     });
     expect(unscopedMatchCount).toBe(2);
 
-    const searchRes = await listTickets(requesterAId, { search: 'VPN' });
+    const searchRes = await listTickets(requesterACookie, { search: 'VPN' });
     expect(searchRes.status).toBe(200);
     expect(idsOf(searchRes.body.items)).toEqual([aMatch.id]);
     expect(idsOf(searchRes.body.items)).not.toContain(bMatch.id);
     expect(searchRes.body.meta.totalItems).toBe(1);
 
-    const allRes = await listTickets(requesterAId);
+    const allRes = await listTickets(requesterACookie);
     expect(idsOf(allRes.body.items).sort((x, y) => x - y)).toEqual([aOther.id, aMatch.id].sort((x, y) => x - y));
     expect(idsOf(allRes.body.items)).not.toContain(bMatch.id);
     expect(allRes.body.meta.totalItems).toBe(2);
@@ -172,7 +209,7 @@ describe('GET /api/tickets', () => {
     const tieHigher = await seedTicket({ createdAt: tieInstant });
     expect(tieHigher.id).toBeGreaterThan(tieLower.id);
 
-    const res = await listTickets(requesterAId);
+    const res = await listTickets(requesterACookie);
 
     expect(res.status).toBe(200);
     expect(idsOf(res.body.items)).toEqual([tieHigher.id, tieLower.id, middle.id, oldest.id]);
@@ -220,7 +257,7 @@ describe('GET /api/tickets', () => {
       await prisma.$executeRaw`UPDATE "Ticket" SET "createdAt" = ${detourInstant} WHERE id = ${tieLower.id}`;
       await prisma.$executeRaw`UPDATE "Ticket" SET "createdAt" = ${tieInstant} WHERE id = ${tieLower.id}`;
 
-      const res = await listTickets(requesterAId);
+      const res = await listTickets(requesterACookie);
 
       expect(res.status).toBe(200);
       expect(idsOf(res.body.items)).toEqual([tieHigher.id, tieLower.id, middle.id, oldest.id]);
@@ -239,7 +276,7 @@ describe('GET /api/tickets', () => {
       await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = ${detourInstant} WHERE id = ${tieLower.id}`;
       await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = ${tieInstant} WHERE id = ${tieLower.id}`;
 
-      const res = await listTickets(requesterAId, { sort: 'updatedAt', order: 'desc' });
+      const res = await listTickets(requesterACookie, { sort: 'updatedAt', order: 'desc' });
 
       expect(res.status).toBe(200);
       expect(idsOf(res.body.items)).toEqual([tieHigher.id, tieLower.id]);
@@ -251,14 +288,14 @@ describe('GET /api/tickets', () => {
     const bySummary = await seedTicket({ ticketNumber: 'TKT-2026-000001', summary: 'Cannot connect to VPN' });
     const neither = await seedTicket({ ticketNumber: 'TKT-2026-000002', summary: 'Printer jam' });
 
-    const byNumberRes = await listTickets(requesterAId, { search: '000777' });
+    const byNumberRes = await listTickets(requesterACookie, { search: '000777' });
     expect(idsOf(byNumberRes.body.items)).toEqual([byNumber.id]);
 
     // Lowercase against a summary containing "VPN" — proves case-insensitivity.
-    const bySummaryRes = await listTickets(requesterAId, { search: 'vpn' });
+    const bySummaryRes = await listTickets(requesterACookie, { search: 'vpn' });
     expect(idsOf(bySummaryRes.body.items)).toEqual([bySummary.id]);
 
-    const blankRes = await listTickets(requesterAId, { search: '   ' });
+    const blankRes = await listTickets(requesterACookie, { search: '   ' });
     expect(blankRes.status).toBe(200);
     expect(idsOf(blankRes.body.items).sort((x, y) => x - y)).toEqual(
       [byNumber.id, bySummary.id, neither.id].sort((x, y) => x - y)
@@ -271,18 +308,18 @@ describe('GET /api/tickets', () => {
     const wrongCategory = await seedTicket({ categoryId: categoryBId, requestedPriority: 'HIGH', status: 'NEW' });
     const wrongPriority = await seedTicket({ categoryId: categoryAId, requestedPriority: 'LOW', status: 'NEW' });
 
-    const categoryOnly = await listTickets(requesterAId, { categoryId: String(categoryAId) });
+    const categoryOnly = await listTickets(requesterACookie, { categoryId: String(categoryAId) });
     expect(idsOf(categoryOnly.body.items).sort((x, y) => x - y)).toEqual(
       [matchesAll.id, wrongPriority.id].sort((x, y) => x - y)
     );
 
-    const categoryAndPriority = await listTickets(requesterAId, {
+    const categoryAndPriority = await listTickets(requesterACookie, {
       categoryId: String(categoryAId),
       priority: 'HIGH',
     });
     expect(idsOf(categoryAndPriority.body.items)).toEqual([matchesAll.id]);
 
-    const statusOnly = await listTickets(requesterAId, { status: 'NEW' });
+    const statusOnly = await listTickets(requesterACookie, { status: 'NEW' });
     expect(idsOf(statusOnly.body.items).sort((x, y) => x - y)).toEqual(
       [matchesAll.id, wrongCategory.id, wrongPriority.id].sort((x, y) => x - y)
     );
@@ -297,8 +334,8 @@ describe('GET /api/tickets', () => {
       await seedTicket({ ticketNumber });
     }
 
-    const page1 = await listTickets(requesterAId, { sort: 'ticketNumber', order: 'asc', pageSize: '10', page: '1' });
-    const page2 = await listTickets(requesterAId, { sort: 'ticketNumber', order: 'asc', pageSize: '10', page: '2' });
+    const page1 = await listTickets(requesterACookie, { sort: 'ticketNumber', order: 'asc', pageSize: '10', page: '1' });
+    const page2 = await listTickets(requesterACookie, { sort: 'ticketNumber', order: 'asc', pageSize: '10', page: '2' });
 
     expect(page1.status).toBe(200);
     expect(page2.status).toBe(200);
@@ -321,7 +358,7 @@ describe('GET /api/tickets', () => {
       await seedTicket({ createdAt: new Date(Date.UTC(2026, 0, i + 1)) });
     }
 
-    const res = await listTickets(requesterAId, { page: '2', pageSize: '10' });
+    const res = await listTickets(requesterACookie, { page: '2', pageSize: '10' });
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(5);
@@ -339,7 +376,7 @@ describe('GET /api/tickets', () => {
     await seedTicket();
     await seedTicket();
 
-    const res = await listTickets(requesterAId, { page: '99', pageSize: '10' });
+    const res = await listTickets(requesterACookie, { page: '99', pageSize: '10' });
 
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([]);
@@ -364,7 +401,7 @@ describe('GET /api/tickets', () => {
     ];
 
     for (const [label, query, expectedField] of cases) {
-      const res = await listTickets(requesterAId, query);
+      const res = await listTickets(requesterACookie, query);
       expect(res.status, label).toBe(400);
       expect(res.body.error, label).toBe('INVALID_QUERY');
       expect(Array.isArray(res.body.fields), label).toBe(true);
@@ -382,7 +419,7 @@ describe('GET /api/tickets', () => {
     // that. This confirms page=0 is rejected even when a page 1 would
     // otherwise have real content to return.
     await seedTicket();
-    const stillRejected = await listTickets(requesterAId, { page: '0' });
+    const stillRejected = await listTickets(requesterACookie, { page: '0' });
     expect(stillRejected.status).toBe(400);
     expect(stillRejected.body.error).toBe('INVALID_QUERY');
   });
@@ -406,7 +443,7 @@ describe('GET /api/tickets', () => {
     ];
 
     for (const [field, query] of blankCases) {
-      const res = await listTickets(requesterAId, query);
+      const res = await listTickets(requesterACookie, query);
       expect(res.status, field).toBe(400);
       expect(res.body.error, field).toBe('INVALID_QUERY');
       const fields = (res.body.fields as Array<{ field: string; message: string }>).map((f) => f.field);
@@ -420,30 +457,37 @@ describe('GET /api/tickets', () => {
     // params still defaulting per §3.2.
     const ticket = await seedTicket();
 
-    const blankSearch = await listTickets(requesterAId, { search: '   ' });
+    const blankSearch = await listTickets(requesterACookie, { search: '   ' });
     expect(blankSearch.status).toBe(200);
     expect(idsOf(blankSearch.body.items)).toEqual([ticket.id]);
 
-    const noParams = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', String(requesterAId));
+    const noParams = await listTickets(requesterACookie);
     expect(noParams.status).toBe(200);
     expect(noParams.body.meta).toEqual(
       expect.objectContaining({ sort: 'createdAt', order: 'desc', page: 1, pageSize: 10 })
     );
   });
 
-  it('API-18: missing/unknown/inactive X-Requester-Id returns 400', async () => {
-    const missing = await request(testServer.server).get('/api/tickets');
-    expect(missing.status).toBe(400);
-    expect(missing.body.error).toBe('MISSING_REQUESTER');
+  it('API-18: missing/unknown session returns 401 UNAUTHENTICATED; an inactive Requester cannot even obtain a session', async () => {
+    const missing = await listTickets(undefined);
+    expect(missing.status).toBe(401);
+    expect(missing.body.error).toBe('UNAUTHENTICATED');
     expect('fields' in missing.body).toBe(false);
 
-    const unknown = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', '999999');
-    expect(unknown.status).toBe(400);
-    expect(unknown.body.error).toBe('INVALID_REQUESTER');
+    const unknown = await listTickets(`${SESSION_COOKIE_NAME}=does-not-exist`);
+    expect(unknown.status).toBe(401);
+    expect(unknown.body.error).toBe('UNAUTHENTICATED');
 
-    const inactive = await request(testServer.server).get('/api/tickets').set('X-Requester-Id', String(inactiveRequesterId));
-    expect(inactive.status).toBe(400);
-    expect(inactive.body.error).toBe('INVALID_REQUESTER');
+    // Lab 3 replaces the Lab 2 "inactive X-Requester-Id -> 400
+    // INVALID_REQUESTER" case: an inactive Requester can't obtain a session
+    // at all (BR-01, BR-08), so there is no "inactive session reaches this
+    // route" case to construct — login itself is the gate.
+    const inactiveLogin = await request(testServer.server)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send({ email: inactiveRequesterEmail, password: LOCAL_DEV_PASSWORD });
+    expect(inactiveLogin.status).toBe(401);
+    expect(inactiveLogin.body.error).toBe('INVALID_CREDENTIALS');
   });
 
   // §3.2's list item shape includes activeAttachmentCount; no dedicated
@@ -458,7 +502,7 @@ describe('GET /api/tickets', () => {
       await seedAttachment(withAttachments.id, { isRemoved: false });
       await seedAttachment(withAttachments.id, { isRemoved: true });
 
-      const res = await listTickets(requesterAId);
+      const res = await listTickets(requesterACookie);
 
       const countsById = new Map((res.body.items as ListItem[]).map((item) => [item.id, item.activeAttachmentCount]));
       expect(countsById.get(withoutAttachments.id)).toBe(0);

@@ -1,15 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
+import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 import type { Priority } from '../../src/validation/ticketFields.js';
 
 // Covers docs/lab-02/api-spec.md §3.3 (GET /api/tickets/:id) and tests.md
 // API-19, API-20, API-21. reset-db.ts (tests/setup/reset-db.ts) truncates
-// Ticket/Attachment/TicketCounter before every test in this file, so each
-// test starts from an empty Ticket table.
+// Ticket/Attachment/TicketCounter/Session before every test in this file,
+// so each test starts from an empty Ticket table.
+//
+// Lab 3 (#70) rewires ownership from the deleted `X-Requester-Id` header
+// onto the authenticated session (BR-03) — every request below now
+// authenticates via a real `POST /api/auth/login` and attaches the
+// resulting session cookie, rather than an identity header.
 //
 // Fixtures are seeded directly via `prisma.ticket.create`/`prisma.attachment.create`
 // (bypassing POST /api/tickets and POST /api/tickets/:id/attachments) so a
@@ -33,7 +40,9 @@ let server: Server;
 let categoryId: number;
 let relatedSystemId: number;
 let requesterAId: number;
+let requesterAEmail: string;
 let requesterBId: number;
+let requesterBEmail: string;
 
 let ticketSeq = 0;
 
@@ -56,13 +65,41 @@ beforeAll(async () => {
   categoryId = category.id;
   relatedSystemId = relatedSystem.id;
   requesterAId = requesters[0]!.id;
+  requesterAEmail = requesters[0]!.email;
   requesterBId = requesters[1]!.id;
+  requesterBEmail = requesters[1]!.email;
 });
 
 afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+});
+
+/** Pulls the `name=value` pair for the session cookie out of a Set-Cookie response header, for reuse on the next request. */
+function extractSessionCookiePair(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
+  const raw = setCookie?.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!raw) {
+    throw new Error('Response carried no toktickit.sid cookie');
+  }
+  return raw.split(';')[0];
+}
+
+async function loginAndGetCookie(email: string, password: string): Promise<string> {
+  const res = await request(server).post('/api/auth/login').set('Content-Type', 'application/json').send({ email, password });
+  expect(res.status, 'test fixture login must succeed').toBe(200);
+  return extractSessionCookiePair(res);
+}
+
+// reset-db.ts truncates Session before every test, so both Requesters' cookies
+// must be obtained fresh per test, not once in beforeAll.
+let requesterACookie: string;
+let requesterBCookie: string;
+
+beforeEach(async () => {
+  requesterACookie = await loginAndGetCookie(requesterAEmail, LOCAL_DEV_PASSWORD);
+  requesterBCookie = await loginAndGetCookie(requesterBEmail, LOCAL_DEV_PASSWORD);
 });
 
 interface SeedTicketOverrides {
@@ -124,9 +161,9 @@ async function seedAttachment(ticketId: number, overrides: SeedAttachmentOverrid
   });
 }
 
-function getTicket(ticketId: number | string, requesterId?: number) {
+function getTicket(ticketId: number | string, cookie?: string) {
   const req = request(server).get(`/api/tickets/${ticketId}`);
-  return requesterId === undefined ? req : req.set('X-Requester-Id', String(requesterId));
+  return cookie === undefined ? req : req.set('Cookie', cookie);
 }
 
 describe('GET /api/tickets/:id', () => {
@@ -134,7 +171,7 @@ describe('GET /api/tickets/:id', () => {
     const ticket = await seedTicket({ summary: 'Laptop battery drains quickly' });
     const active = await seedAttachment(ticket.id, { isRemoved: false });
 
-    const res = await getTicket(ticket.id, requesterAId);
+    const res = await getTicket(ticket.id, requesterACookie);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
@@ -167,7 +204,7 @@ describe('GET /api/tickets/:id', () => {
   it('API-19: an owned ticket with no attachments returns attachments: []', async () => {
     const ticket = await seedTicket();
 
-    const res = await getTicket(ticket.id, requesterAId);
+    const res = await getTicket(ticket.id, requesterACookie);
 
     expect(res.status).toBe(200);
     expect(res.body.attachments).toEqual([]);
@@ -183,8 +220,8 @@ describe('GET /api/tickets/:id', () => {
       const exists = await prisma.ticket.findUnique({ where: { id: unknownId } });
       expect(exists).toBeNull();
 
-      const notOwnedRes = await getTicket(bTicket.id, requesterAId);
-      const unknownRes = await getTicket(unknownId, requesterAId);
+      const notOwnedRes = await getTicket(bTicket.id, requesterACookie);
+      const unknownRes = await getTicket(unknownId, requesterACookie);
 
       expect(notOwnedRes.status).toBe(404);
       expect(unknownRes.status).toBe(404);
@@ -199,7 +236,7 @@ describe('GET /api/tickets/:id', () => {
     it("Requester B cannot read Requester A's ticket (data-disclosure guard, AC-37)", async () => {
       const aTicket = await seedTicket({ requesterId: requesterAId, summary: "A's private ticket" });
 
-      const res = await getTicket(aTicket.id, requesterBId);
+      const res = await getTicket(aTicket.id, requesterBCookie);
 
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
@@ -209,27 +246,27 @@ describe('GET /api/tickets/:id', () => {
     });
 
     it('a non-integer :id is 404 NOT_FOUND, not 400 (§1.4)', async () => {
-      const res = await getTicket('abc', requesterAId);
+      const res = await getTicket('abc', requesterACookie);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
     it('an id beyond int4 range is 404, not a 500 (§1.4, out-of-range bound)', async () => {
-      const res = await getTicket('99999999999999', requesterAId);
+      const res = await getTicket('99999999999999', requesterACookie);
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
     });
 
-    it('missing/unknown/inactive X-Requester-Id returns 400 before ownership is ever checked', async () => {
+    it('missing/unknown session returns 401 UNAUTHENTICATED before ownership is ever checked', async () => {
       const ticket = await seedTicket();
 
       const missing = await getTicket(ticket.id);
-      expect(missing.status).toBe(400);
-      expect(missing.body.error).toBe('MISSING_REQUESTER');
+      expect(missing.status).toBe(401);
+      expect(missing.body.error).toBe('UNAUTHENTICATED');
 
-      const unknown = await getTicket(ticket.id, 999999);
-      expect(unknown.status).toBe(400);
-      expect(unknown.body.error).toBe('INVALID_REQUESTER');
+      const unknown = await getTicket(ticket.id, `${SESSION_COOKIE_NAME}=does-not-exist`);
+      expect(unknown.status).toBe(401);
+      expect(unknown.body.error).toBe('UNAUTHENTICATED');
     });
   });
 
@@ -238,7 +275,7 @@ describe('GET /api/tickets/:id', () => {
     const active = await seedAttachment(ticket.id, { isRemoved: false });
     const removed = await seedAttachment(ticket.id, { isRemoved: true, removedReason: 'Uploaded the wrong screenshot' });
 
-    const res = await getTicket(ticket.id, requesterAId);
+    const res = await getTicket(ticket.id, requesterACookie);
 
     expect(res.status).toBe(200);
     expect(res.body.attachments).toHaveLength(2);
