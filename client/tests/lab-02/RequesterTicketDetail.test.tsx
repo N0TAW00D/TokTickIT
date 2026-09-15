@@ -7,22 +7,26 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { useEffect, type ReactNode } from "react";
 import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
-import {
-  RequesterProvider,
-  useRequester,
-} from "../../src/requester/RequesterContext.tsx";
 
 // Covers docs/lab-02/tests.md rows C-29..C-32 (read-only header render, the
-// not-found/failure states, the X-Requester-Id header ui-spec.md §10
-// requires, and the BR-11/AC-09 requester-switch guard). The detailed
-// per-state attachment-row checks (C-20/C-21) and the Remove dialog's own
-// behavior (C-18/C-19) live in AttachmentSection.test.tsx; this file only
-// confirms the section is on the page at all, plus one end-to-end check
-// below that a successful removal actually propagates back into this
-// screen's own ticket state (the row *and* the section heading's active
-// count, not just AttachmentSection in isolation).
+// not-found/failure states, and the session-identity fetch ui-spec.md §10
+// requires). The detailed per-state attachment-row checks (C-20/C-21) and
+// the Remove dialog's own behavior (C-18/C-19) live in
+// AttachmentSection.test.tsx; this file only confirms the section is on the
+// page at all, plus one end-to-end check below that a successful removal
+// actually propagates back into this screen's own ticket state (the row
+// *and* the section heading's active count, not just AttachmentSection in
+// isolation).
+//
+// Issue #70 rewires TicketDetailScreen off the deleted Development
+// Requester selector (RequesterContext/RequesterProvider/X-Requester-Id)
+// and onto the session cookie (credentials: "include") — this file is
+// re-pointed accordingly (AC-19's spirit: re-point, don't gut). The former
+// "C-32 Ticket Detail on requester switch" describe block tested a
+// client-side requester-switching feature that no longer exists at all
+// (there is nothing left to switch between on one authenticated session)
+// and is deleted outright rather than re-pointed.
 
 const API_BASE_URL = "http://localhost:3000";
 const TICKET_URL = `${API_BASE_URL}/api/tickets/1`;
@@ -72,69 +76,16 @@ function mockFetch(handler?: () => Promise<Response>) {
   return fetchMock;
 }
 
-/**
- * Seeds the RequesterContext the same way a real Continue click / route
- * guard pass would (mirrors CreateTicket.test.tsx's Bootstrap), so this
- * screen can be rendered directly without RequireRequester or the
- * selection screen.
- */
-function Bootstrap({
-  id = 7,
-  name = "Jennifer Anderson",
-  children,
-}: {
-  id?: number;
-  name?: string;
-  children: ReactNode;
-}) {
-  const { requesterName, selectRequester } = useRequester();
-
-  useEffect(() => {
-    if (requesterName === null) {
-      selectRequester({ id, name });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (requesterName === null) return null;
-
-  return <>{children}</>;
-}
-
-/**
- * Test-only stand-in for whatever could change the current Requester while
- * this screen stays mounted (C-32/BR-11/AC-09): calls `selectRequester`
- * directly against the same context TicketDetailScreen reads, instead of
- * going through the real "Change Requester" UI. That real flow (see
- * RequesterBadge, exercised in AppShell.test.tsx and MyTickets.test.tsx)
- * always navigates to /select-requester first, which would unmount this
- * screen before the Requester actually changed — never reaching the guard
- * this test targets.
- */
-function SwitchRequesterTrigger({ id, name }: { id: number; name: string }) {
-  const { selectRequester } = useRequester();
-  return (
-    <button type="button" onClick={() => selectRequester({ id, name })}>
-      switch requester
-    </button>
-  );
-}
-
 function renderScreen({
-  requesterId = 7,
   ticketPath = "/tickets/1",
-}: { requesterId?: number; ticketPath?: string } = {}) {
+}: { ticketPath?: string } = {}) {
   return render(
-    <RequesterProvider>
-      <Bootstrap id={requesterId}>
-        <MemoryRouter initialEntries={[ticketPath]}>
-          <Routes>
-            <Route path="/tickets/:id" element={<TicketDetailScreen />} />
-            <Route path="/tickets" element={<h1>My Tickets</h1>} />
-          </Routes>
-        </MemoryRouter>
-      </Bootstrap>
-    </RequesterProvider>,
+    <MemoryRouter initialEntries={[ticketPath]}>
+      <Routes>
+        <Route path="/tickets/:id" element={<TicketDetailScreen />} />
+        <Route path="/tickets" element={<h1>My Tickets</h1>} />
+      </Routes>
+    </MemoryRouter>,
   );
 }
 
@@ -156,9 +107,9 @@ describe("C-29 Ticket Detail read-only render", () => {
 
     await screen.findByText(TICKET.ticketNumber);
 
-    // Scoped to the ticket information card: the app shell's own
-    // RequesterBadge also renders the Requester's name, so an unscoped
-    // query would be ambiguous.
+    // Scoped to the ticket information card: the app shell's own UserBadge
+    // also renders the signed-in user's name, so an unscoped query would be
+    // ambiguous.
     const card = container.querySelector(".zen-ticket-detail__card");
     if (!card) throw new Error("ticket information card did not render");
     const detail = within(card as HTMLElement);
@@ -229,17 +180,15 @@ describe("C-29 Ticket Detail read-only render", () => {
     ).toBeInTheDocument();
   });
 
-  it("sends X-Requester-Id on the detail request", async () => {
+  it("sends the request with the session cookie included", async () => {
     const fetchMock = mockFetch();
-    renderScreen({ requesterId: 42 });
+    renderScreen();
 
     await screen.findByText(TICKET.ticketNumber);
 
     expect(fetchMock).toHaveBeenCalledWith(
       TICKET_URL,
-      expect.objectContaining({
-        headers: expect.objectContaining({ "X-Requester-Id": "42" }),
-      }),
+      expect.objectContaining({ credentials: "include" }),
     );
   });
 
@@ -314,7 +263,7 @@ describe("Ticket Detail not-found state", () => {
     expect(await screen.findByText(/ticket not found/i)).toBeInTheDocument();
     expect(
       screen.getByText(
-        "This ticket doesn't exist or isn't associated with the current development requester.",
+        "This ticket doesn't exist or isn't associated with your account.",
       ),
     ).toBeInTheDocument();
 
@@ -338,56 +287,14 @@ describe("Ticket Detail not-found state", () => {
     // identical 404 — the client has no way to (and must not) distinguish
     // them, so both drive the exact same UI state.
     mockFetch(() => jsonResponse(404, { error: "NOT_FOUND" }));
-    renderScreen({ requesterId: 99, ticketPath: "/tickets/1" });
+    renderScreen({ ticketPath: "/tickets/1" });
 
     expect(await screen.findByText(/ticket not found/i)).toBeInTheDocument();
     expect(
       screen.getByText(
-        "This ticket doesn't exist or isn't associated with the current development requester.",
+        "This ticket doesn't exist or isn't associated with your account.",
       ),
     ).toBeInTheDocument();
-  });
-});
-
-describe("C-32 Ticket Detail on requester switch", () => {
-  it("navigates to /tickets instead of continuing to show the ticket or re-fetching it under the new Requester id (BR-11/AC-09)", async () => {
-    const fetchMock = mockFetch();
-
-    render(
-      <RequesterProvider>
-        <Bootstrap id={1} name="Jennifer Anderson">
-          <MemoryRouter initialEntries={["/tickets/1"]}>
-            {/* Mounted alongside <Routes>, not inside it, so it survives the
-                navigation this test triggers below and can still drive the
-                switch afterward if needed. */}
-            <SwitchRequesterTrigger id={2} name="Michael Brown" />
-            <Routes>
-              <Route path="/tickets/:id" element={<TicketDetailScreen />} />
-              <Route path="/tickets" element={<h1>My Tickets</h1>} />
-            </Routes>
-          </MemoryRouter>
-        </Bootstrap>
-      </RequesterProvider>,
-    );
-
-    // Falsifiable pre-state: the ticket for Requester 1 is actually on
-    // screen before the switch, not merely "rendered without crashing" —
-    // an assertion on the post-state only means something if this differed.
-    await screen.findByText(TICKET.ticketNumber);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /switch requester/i }),
-    );
-
-    // The ticket is foreign to Requester 2, so the screen leaves for My
-    // Tickets rather than continuing to show it or fetching it again under
-    // the new id.
-    expect(
-      await screen.findByRole("heading", { name: /my tickets/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(TICKET.ticketNumber)).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -452,6 +359,14 @@ describe("C-18 remove flow integration on Ticket Detail", () => {
     expect(
       screen.queryByRole("button", { name: /^remove$/i }),
     ).not.toBeInTheDocument();
+
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([url, init]: [string, RequestInit?]) =>
+        url === `${API_BASE_URL}/api/attachments/${attachmentId}` &&
+        init?.method === "DELETE",
+    );
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0][1]?.credentials).toBe("include");
   });
 });
 
@@ -516,8 +431,6 @@ describe("Add-attachment flow integration on Ticket Detail (AC-20 path)", () => 
         init?.method === "POST",
     );
     expect(uploadCalls).toHaveLength(1);
-    expect(uploadCalls[0][1]?.headers).toMatchObject({
-      "X-Requester-Id": "7",
-    });
+    expect(uploadCalls[0][1]?.credentials).toBe("include");
   });
 });
