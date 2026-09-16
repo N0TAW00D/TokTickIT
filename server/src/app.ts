@@ -2,7 +2,6 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import cors from 'cors';
 import { categoriesRouter } from './routes/categories.ts';
 import { relatedSystemsRouter } from './routes/relatedSystems.ts';
-import { requestersRouter } from './routes/requesters.ts';
 import { ticketsRouter } from './routes/tickets.ts';
 import { attachmentsRouter } from './routes/attachments.ts';
 import { authRouter } from './routes/auth.ts';
@@ -91,7 +90,6 @@ app.use('/api/categories', categoriesRouter);
 
 app.use('/api/related-systems', relatedSystemsRouter);
 
-app.use('/api/requesters', requestersRouter);
 app.use('/api/tickets', ticketsRouter);
 app.use('/api/attachments', attachmentsRouter);
 app.use('/api/auth', authRouter);

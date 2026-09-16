@@ -1,7 +1,8 @@
 import multer, { MulterError } from 'multer';
-import { Router, type Request, type Response } from 'express';
-import { requesterContext } from '../middleware/requesterContext.ts';
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { authenticate, passwordChangeGate, requireRole, type AuthenticatedUser } from '../middleware/authContext.ts';
 import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
+import { validateCommentBody } from '../validation/commentFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError, TICKET_INCLUDE } from '../services/createTicket.ts';
 import { validateAttachmentType, safeOriginalFilename, sniffMimeType } from '../validation/attachmentFile.ts';
@@ -12,7 +13,7 @@ import {
   uploadAttachment,
 } from '../services/uploadAttachment.ts';
 import { prisma } from '../lib/prisma.ts';
-import type { Prisma } from '../generated/prisma/client.ts';
+import type { Prisma, TicketStatus } from '../generated/prisma/client.ts';
 
 // POST /api/tickets — api-spec.md §3.1 (BR-01, BR-02, BR-04, BR-12, BR-24,
 // BR-25, BR-26, BR-28, BR-36; AC-01, AC-11..AC-14, AC-16, AC-43).
@@ -47,8 +48,8 @@ const PG_INT4_MAX = 2_147_483_647;
  *   any row) — that's a *lookup* failure, which is what BR-36 and AC-43
  *   actually describe, so it is `404 NOT_FOUND` (checked separately, after
  *   this shape check passes, in `resolveReferences`). This mirrors the
- *   existing `requesterContext` middleware's treatment of an out-of-range
- *   `X-Requester-Id`.
+ *   int4-range treatment of `categoryId`/`relatedSystemId` a few lines
+ *   below in this same file.
  */
 function validateReferenceIdShape(raw: unknown, field: 'categoryId' | 'relatedSystemId'): FieldError | null {
   if (typeof raw !== 'number' || !Number.isInteger(raw)) {
@@ -87,14 +88,16 @@ function internalError(res: Response): void {
   res.status(500).json({ error: 'INTERNAL', message: 'An unexpected error occurred.' });
 }
 
-ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.post('/', requireJsonContentType, authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // express.json() (app.ts) parses in "strict" mode, which already rejects
   // a bare top-level primitive (e.g. `42`) as a parse error — caught by the
   // handler mounted right after it (app.ts) — before this guard ever runs.
-  // What's left for this route to reject is a body that parsed fine but
-  // isn't a plain object: a top-level JSON array (strict mode lets arrays
-  // through) or a missing/undefined body (no/unhandled Content-Type), which
-  // would otherwise fall through into the create path and crash (§1.4).
+  // requireJsonContentType above already turns a missing/non-JSON
+  // Content-Type into 415 before this handler runs at all (BR-40), so
+  // what's left for this guard to reject is a body that declared
+  // `application/json` and parsed fine but isn't a plain object — a
+  // top-level JSON array (strict mode lets arrays through) — which would
+  // otherwise fall through into the create path and crash (§1.4).
   if (!isPlainRequestBody(req.body)) {
     malformedBody(res);
     return;
@@ -102,10 +105,11 @@ ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) =>
 
   const body = req.body;
 
-  // The owner is always the header-resolved Requester (A-01) — a
+  // The owner is always the authenticated Requester (BR-03, BR-14) — a
   // `requesterId` in the body, if present, is read nowhere below and is
-  // therefore silently ignored, per api-spec.md §3.1.
-  const requesterId = req.requester!.id;
+  // therefore silently ignored, per api-spec.md §3 (Lab 3 change:
+  // identity comes from the session, not X-Requester-Id).
+  const requesterId = req.authUser!.id;
 
   const categoryIdError = validateReferenceIdShape(body.categoryId, 'categoryId');
   const relatedSystemIdError = validateReferenceIdShape(body.relatedSystemId, 'relatedSystemId');
@@ -131,9 +135,8 @@ ticketsRouter.post('/', requesterContext, async (req: Request, res: Response) =>
   ).value;
 
   // Out-of-int4-range ids cannot reference any row; querying with them would
-  // raise a driver-level range error instead of a clean "not found" (same
-  // reasoning as requesterContext's X-Requester-Id bounds check). Treat them
-  // as a lookup failure here rather than letting that surface as a 500.
+  // raise a driver-level range error instead of a clean "not found". Treat
+  // them as a lookup failure here rather than letting that surface as a 500.
   if (Math.abs(categoryId) > PG_INT4_MAX || Math.abs(relatedSystemId) > PG_INT4_MAX) {
     notFound(res);
     return;
@@ -181,7 +184,7 @@ function invalidQuery(res: Response, fields: FieldError[]): void {
   });
 }
 
-ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.get('/', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // req.query values are always string | string[] | ParsedQs | ParsedQs[] |
   // undefined; parseTicketListQuery treats anything other than a single
   // plain string as a shape failure for that param (no silent coercion —
@@ -220,7 +223,7 @@ ticketsRouter.get('/', requesterContext, async (req: Request, res: Response) => 
       // BR-15: always server-side scoped to the caller, unconditionally and
       // first — no filter below can widen the scope past this Requester,
       // regardless of what the query string asks for.
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       // BR-16: case-insensitive substring match on ticketNumber OR summary.
       // Blank/whitespace-only search was already normalized to `undefined`
       // by the parser, so its presence here always means a real search.
@@ -320,7 +323,7 @@ const TICKET_DETAIL_ATTACHMENT_SELECT = {
   createdAt: true,
 } as const;
 
-ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
   // treated as a resource that does not exist, never a 400 — same helper
   // the attachments route below already uses for its own `:id`.
@@ -340,9 +343,14 @@ ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) 
     // BR-14/BR-42's byte-identical requirement can't drift apart if there is
     // only one code path that ever produces the 404.
     const ticket = await prisma.ticket.findFirst({
-      where: { id: ticketId, requesterId: req.requester!.id },
+      where: { id: ticketId, requesterId: req.authUser!.id },
       include: {
         ...TICKET_INCLUDE,
+        // ui-spec.md §7: Ticket Owner shows as a read-only row
+        // ("Unassigned" or the owner's name) — IT Priority is deliberately
+        // NOT selected/returned here, since it is never shown to the
+        // Requester (api-spec.md §9: "a Requester never sees itPriority").
+        owner: { select: { id: true, name: true } },
         attachments: {
           // BR-33: both active and soft-removed attachments are listed here
           // (unlike GET /api/tickets's activeAttachmentCount, which counts
@@ -374,6 +382,12 @@ ticketsRouter.get('/:id', requesterContext, async (req: Request, res: Response) 
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       attachments: ticket.attachments,
+      // api-spec.md §9 (Lab 3 change): null when unassigned — the client
+      // renders that as "Unassigned" (ui-spec.md §7).
+      owner: ticket.owner,
+      // BR-26: null until the Requester has indicated the problem appears
+      // resolved; never cleared by this route.
+      requesterResolvedAt: ticket.requesterResolvedAt,
     });
   } catch (error) {
     console.error('Error fetching ticket:', error);
@@ -483,7 +497,7 @@ function ticketNotFound(res: Response): void {
   });
 }
 
-ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, res: Response) => {
+ticketsRouter.post('/:id/attachments', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const ticketId = parseTicketIdParam(String(req.params.id));
   if (ticketId === null) {
     ticketNotFound(res);
@@ -504,7 +518,7 @@ ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, re
     internalError(res);
     return;
   }
-  if (ownerId === null || ownerId !== req.requester!.id) {
+  if (ownerId === null || ownerId !== req.authUser!.id) {
     ticketNotFound(res);
     return;
   }
@@ -542,7 +556,7 @@ ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, re
   try {
     const attachment = await uploadAttachment({
       ticketId,
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       buffer: file.buffer,
       mimeType: typeResult.value.mimeType,
       extension: typeResult.value.extension,
@@ -576,3 +590,277 @@ ticketsRouter.post('/:id/attachments', requesterContext, async (req: Request, re
     internalError(res);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Public Comments and "Problem Appears Resolved"
+// (api-spec.md §3.1-3.3; specification.md FR-16..FR-18, BR-04, BR-05,
+// BR-15..BR-18, BR-26; AC-21..AC-25, AC-65)
+//
+// Internal Notes (`GET`/`POST /api/tickets/:id/notes`) are explicitly out of
+// scope for this issue (#72's job) — nothing below touches them.
+// ---------------------------------------------------------------------------
+
+function forbidden(res: Response): void {
+  res.status(403).json({
+    error: 'FORBIDDEN',
+    message: 'You do not have permission to perform this action.',
+  });
+}
+
+function unsupportedMediaType(res: Response): void {
+  res.status(415).json({
+    error: 'UNSUPPORTED_MEDIA_TYPE',
+    message: 'Content-Type must be application/json.',
+  });
+}
+
+/**
+ * BR-40 (api-spec.md §1.6): every state-changing endpoint requires
+ * `Content-Type: application/json`, else `415`. Mounted first, ahead of
+ * `authenticate`, matching the order `src/routes/auth.ts`'s own
+ * `requireJsonContentType` uses on every one of its POST routes (including
+ * `POST /api/auth/logout`, which — like `POST /api/tickets/:id/
+ * requester-resolved` below — documents no request body at all: BR-40's
+ * CSRF argument (D-04) needs the Content-Type gate on every state-changing
+ * request regardless of whether that request carries a body, since a
+ * cross-site form can't set this header either way).
+ */
+function requireJsonContentType(req: Request, res: Response, next: NextFunction): void {
+  if (!req.is('application/json')) {
+    unsupportedMediaType(res);
+    return;
+  }
+  next();
+}
+
+const COMMENT_AUTHOR_SELECT = {
+  id: true,
+  name: true,
+  role: true,
+} as const;
+
+interface PublicCommentRow {
+  id: number;
+  body: string;
+  createdAt: Date;
+  author: { id: number; name: string; role: string };
+}
+
+function commentToJson(comment: PublicCommentRow) {
+  return {
+    id: comment.id,
+    body: comment.body,
+    createdAt: comment.createdAt,
+    author: comment.author,
+  };
+}
+
+interface TicketAccessRow {
+  id: number;
+  requesterId: number;
+  status: TicketStatus;
+}
+
+type TicketAccess =
+  | { kind: 'not-found' }
+  | { kind: 'owner'; ticket: TicketAccessRow }
+  | { kind: 'staff'; ticket: TicketAccessRow };
+
+/**
+ * Resolves the ticket for a Public-Comment/resolution-indication route and
+ * classifies the caller's read path, implementing the three-case 403/404
+ * precedence (api-spec.md §1.4, specification.md §8.2):
+ *
+ * - No such ticket -> `'not-found'` (nobody has a read path to a record
+ *   that doesn't exist, regardless of role).
+ * - Caller is the owning Requester -> `'owner'`.
+ * - Caller is a REQUESTER who does not own it -> `'not-found'` (case 2:
+ *   Requesters have no read path to another Requester's ticket at all,
+ *   BR-13) — byte-identical to an unknown id.
+ * - Caller is IT_STAFF or ADMINISTRATOR -> `'staff'` (case 3: both can
+ *   already read any ticket via the staff/admin read paths — §4.1 — so a
+ *   write they lack is a safe `403`, never a `404`).
+ */
+async function resolveTicketAccess(ticketId: number, authUser: AuthenticatedUser): Promise<TicketAccess> {
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { id: true, requesterId: true, status: true },
+  });
+
+  if (!ticket) {
+    return { kind: 'not-found' };
+  }
+
+  if (authUser.role === 'REQUESTER') {
+    return ticket.requesterId === authUser.id ? { kind: 'owner', ticket } : { kind: 'not-found' };
+  }
+
+  return { kind: 'staff', ticket };
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/:id/comments (api-spec.md §3.1)
+// ---------------------------------------------------------------------------
+
+ticketsRouter.get(
+  '/:id/comments',
+  authenticate,
+  passwordChangeGate,
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    try {
+      // BR-04: the owning Requester, any IT Staff, and any Administrator
+      // may all read the thread — every branch except 'not-found' reads.
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+      if (access.kind === 'not-found') {
+        ticketNotFound(res);
+        return;
+      }
+
+      const comments = await prisma.publicComment.findMany({
+        where: { ticketId },
+        orderBy: { createdAt: 'asc' },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(200).json(comments.map(commentToJson));
+    } catch (error) {
+      console.error('Error listing public comments:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/tickets/:id/comments (api-spec.md §3.2)
+// ---------------------------------------------------------------------------
+
+ticketsRouter.post(
+  '/:id/comments',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+      if (access.kind === 'not-found') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // Administrators can already read this ticket (case 3 — 'staff'
+      // above) but api-spec.md §3.2 / specification.md §4.1 explicitly
+      // deny them the write: "Administrators may read comments but not
+      // post them." IT Staff, in the same 'staff' branch, MAY post — so
+      // this is the one place the two staff-ish roles diverge.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      const bodyResult = validateCommentBody(req.body.body);
+      if (!bodyResult.ok) {
+        validationFailed(res, [bodyResult.error]);
+        return;
+      }
+
+      // BR-16: author and createdAt are always server-set — any
+      // client-supplied `author`/`createdAt` in the body is read nowhere
+      // above and is therefore silently ignored.
+      const comment = await prisma.publicComment.create({
+        data: {
+          ticketId,
+          authorId: req.authUser!.id,
+          body: bodyResult.value,
+        },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(201).json(commentToJson(comment));
+    } catch (error) {
+      console.error('Error creating public comment:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/tickets/:id/requester-resolved (api-spec.md §3.3)
+// ---------------------------------------------------------------------------
+
+/** BR-05/BR-26: nothing left to report once the ticket has reached one of these. */
+const RESOLUTION_TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set(['RESOLVED', 'CLOSED', 'CANCELLED']);
+
+function invalidState(res: Response): void {
+  res.status(409).json({
+    error: 'INVALID_STATE',
+    message: 'This ticket is already Resolved, Closed or Cancelled.',
+  });
+}
+
+ticketsRouter.post(
+  '/:id/requester-resolved',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+      if (access.kind === 'not-found') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // IT Staff/Administrator can already read this ticket (case 3) but
+      // BR-05 reserves the resolution indication for the owning Requester
+      // only — neither of them may perform it on any ticket, owned or not.
+      if (access.kind === 'staff') {
+        forbidden(res);
+        return;
+      }
+
+      if (RESOLUTION_TERMINAL_STATUSES.has(access.ticket.status)) {
+        invalidState(res);
+        return;
+      }
+
+      // BR-26: records the indication and its time; the status is left
+      // untouched (idempotent — a repeat call just refreshes the timestamp
+      // and still returns 204).
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { requesterResolvedAt: new Date() },
+      });
+
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error recording resolution indication:', error);
+      internalError(res);
+    }
+  },
+);

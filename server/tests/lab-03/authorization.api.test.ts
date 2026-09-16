@@ -53,9 +53,18 @@ import type { Role } from '../../src/generated/prisma/client.js';
 //     write once they do.
 //   - SEC-03 (client-supplied `requesterId`/foreign path id ignored) and
 //     SEC-04 (Requester's own Ticket 404 for another Requester's Ticket,
-//     byte-identical to a nonexistent one): both depend on `GET
+//     byte-identical to a nonexistent one): both depended on `GET
 //     /api/tickets/:id` running on session identity instead of
-//     `X-Requester-Id`. Deferred to #70.
+//     `X-Requester-Id` — #70 has now rewired that route, so both rows are
+//     real, but the assertions already live where they were re-pointed
+//     rather than being duplicated here: SEC-03 is
+//     server/tests/lab-02/create-ticket.api.test.ts's API-08 ("a
+//     requesterId in the body is ignored") plus
+//     server/tests/lab-02/attachments.api.test.ts's ownership-boundary
+//     cases (a foreign path id never changes whose data is returned); SEC-04
+//     is server/tests/lab-02/ticket-detail.api.test.ts's API-20 ("not owned
+//     / unknown — byte-identical 404"). Same non-duplication reasoning as
+//     SEC-07 below.
 //   - SEC-05 (Internal Notes -> 404 for a Requester, never 403 or leaked
 //     content) and SEC-06 (Administrator: IT Priority 200, status/owner/note
 //     -write all 403 because they CAN already read the ticket): both need

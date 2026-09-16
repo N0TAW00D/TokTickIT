@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -8,15 +8,27 @@ import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { AttachmentSection } from "../components/AttachmentSection";
-import { useRequester } from "../requester/RequesterContext";
+import { MessageThread } from "../components/MessageThread";
+import { ConfirmResolvedDialog } from "../components/ConfirmResolvedDialog";
 import {
+  fetchComments,
   fetchTicketDetail,
+  postComment,
+  postRequesterResolved,
+  RequesterResolvedConflictError,
   TicketNotFoundError,
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
-import { formatDateTimeWithYear } from "../tickets/formatDateTime";
+import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./TicketDetailScreen.css";
+
+/** ui-spec.md §7: the button is hidden once the ticket reaches any of these. */
+const RESOLUTION_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "RESOLVED",
+  "CLOSED",
+  "CANCELLED",
+]);
 
 interface StaticFieldProps {
   label: string;
@@ -103,28 +115,29 @@ type DetailState =
 export function TicketDetailScreen() {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { requesterId } = useRequester();
 
   const parsedId = params.id !== undefined ? Number(params.id) : NaN;
   const validId = Number.isInteger(parsedId) && parsedId > 0;
 
   const [state, setState] = useState<DetailState>({ phase: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
-  // Captures the Requester in effect when this screen first mounted, so a
-  // later change can be detected without re-fetching for it (see below).
-  const initialRequesterIdRef = useRef(requesterId);
+
+  // "Problem Appears Resolved" (ui-spec.md §7). `justResolvedAt` is set
+  // client-side the moment a confirm succeeds, so the button is replaced by
+  // the read-only note immediately, without waiting on a full re-fetch;
+  // `state.ticket.requesterResolvedAt` (from the server) covers the case
+  // where the screen loads a ticket already resolved in an earlier visit.
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
+  const [resolveSubmitting, setResolveSubmitting] = useState(false);
+  const [resolveError, setResolveError] = useState<string | undefined>();
+  const [justResolvedAt, setJustResolvedAt] = useState<string | null>(null);
+  // The 409 conflict banner (ui-spec.md §7) — wired to the resolution
+  // indication only, per api-spec.md §3.2's contract carrying no 409 for
+  // comment posting (see routes/tickets.ts's own doc comment for the
+  // judgment call this mirrors).
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (requesterId === null) return;
-
-    // BR-11/AC-09: if the current Requester changes while this screen is
-    // open, the ticket is now foreign — the screen does not re-fetch it and
-    // instead leaves immediately for My Tickets under the new Requester.
-    if (requesterId !== initialRequesterIdRef.current) {
-      navigate("/tickets", { replace: true });
-      return;
-    }
-
     if (!validId) {
       setState({ phase: "not-found" });
       return;
@@ -133,7 +146,7 @@ export function TicketDetailScreen() {
     let cancelled = false;
     setState({ phase: "loading" });
 
-    fetchTicketDetail(requesterId, parsedId)
+    fetchTicketDetail(parsedId)
       .then((ticket) => {
         if (!cancelled) setState({ phase: "loaded", ticket });
       })
@@ -153,7 +166,7 @@ export function TicketDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [requesterId, parsedId, validId, reloadToken, navigate]);
+  }, [parsedId, validId, reloadToken]);
 
   function handleRetry() {
     setReloadToken((token) => token + 1);
@@ -203,6 +216,34 @@ export function TicketDetailScreen() {
     });
   }
 
+  function handleConfirmResolved() {
+    if (state.phase !== "loaded") return;
+    setResolveSubmitting(true);
+    setResolveError(undefined);
+
+    postRequesterResolved(state.ticket.id)
+      .then(() => {
+        setJustResolvedAt(new Date().toISOString());
+        setResolveDialogOpen(false);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof RequesterResolvedConflictError) {
+          setResolveDialogOpen(false);
+          setConflictMessage(error.message);
+          return;
+        }
+        setResolveError(
+          "Could not record this. Please check your connection and try again.",
+        );
+      })
+      .finally(() => setResolveSubmitting(false));
+  }
+
+  function handleRefreshAfterConflict() {
+    setConflictMessage(null);
+    handleRetry();
+  }
+
   return (
     <AppShell>
       <div className="zen-ticket-detail__breadcrumb-row">
@@ -212,15 +253,36 @@ export function TicketDetailScreen() {
           <span>Ticket Details</span>
         </nav>
 
-        {state.phase !== "not-found" && (
-          <Button variant="secondary" onClick={handleBack}>
-            <span aria-hidden="true">&larr; </span>
-            Back to My Tickets
-          </Button>
-        )}
+        <div className="zen-ticket-detail__header-actions">
+          {state.phase === "loaded" &&
+            !(justResolvedAt ?? state.ticket.requesterResolvedAt) &&
+            !RESOLUTION_TERMINAL_STATUSES.has(state.ticket.status) && (
+              <Button
+                variant="secondary"
+                onClick={() => setResolveDialogOpen(true)}
+              >
+                Problem appears resolved
+              </Button>
+            )}
+          {state.phase !== "not-found" && (
+            <Button variant="secondary" onClick={handleBack}>
+              <span aria-hidden="true">&larr; </span>
+              Back to My Tickets
+            </Button>
+          )}
+        </div>
       </div>
 
       <h1>Ticket Details</h1>
+
+      {conflictMessage && (
+        <div role="alert" className="zen-ticket-detail__conflict-banner">
+          <span>{conflictMessage}</span>
+          <Button variant="secondary" onClick={handleRefreshAfterConflict}>
+            Refresh
+          </Button>
+        </div>
+      )}
 
       {state.phase === "loading" && <LoadingState label="Loading ticket…" />}
 
@@ -231,7 +293,7 @@ export function TicketDetailScreen() {
       {state.phase === "not-found" && (
         <EmptyState
           title="Ticket not found"
-          description="This ticket doesn't exist or isn't associated with the current development requester."
+          description="This ticket doesn't exist or isn't associated with your account."
           action={
             <Button variant="primary" onClick={handleBack}>
               <span aria-hidden="true">&larr; </span>
@@ -273,6 +335,13 @@ export function TicketDetailScreen() {
                 label="Related System"
                 value={state.ticket.relatedSystem.name}
               />
+              {/* ui-spec.md §7: read-only; IT Priority is never shown to
+                  the Requester (the server never even sends it — see
+                  TicketDetailResponse). */}
+              <StaticField
+                label="Ticket Owner"
+                value={state.ticket.owner?.name ?? "Unassigned"}
+              />
             </div>
 
             <StaticField
@@ -287,6 +356,16 @@ export function TicketDetailScreen() {
               fullWidth
               multiline
             />
+
+            {(justResolvedAt ?? state.ticket.requesterResolvedAt) && (
+              <p className="zen-ticket-detail__resolved-note">
+                You reported this looks resolved on{" "}
+                {formatDateTime(
+                  (justResolvedAt ?? state.ticket.requesterResolvedAt) as string,
+                )}
+                .
+              </p>
+            )}
           </section>
 
           {/* Clear separation from the ticket information card above
@@ -300,13 +379,28 @@ export function TicketDetailScreen() {
             </h2>
             <AttachmentSection
               attachments={state.ticket.attachments}
-              requesterId={requesterId as number}
               ticketId={state.ticket.id}
               onAttachmentRemoved={handleAttachmentRemoved}
               onAttachmentAdded={handleAttachmentAdded}
             />
           </section>
+
+          {/* ui-spec.md §7/§8: Public Comments thread, below Attachments. */}
+          <MessageThread
+            variant="public"
+            fetchEntries={() => fetchComments(state.ticket.id)}
+            postEntry={(body) => postComment(state.ticket.id, body)}
+          />
         </>
+      )}
+
+      {resolveDialogOpen && (
+        <ConfirmResolvedDialog
+          busy={resolveSubmitting}
+          errorMessage={resolveError}
+          onCancel={() => setResolveDialogOpen(false)}
+          onConfirm={handleConfirmResolved}
+        />
       )}
     </AppShell>
   );

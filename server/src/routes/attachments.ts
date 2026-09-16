@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Router, type Request, type Response } from 'express';
-import { requesterContext } from '../middleware/requesterContext.ts';
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
 import { AttachmentAlreadyRemovedError, removeAttachment } from '../services/removeAttachment.ts';
@@ -49,6 +49,28 @@ function malformedBody(res: Response): void {
     error: 'MALFORMED_BODY',
     message: 'Request body must be a JSON object.',
   });
+}
+
+function unsupportedMediaType(res: Response): void {
+  res.status(415).json({
+    error: 'UNSUPPORTED_MEDIA_TYPE',
+    message: 'Content-Type must be application/json.',
+  });
+}
+
+/**
+ * BR-40 (api-spec.md §1.6): every state-changing endpoint requires
+ * `Content-Type: application/json`, else `415`. Mounted first, ahead of
+ * `authenticate`, matching the order routes/tickets.ts's own
+ * `requireJsonContentType` uses. Scoped to `DELETE /:id` only — the two
+ * `GET` routes above are not state-changing, so BR-40 doesn't apply to them.
+ */
+function requireJsonContentType(req: Request, res: Response, next: NextFunction): void {
+  if (!req.is('application/json')) {
+    unsupportedMediaType(res);
+    return;
+  }
+  next();
 }
 
 function validationFailed(res: Response, fields: FieldError[]): void {
@@ -122,7 +144,7 @@ function attachmentToJson(attachment: {
 // GET /api/attachments/:id (api-spec.md §4.2)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const attachmentId = parseAttachmentIdParam(String(req.params.id));
   if (attachmentId === null) {
     attachmentNotFound(res);
@@ -132,7 +154,7 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
   try {
     // Both active and removed attachments are returned here (§4.2, BR-33) —
     // getOwnedAttachment doesn't filter on isRemoved, only on ownership.
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+    const attachment = await getOwnedAttachment(attachmentId, req.authUser!.id);
     res.status(200).json(attachmentToJson(attachment));
   } catch (error) {
     if (error instanceof AttachmentNotFoundError) {
@@ -148,7 +170,7 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
 // GET /api/attachments/:id/download (api-spec.md §4.3)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.get('/:id/download', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const attachmentId = parseAttachmentIdParam(String(req.params.id));
   if (attachmentId === null) {
     attachmentNotFound(res);
@@ -156,7 +178,7 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
   }
 
   try {
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+    const attachment = await getOwnedAttachment(attachmentId, req.authUser!.id);
 
     // BR-33: a soft-removed attachment's download endpoint returns 410, not
     // the file — checked only after ownership is confirmed, so a stranger
@@ -210,7 +232,7 @@ attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, re
 // DELETE /api/attachments/:id (api-spec.md §4.4)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.delete('/:id', requireJsonContentType, authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // Path-shape check first, same precedence as the other two routes and as
   // routes/tickets.ts's POST /:id/attachments: a non-integer id is 404
   // regardless of the request body (§1.4 — "the route matched, the resource
@@ -221,9 +243,10 @@ attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Res
     return;
   }
 
-  // §1.4a: DELETE /api/attachments/:id requires Content-Type:
-  // application/json; anything else (or a non-object body) -> 400
-  // MALFORMED_BODY. Same guard as POST /api/tickets (routes/tickets.ts).
+  // requireJsonContentType above already turns a missing/non-JSON
+  // Content-Type into 415 (BR-40) before this handler runs at all, so
+  // what's left for this guard to reject is a body that declared
+  // `application/json` and parsed fine but isn't a plain object.
   if (!isPlainRequestBody(req.body)) {
     malformedBody(res);
     return;
@@ -242,7 +265,7 @@ attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Res
   try {
     const updated = await removeAttachment({
       attachmentId,
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       reason: reasonResult.value,
     });
     res.status(200).json(attachmentToJson(updated));

@@ -15,7 +15,6 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 export interface ImagePreviewDialogProps {
   /** The active image attachment being previewed (ui-spec.md §10, BR-34). */
   attachment: TicketAttachment;
-  requesterId: number;
   /** Closes the lightbox; the caller restores focus to the triggering Preview button. */
   onClose: () => void;
 }
@@ -25,9 +24,9 @@ type LoadState = "loading" | "loaded" | "error";
 /**
  * Inline image lightbox for an active image attachment (ui-spec.md §10:
  * "`Preview` (opens inline lightbox)", BR-34). The image endpoint needs
- * the `X-Requester-Id` header, so the bytes are fetched via
- * `downloadAttachment` and shown from an object URL rather than a bare
- * `<img src>` pointing at the API.
+ * the session cookie, so the bytes are fetched via `downloadAttachment`
+ * and shown from an object URL rather than a bare `<img src>` pointing at
+ * the API.
  *
  * Modal shell matches `RemoveAttachmentDialog`: `role="dialog"`,
  * `aria-modal`, an accessible label, `Esc` + a close button to dismiss,
@@ -37,7 +36,6 @@ type LoadState = "loading" | "loaded" | "error";
  */
 export function ImagePreviewDialog({
   attachment,
-  requesterId,
   onClose,
 }: ImagePreviewDialogProps) {
   const [state, setState] = useState<LoadState>("loading");
@@ -56,7 +54,7 @@ export function ImagePreviewDialog({
     setState("loading");
     setObjectUrl(null);
 
-    downloadAttachment(requesterId, attachment.id)
+    downloadAttachment(attachment.id)
       .then(({ blob }) => {
         if (cancelled) return;
         createdUrl = URL.createObjectURL(blob);
@@ -71,7 +69,7 @@ export function ImagePreviewDialog({
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [requesterId, attachment.id]);
+  }, [attachment.id]);
 
   // Esc closes; Tab/Shift+Tab wrap within the dialog (ui-spec.md §12).
   useEffect(() => {

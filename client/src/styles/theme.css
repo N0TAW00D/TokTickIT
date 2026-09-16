@@ -39,12 +39,21 @@
   --zen-priority-low-bg: #e7f0ea;
   --zen-priority-low-text: #2f6b49;
 
-  /* ---- Role badge (ui-spec.md §2, §3.3) ----
-     Only the two tokens issue #68 actually uses (UserBadge's RoleBadge) are
-     added here — the private-note and unassigned-owner tokens ui-spec.md §2
-     also lists belong to screens #69+ builds, not this one. */
+  /* ---- Role badge (ui-spec.md §2, §3.3) ---- */
   --zen-role-bg: #ecf1fa;
   --zen-role-text: #3a3f58;
+
+  /* ---- Internal Note surface (ui-spec.md §2, §8) ----
+     Used by MessageThread's variant="internal" — issue #70 only wires up
+     variant="public" (Public Comments), but the shared component and its
+     CSS contract exist now so #72 can add Internal Notes without touching
+     this file again. Deliberately warm/non-green, so private content never
+     reads as ordinary page content. The queue's "Unassigned" owner token
+     (ui-spec.md §2 also lists it here) still belongs to #71, not this
+     issue — not added yet. */
+  --zen-private-bg: #f4f1e8;
+  --zen-private-border: #c9bfa3;
+  --zen-private-text: #6b5a2e;
 
   /* ---- Typography (ui-spec.md §3) ---- */
   --zen-font-family: system-ui, -apple-system, "Segoe UI", Roboto,

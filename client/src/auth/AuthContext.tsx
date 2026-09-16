@@ -65,12 +65,10 @@ export function useAuth(): AuthContextValue {
  * being mounted outside an `AuthProvider`: `UserBadge`
  * (../shell/UserBadge.tsx), which `AppShell` renders unconditionally.
  * `AppShell` is exercised on its own (no `AuthProvider` in the tree) by
- * Lab 2's `client/tests/lab-02/AppShell.test.tsx` — that harness predates
- * Lab 3 and is out of this issue's scope to rewrite (its assertions are
- * about `RequesterBadge`/`RequesterContext`, unrelated to auth). Every real
- * mount of the app (`src/App.tsx`) wraps everything in `AuthProvider`, so
- * this only ever returns `null` in that one legacy test context — never in
- * production.
+ * Lab 2's `client/tests/lab-02/ui-style.test.tsx`, which predates Lab 3 and
+ * asserts shell/token styling unrelated to auth. Every real mount of the
+ * app (`src/App.tsx`) wraps everything in `AuthProvider`, so this only ever
+ * returns `null` in that one legacy test context — never in production.
  */
 export function useOptionalAuth(): AuthContextValue | null {
   return useContext(AuthContext) ?? null;

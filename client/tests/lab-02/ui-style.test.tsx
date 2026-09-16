@@ -3,7 +3,6 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { useEffect, type ReactNode } from "react";
 import { Button } from "../../src/components/Button.tsx";
 import { FormField } from "../../src/components/FormField.tsx";
 import { TextInput } from "../../src/components/TextInput.tsx";
@@ -15,10 +14,6 @@ import { ErrorState } from "../../src/components/ErrorState.tsx";
 import { AppShell } from "../../src/shell/AppShell.tsx";
 import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
 import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
-import {
-  RequesterProvider,
-  useRequester,
-} from "../../src/requester/RequesterContext.tsx";
 
 afterEach(() => {
   cleanup();
@@ -365,6 +360,13 @@ function s06JsonResponse(status: number, body: unknown): Promise<Response> {
  */
 function mockS06Fetch() {
   const fetchMock = vi.fn((input: string) => {
+    // Issue #70's Public Comments thread fires its own GET .../comments on
+    // mount — checked before the detail-ticket prefix match below, which
+    // would otherwise also match this URL and hand MessageThread a Ticket
+    // object instead of an array.
+    if (input === `${API_BASE_URL}/api/tickets/${TICKET_ID}/comments`) {
+      return s06JsonResponse(200, []);
+    }
     if (input.startsWith(`${API_BASE_URL}/api/tickets/${TICKET_ID}`)) {
       return s06JsonResponse(200, S06_DETAIL_TICKET);
     }
@@ -406,51 +408,30 @@ function stubMatchMedia(matches: boolean) {
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mediaQueryList));
 }
 
-/** Seeds RequesterContext the way a real Continue click would, mirroring
- * MyTickets.test.tsx / RequesterTicketDetail.test.tsx's identical helper,
- * so screens can render directly without RequireRequester. */
-function S06Bootstrap({ children }: { children: ReactNode }) {
-  const { requesterName, selectRequester } = useRequester();
-
-  useEffect(() => {
-    if (requesterName === null) {
-      selectRequester({ id: REQUESTER_ID, name: "Jennifer Anderson" });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (requesterName === null) return null;
-
-  return <>{children}</>;
-}
-
+// Issue #70 rewires MyTicketsScreen/TicketDetailScreen off the deleted
+// RequesterContext/X-Requester-Id and onto the session cookie
+// (`credentials: "include"`) — these screens no longer read any client-side
+// requester id, so rendering them for this style check needs nothing more
+// than a mocked fetch and a router, no requester-context bootstrap.
 function renderMyTickets(desktop: boolean) {
   stubMatchMedia(desktop);
   return render(
-    <RequesterProvider>
-      <S06Bootstrap>
-        <MemoryRouter initialEntries={["/tickets"]}>
-          <Routes>
-            <Route path="/tickets" element={<MyTicketsScreen />} />
-            <Route path="/tickets/:id" element={<h1>detail stub</h1>} />
-          </Routes>
-        </MemoryRouter>
-      </S06Bootstrap>
-    </RequesterProvider>,
+    <MemoryRouter initialEntries={["/tickets"]}>
+      <Routes>
+        <Route path="/tickets" element={<MyTicketsScreen />} />
+        <Route path="/tickets/:id" element={<h1>detail stub</h1>} />
+      </Routes>
+    </MemoryRouter>,
   );
 }
 
 function renderTicketDetail() {
   return render(
-    <RequesterProvider>
-      <S06Bootstrap>
-        <MemoryRouter initialEntries={[`/tickets/${TICKET_ID}`]}>
-          <Routes>
-            <Route path="/tickets/:id" element={<TicketDetailScreen />} />
-          </Routes>
-        </MemoryRouter>
-      </S06Bootstrap>
-    </RequesterProvider>,
+    <MemoryRouter initialEntries={[`/tickets/${TICKET_ID}`]}>
+      <Routes>
+        <Route path="/tickets/:id" element={<TicketDetailScreen />} />
+      </Routes>
+    </MemoryRouter>,
   );
 }
 
@@ -521,13 +502,11 @@ describe("S-01 Zen Green colour tokens applied (ui-spec.md §2, AC-41)", () => {
 
   it("the app header element renders with the token-styled class", () => {
     render(
-      <RequesterProvider>
-        <MemoryRouter initialEntries={["/tickets"]}>
-          <AppShell>
-            <div />
-          </AppShell>
-        </MemoryRouter>
-      </RequesterProvider>,
+      <MemoryRouter initialEntries={["/tickets"]}>
+        <AppShell>
+          <div />
+        </AppShell>
+      </MemoryRouter>,
     );
     expect(document.querySelector(".zen-app-shell__header")).toBeTruthy();
   });

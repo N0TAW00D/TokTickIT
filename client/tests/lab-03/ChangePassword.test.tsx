@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { ChangePasswordScreen } from "../../src/screens/ChangePasswordScreen.tsx";
 import { AuthProvider, useAuth } from "../../src/auth/AuthContext.tsx";
-import { RequesterProvider } from "../../src/requester/RequesterContext.tsx";
 import type { AuthUser } from "../../src/auth/api.ts";
 
 // Covers docs/lab-03/ui-spec.md §6 (Change Password screen) and
@@ -31,7 +30,7 @@ function mockChangePasswordFetch(handler: (init?: RequestInit) => Promise<Respon
   return fetchMock;
 }
 
-/** Seeds AuthContext with a known user before the screen under test mounts — the same pattern client/tests/lab-02/AppShell.test.tsx uses for RequesterContext. */
+/** Seeds AuthContext with a known user before the screen under test mounts. */
 function AuthBootstrap({ user, children }: { user: AuthUser; children: ReactNode }) {
   const { user: current, setUser } = useAuth();
 
@@ -92,19 +91,13 @@ function renderVoluntary() {
   return render(
     <AuthProvider>
       <AuthBootstrap user={VOLUNTARY_USER}>
-        {/* AppShell (rendered in voluntary mode) always mounts
-            RequesterBadge, which needs RequesterProvider regardless of
-            auth — a pre-existing Lab 2 requirement, not something this
-            test introduces. */}
-        <RequesterProvider>
-          <MemoryRouter initialEntries={["/tickets", "/change-password"]}>
-            <Routes>
-              <Route path="/change-password" element={<ChangePasswordScreen />} />
-              <Route path="/tickets" element={<h1>Previous route</h1>} />
-              <Route path="/" element={<h1>Landing</h1>} />
-            </Routes>
-          </MemoryRouter>
-        </RequesterProvider>
+        <MemoryRouter initialEntries={["/tickets", "/change-password"]}>
+          <Routes>
+            <Route path="/change-password" element={<ChangePasswordScreen />} />
+            <Route path="/tickets" element={<h1>Previous route</h1>} />
+            <Route path="/" element={<h1>Landing</h1>} />
+          </Routes>
+        </MemoryRouter>
       </AuthBootstrap>
     </AuthProvider>,
   );

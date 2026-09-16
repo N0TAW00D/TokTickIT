@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { RequesterBadge } from "./RequesterBadge";
 import { UserBadge } from "./UserBadge";
 import { useOptionalAuth } from "../auth/AuthContext";
 import type { Role } from "../auth/api";
@@ -28,15 +27,14 @@ const REQUESTER_NAV_LINKS: NavLink[] = [
 // destinations — not rendered-and-disabled, simply absent (ui-spec.md
 // §4.2: "A destination a role may not reach is not rendered"). This is
 // feedback, not the security control: every one of these routes is
-// independently enforced server-side (specification.md §2), and — for IT
-// Staff / Administrator — by `RequireRole` client-side once #71/#73 wrap
-// their screens with it.
+// independently enforced server-side (specification.md §2), and — for
+// Requester / IT Staff / Administrator — by `RequireRole` client-side once
+// each role's screens are wrapped with it.
 //
 // `/staff/tickets` and `/admin/users` deliberately do not resolve to a
-// built screen yet (#71, #73 build those) — exactly the same kind of known,
-// documented gap #68 left for `/select-requester` (see App.tsx's own scope
-// note). Getting the nav ITEM SET right per role is this issue's job;
-// building the screens behind IT Staff's and Administrator's links is not.
+// built screen yet (#71, #73 build those) — a known, documented gap.
+// Getting the nav ITEM SET right per role is this issue's job; building the
+// screens behind IT Staff's and Administrator's links is not.
 const ROLE_NAV_LINKS: Record<Role, NavLink[]> = {
   REQUESTER: REQUESTER_NAV_LINKS,
   IT_STAFF: [{ to: "/staff/tickets", label: "Ticket Queue" }],
@@ -44,21 +42,15 @@ const ROLE_NAV_LINKS: Record<Role, NavLink[]> = {
 };
 
 /**
- * Resolves which nav links to show. `role` is `undefined` in two real
- * cases, both pre-existing and out of this issue's scope to close:
- *   1. `AppShell` mounted with no `AuthProvider` in the tree at all —
- *      Lab 2's `client/tests/lab-02/AppShell.test.tsx` and
- *      `ui-style.test.tsx` do exactly this, and must keep passing
- *      unmodified (this issue does not touch Lab 2 test files).
- *   2. The real Requester ticket screens (My Tickets, Create Ticket,
- *      Ticket Detail), which still identify the caller via
- *      `RequesterContext`/`X-Requester-Id`, not `AuthContext` — #70's job,
- *      not this issue's (see App.tsx's scope note).
- * In both cases the caller is, today, always acting as a Requester (no
- * other role's screens exist to reach `AppShell` this way yet), so the
- * Requester nav is the correct and only honest fallback — never an empty
- * nav, which would regress Lab 2's still-passing assertions for no
- * authorization reason at all.
+ * Resolves which nav links to show. `role` is `undefined` when `AppShell`
+ * is mounted with no `AuthProvider` in the tree at all — Lab 2's
+ * `client/tests/lab-02/AppShell.test.tsx` and `ui-style.test.tsx` do
+ * exactly this, and must keep passing unmodified. The real app
+ * (`src/App.tsx`) always wraps `AppShell` in `AuthProvider`, and every
+ * screen that reaches it is now gated by `RequireRole`, so this fallback
+ * only ever fires in that legacy no-provider test context — never in
+ * production. Requester nav is the fallback (not an empty nav) so those
+ * Lab 2 assertions keep passing for no authorization reason at all.
  */
 function navLinksForRole(role: Role | undefined): NavLink[] {
   if (!role) return REQUESTER_NAV_LINKS;
@@ -115,15 +107,11 @@ export function AppShell({ children }: AppShellProps) {
             ))}
           </nav>
 
-          {/* ui-spec.md §4.1's UserBadge is rendered alongside, not in
-              place of, RequesterBadge — see UserBadge.tsx's doc comment for
-              why (#68 judgment call: the Requester flow still identifies
-              itself via RequesterContext until #70 rewires it onto the
-              session). UserBadge renders nothing until a real authenticated
-              user exists, so this is a no-op on every screen #68 doesn't
-              touch. */}
+          {/* ui-spec.md §4.1: UserBadge replaces the Lab 2 RequesterBadge
+              (deleted, #70). It renders nothing until a real authenticated
+              user exists — a no-op on any screen reached without a
+              session. */}
           <div className="zen-app-shell__requester zen-app-shell__requester--inline">
-            <RequesterBadge />
             <UserBadge />
           </div>
 
@@ -157,7 +145,6 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
             ))}
             <div className="zen-app-shell__requester zen-app-shell__requester--mobile">
-              <RequesterBadge onNavigate={closeMenu} />
               <UserBadge onNavigate={closeMenu} />
             </div>
           </nav>

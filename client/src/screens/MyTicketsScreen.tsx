@@ -12,7 +12,6 @@ import { Pagination, type PageSizeValue } from "../components/Pagination";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useRequester } from "../requester/RequesterContext";
 import {
   fetchCategories,
   fetchMyTickets,
@@ -385,7 +384,6 @@ function TicketsCards({ items }: TicketRowsProps) {
  */
 export function MyTicketsScreen() {
   const navigate = useNavigate();
-  const { requesterId } = useRequester();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [state, setState] = useState<ListState>({ phase: "loading" });
 
@@ -467,12 +465,8 @@ export function MyTicketsScreen() {
   }, [searchInput]);
 
   const load = useCallback(() => {
-    // RequireRequester guarantees a valid requesterId by the time this
-    // screen renders; this is a type-narrowing guard, not a real branch.
-    if (requesterId === null) return;
-
     setState({ phase: "loading" });
-    fetchMyTickets(requesterId, {
+    fetchMyTickets({
       search: debouncedSearch,
       categoryId: categoryId ? Number(categoryId) : undefined,
       priority: priority ? (priority as RequestedPriority) : undefined,
@@ -492,17 +486,7 @@ export function MyTicketsScreen() {
             "Could not load your tickets. Please check your connection and try again.",
         });
       });
-  }, [
-    requesterId,
-    debouncedSearch,
-    categoryId,
-    priority,
-    status,
-    sort,
-    order,
-    page,
-    pageSize,
-  ]);
+  }, [debouncedSearch, categoryId, priority, status, sort, order, page, pageSize]);
 
   useEffect(() => {
     load();

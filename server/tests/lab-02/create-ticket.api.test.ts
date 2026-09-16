@@ -1,20 +1,27 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
 import { useTestServer } from '../setup/http-server.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
+import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 
 // Covers docs/lab-02/api-spec.md §3.1 (POST /api/tickets) and
 // tests.md API-05..API-09, API-32. reset-db.ts (tests/setup/reset-db.ts)
-// truncates Ticket/Attachment/TicketCounter before every test in this file
-// (and every other file sharing the test DB), so each test starts from an
-// empty Ticket table and a fresh per-year counter — the sequence assertions
-// below (e.g. "000001") rely on that.
+// truncates Ticket/Attachment/TicketCounter/Session before every test in
+// this file (and every other file sharing the test DB), so each test
+// starts from an empty Ticket table and a fresh per-year counter — the
+// sequence assertions below (e.g. "000001") rely on that.
 //
 // All requests below go through one shared, already-listening server
 // (tests/setup/http-server.ts) rather than `request(app)` — see that file
 // for why. This is the file where it matters most: API-09 fires 15
 // requests concurrently via Promise.all.
+//
+// Lab 3 (#70) rewires ownership from the deleted `X-Requester-Id` header
+// onto the authenticated session (BR-03) — every request below now
+// authenticates via a real `POST /api/auth/login` and attaches the
+// resulting session cookie, rather than an identity header.
 const testServer = useTestServer(app);
 
 let activeCategoryId: number;
@@ -22,15 +29,15 @@ let activeCategoryName: string;
 let activeRelatedSystemId: number;
 let activeRelatedSystemName: string;
 let activeRequesterId: number;
-let inactiveRequesterId: number;
+let activeRequesterEmail: string;
+let inactiveRequesterEmail: string;
 
 beforeAll(async () => {
   const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
   const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
   // Lab 3 renames RequesterUser to User and adds other roles to the same
   // table (specification.md §7.4 item 1); the role filter keeps this
-  // picking Requesters specifically, since X-Requester-Id now only
-  // resolves to role REQUESTER rows.
+  // picking Requesters specifically.
   const requester = await prisma.user.findFirstOrThrow({ where: { isActive: true, role: 'REQUESTER' } });
   const inactiveRequester = await prisma.user.findFirstOrThrow({ where: { isActive: false, role: 'REQUESTER' } });
 
@@ -39,7 +46,37 @@ beforeAll(async () => {
   activeRelatedSystemId = relatedSystem.id;
   activeRelatedSystemName = relatedSystem.name;
   activeRequesterId = requester.id;
-  inactiveRequesterId = inactiveRequester.id;
+  activeRequesterEmail = requester.email;
+  inactiveRequesterEmail = inactiveRequester.email;
+});
+
+/** Pulls the `name=value` pair for the session cookie out of a Set-Cookie response header, for reuse on the next request. */
+function extractSessionCookiePair(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
+  const raw = setCookie?.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!raw) {
+    throw new Error('Response carried no toktickit.sid cookie');
+  }
+  return raw.split(';')[0];
+}
+
+async function loginAndGetCookie(email: string, password: string): Promise<string> {
+  const res = await request(testServer.server)
+    .post('/api/auth/login')
+    .set('Content-Type', 'application/json')
+    .send({ email, password });
+  expect(res.status, 'test fixture login must succeed').toBe(200);
+  return extractSessionCookiePair(res);
+}
+
+// reset-db.ts truncates Session before every test (docs/lab-03), so the
+// active Requester's cookie must be obtained fresh per test, not once in
+// beforeAll — a beforeAll-obtained cookie would already be invalid by the
+// time the first test body runs.
+let activeRequesterCookie: string;
+
+beforeEach(async () => {
+  activeRequesterCookie = await loginAndGetCookie(activeRequesterEmail, LOCAL_DEV_PASSWORD);
 });
 
 function validBody(overrides: Record<string, unknown> = {}) {
@@ -57,7 +94,7 @@ describe('POST /api/tickets', () => {
   it('API-05: happy path returns 201 with the full ticket shape', async () => {
     const res = await request(testServer.server)
       .post('/api/tickets')
-      .set('X-Requester-Id', String(activeRequesterId))
+      .set('Cookie', activeRequesterCookie)
       .send(validBody());
 
     expect(res.status).toBe(201);
@@ -98,7 +135,7 @@ describe('POST /api/tickets', () => {
     for (const [label, overrides] of cases) {
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .send(validBody(overrides));
 
       expect(res.status, label).toBe(400);
@@ -121,14 +158,14 @@ describe('POST /api/tickets', () => {
 
     const unknownCategoryRes = await request(testServer.server)
       .post('/api/tickets')
-      .set('X-Requester-Id', String(activeRequesterId))
+      .set('Cookie', activeRequesterCookie)
       .send(validBody({ categoryId: unknownId }));
     expect(unknownCategoryRes.status).toBe(404);
     expect(unknownCategoryRes.body.error).toBe('NOT_FOUND');
 
     const unknownRelatedSystemRes = await request(testServer.server)
       .post('/api/tickets')
-      .set('X-Requester-Id', String(activeRequesterId))
+      .set('Cookie', activeRequesterCookie)
       .send(validBody({ relatedSystemId: unknownId }));
     expect(unknownRelatedSystemRes.status).toBe(404);
     expect(unknownRelatedSystemRes.body.error).toBe('NOT_FOUND');
@@ -143,7 +180,7 @@ describe('POST /api/tickets', () => {
     try {
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .send(validBody({ categoryId: inactiveCategory.id }));
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
@@ -157,7 +194,7 @@ describe('POST /api/tickets', () => {
     try {
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .send(validBody({ relatedSystemId: inactiveRelatedSystem.id }));
       expect(res.status).toBe(404);
       expect(res.body.error).toBe('NOT_FOUND');
@@ -169,29 +206,39 @@ describe('POST /api/tickets', () => {
     expect(after).toBe(before);
   });
 
-  it('API-08: requester header rules; a requesterId in the body is ignored (A-01)', async () => {
-    const missingHeaderRes = await request(testServer.server).post('/api/tickets').send(validBody());
-    expect(missingHeaderRes.status).toBe(400);
-    expect(missingHeaderRes.body.error).toBe('MISSING_REQUESTER');
+  it('API-08: identity rules; a requesterId in the body is ignored (A-01, BR-03)', async () => {
+    // No session at all -> 401 UNAUTHENTICATED (Lab 3 replaces the Lab 2
+    // 400 MISSING_REQUESTER with the standard auth gate, api-spec.md §1.2).
+    const missingSessionRes = await request(testServer.server).post('/api/tickets').send(validBody());
+    expect(missingSessionRes.status).toBe(401);
+    expect(missingSessionRes.body.error).toBe('UNAUTHENTICATED');
 
-    const unknownHeaderRes = await request(testServer.server)
+    // A cookie that doesn't resolve to any Session row -> also 401
+    // UNAUTHENTICATED (replaces the Lab 2 400 INVALID_REQUESTER case: there
+    // is no more "syntactically present but unknown" identity value to
+    // distinguish once identity is a session, not a client-supplied id).
+    const unknownSessionRes = await request(testServer.server)
       .post('/api/tickets')
-      .set('X-Requester-Id', '999999')
+      .set('Cookie', `${SESSION_COOKIE_NAME}=does-not-exist`)
       .send(validBody());
-    expect(unknownHeaderRes.status).toBe(400);
-    expect(unknownHeaderRes.body.error).toBe('INVALID_REQUESTER');
+    expect(unknownSessionRes.status).toBe(401);
+    expect(unknownSessionRes.body.error).toBe('UNAUTHENTICATED');
 
-    const inactiveHeaderRes = await request(testServer.server)
-      .post('/api/tickets')
-      .set('X-Requester-Id', String(inactiveRequesterId))
-      .send(validBody());
-    expect(inactiveHeaderRes.status).toBe(400);
-    expect(inactiveHeaderRes.body.error).toBe('INVALID_REQUESTER');
+    // An inactive Requester can't obtain a session at all (BR-01, BR-08) —
+    // there is no "inactive identity reaches the route" case anymore, since
+    // login itself is the gate. This is the Lab 3 replacement for Lab 2's
+    // "inactive X-Requester-Id -> 400 INVALID_REQUESTER" case.
+    const inactiveLoginRes = await request(testServer.server)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send({ email: inactiveRequesterEmail, password: LOCAL_DEV_PASSWORD });
+    expect(inactiveLoginRes.status).toBe(401);
+    expect(inactiveLoginRes.body.error).toBe('INVALID_CREDENTIALS');
 
     const ignoredBodyRequesterRes = await request(testServer.server)
       .post('/api/tickets')
-      .set('X-Requester-Id', String(activeRequesterId))
-      .send(validBody({ requesterId: inactiveRequesterId }));
+      .set('Cookie', activeRequesterCookie)
+      .send(validBody({ requesterId: 999_999 }));
     expect(ignoredBodyRequesterRes.status).toBe(201);
     expect(ignoredBodyRequesterRes.body.requester.id).toBe(activeRequesterId);
   });
@@ -201,7 +248,7 @@ describe('POST /api/tickets', () => {
       Array.from({ length: 15 }, () =>
         request(testServer.server)
           .post('/api/tickets')
-          .set('X-Requester-Id', String(activeRequesterId))
+          .set('Cookie', activeRequesterCookie)
           .send(validBody())
       )
     );
@@ -239,7 +286,7 @@ describe('POST /api/tickets', () => {
     try {
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .send(validBody());
 
       expect(res.status).toBe(500);
@@ -271,7 +318,7 @@ describe('POST /api/tickets', () => {
 
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .set('Content-Type', 'application/json')
         .send('{"summary": ');
 
@@ -290,7 +337,7 @@ describe('POST /api/tickets', () => {
 
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .set('Content-Type', 'application/json')
         .send('[1,2,3]');
 
@@ -309,7 +356,7 @@ describe('POST /api/tickets', () => {
 
       const res = await request(testServer.server)
         .post('/api/tickets')
-        .set('X-Requester-Id', String(activeRequesterId))
+        .set('Cookie', activeRequesterCookie)
         .set('Content-Type', 'application/json')
         .send('42');
 
@@ -323,16 +370,56 @@ describe('POST /api/tickets', () => {
       expect(after).toBe(before);
     });
 
-    it('no body and no Content-Type returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
+    it('no body and no Content-Type returns 415 UNSUPPORTED_MEDIA_TYPE (requireJsonContentType guard)', async () => {
       const before = await prisma.ticket.count();
 
-      const res = await request(testServer.server).post('/api/tickets').set('X-Requester-Id', String(activeRequesterId));
+      const res = await request(testServer.server).post('/api/tickets').set('Cookie', activeRequesterCookie);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
       expect(typeof res.body.message).toBe('string');
       expect(res.body.message.length).toBeGreaterThan(0);
       expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+  });
+
+  // api-spec.md §1.6 / BR-40: every state-changing endpoint gates on
+  // Content-Type: application/json before anything else, including
+  // authentication (D-04's CSRF argument applies regardless of whether the
+  // caller has a valid session). requireJsonContentType (routes/tickets.ts)
+  // is the guard under test here.
+  describe('Content-Type gate (§1.6, BR-40) — no tests.md API-xx row', () => {
+    it('a text/plain Content-Type returns 415 UNSUPPORTED_MEDIA_TYPE, not 400 MALFORMED_BODY', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(testServer.server)
+        .post('/api/tickets')
+        .set('Cookie', activeRequesterCookie)
+        .set('Content-Type', 'text/plain')
+        .send(JSON.stringify(validBody()));
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+
+    it('a valid body with the wrong Content-Type is rejected before authentication ever runs', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(testServer.server)
+        .post('/api/tickets')
+        .set('Content-Type', 'text/plain')
+        .send(JSON.stringify(validBody()));
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
 
       const after = await prisma.ticket.count();
       expect(after).toBe(before);
