@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { getUploadsDir } from '../services/attachmentStorage.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
@@ -49,6 +49,28 @@ function malformedBody(res: Response): void {
     error: 'MALFORMED_BODY',
     message: 'Request body must be a JSON object.',
   });
+}
+
+function unsupportedMediaType(res: Response): void {
+  res.status(415).json({
+    error: 'UNSUPPORTED_MEDIA_TYPE',
+    message: 'Content-Type must be application/json.',
+  });
+}
+
+/**
+ * BR-40 (api-spec.md §1.6): every state-changing endpoint requires
+ * `Content-Type: application/json`, else `415`. Mounted first, ahead of
+ * `authenticate`, matching the order routes/tickets.ts's own
+ * `requireJsonContentType` uses. Scoped to `DELETE /:id` only — the two
+ * `GET` routes above are not state-changing, so BR-40 doesn't apply to them.
+ */
+function requireJsonContentType(req: Request, res: Response, next: NextFunction): void {
+  if (!req.is('application/json')) {
+    unsupportedMediaType(res);
+    return;
+  }
+  next();
 }
 
 function validationFailed(res: Response, fields: FieldError[]): void {
@@ -210,7 +232,7 @@ attachmentsRouter.get('/:id/download', authenticate, passwordChangeGate, require
 // DELETE /api/attachments/:id (api-spec.md §4.4)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.delete('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
+attachmentsRouter.delete('/:id', requireJsonContentType, authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // Path-shape check first, same precedence as the other two routes and as
   // routes/tickets.ts's POST /:id/attachments: a non-integer id is 404
   // regardless of the request body (§1.4 — "the route matched, the resource
@@ -221,9 +243,10 @@ attachmentsRouter.delete('/:id', authenticate, passwordChangeGate, requireRole('
     return;
   }
 
-  // §1.4a: DELETE /api/attachments/:id requires Content-Type:
-  // application/json; anything else (or a non-object body) -> 400
-  // MALFORMED_BODY. Same guard as POST /api/tickets (routes/tickets.ts).
+  // requireJsonContentType above already turns a missing/non-JSON
+  // Content-Type into 415 (BR-40) before this handler runs at all, so
+  // what's left for this guard to reject is a body that declared
+  // `application/json` and parsed fine but isn't a plain object.
   if (!isPlainRequestBody(req.body)) {
     malformedBody(res);
     return;

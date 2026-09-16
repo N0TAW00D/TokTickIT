@@ -1028,7 +1028,7 @@ describe('DELETE /api/attachments/:id', () => {
       expect(longRes.status).toBe(200);
     });
 
-    it('a non-JSON content type returns 400 MALFORMED_BODY and leaves the attachment active', async () => {
+    it('a non-JSON content type returns 415 UNSUPPORTED_MEDIA_TYPE, not 400 MALFORMED_BODY, and leaves the attachment active', async () => {
       const ticketId = await createTicket(requesterACookie);
       const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
         filename: 'report.pdf',
@@ -1040,8 +1040,43 @@ describe('DELETE /api/attachments/:id', () => {
         .set('Cookie', requesterACookie)
         .send('reason=whatever');
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(false);
+    });
+
+    it('no Content-Type at all returns 415 UNSUPPORTED_MEDIA_TYPE (requireJsonContentType guard, §1.6/BR-40)', async () => {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const res = await request(server).delete(`/api/attachments/${attachmentId}`).set('Cookie', requesterACookie);
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+
+      const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
+      expect(row.isRemoved).toBe(false);
+    });
+
+    it('a wrong Content-Type is rejected before authentication ever runs', async () => {
+      const ticketId = await createTicket(requesterACookie);
+      const uploadRes = await upload(ticketId, requesterACookie).attach('file', pdfBuffer(1000), {
+        filename: 'report.pdf',
+      });
+      const attachmentId = uploadRes.body.id as number;
+
+      const res = await request(server)
+        .delete(`/api/attachments/${attachmentId}`)
+        .set('Content-Type', 'text/plain')
+        .send('reason=whatever');
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
 
       const row = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId } });
       expect(row.isRemoved).toBe(false);

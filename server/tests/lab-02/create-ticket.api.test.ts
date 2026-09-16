@@ -370,16 +370,56 @@ describe('POST /api/tickets', () => {
       expect(after).toBe(before);
     });
 
-    it('no body and no Content-Type returns 400 MALFORMED_BODY (isPlainRequestBody guard)', async () => {
+    it('no body and no Content-Type returns 415 UNSUPPORTED_MEDIA_TYPE (requireJsonContentType guard)', async () => {
       const before = await prisma.ticket.count();
 
       const res = await request(testServer.server).post('/api/tickets').set('Cookie', activeRequesterCookie);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('MALFORMED_BODY');
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
       expect(typeof res.body.message).toBe('string');
       expect(res.body.message.length).toBeGreaterThan(0);
       expect('fields' in res.body).toBe(false);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+  });
+
+  // api-spec.md §1.6 / BR-40: every state-changing endpoint gates on
+  // Content-Type: application/json before anything else, including
+  // authentication (D-04's CSRF argument applies regardless of whether the
+  // caller has a valid session). requireJsonContentType (routes/tickets.ts)
+  // is the guard under test here.
+  describe('Content-Type gate (§1.6, BR-40) — no tests.md API-xx row', () => {
+    it('a text/plain Content-Type returns 415 UNSUPPORTED_MEDIA_TYPE, not 400 MALFORMED_BODY', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(testServer.server)
+        .post('/api/tickets')
+        .set('Cookie', activeRequesterCookie)
+        .set('Content-Type', 'text/plain')
+        .send(JSON.stringify(validBody()));
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
+      expect(typeof res.body.message).toBe('string');
+      expect(res.body.message.length).toBeGreaterThan(0);
+
+      const after = await prisma.ticket.count();
+      expect(after).toBe(before);
+    });
+
+    it('a valid body with the wrong Content-Type is rejected before authentication ever runs', async () => {
+      const before = await prisma.ticket.count();
+
+      const res = await request(testServer.server)
+        .post('/api/tickets')
+        .set('Content-Type', 'text/plain')
+        .send(JSON.stringify(validBody()));
+
+      expect(res.status).toBe(415);
+      expect(res.body.error).toBe('UNSUPPORTED_MEDIA_TYPE');
 
       const after = await prisma.ticket.count();
       expect(after).toBe(before);
