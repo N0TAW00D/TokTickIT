@@ -6,9 +6,10 @@ import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
-import { StatusBadge } from "../components/StatusBadge";
+import { getStatusLabel, type StatusValue } from "../components/StatusBadge";
 import { AttachmentList } from "../components/AttachmentList";
 import { ImagePreviewDialog } from "../components/ImagePreviewDialog";
+import { ConfirmStatusChangeDialog } from "../components/ConfirmStatusChangeDialog";
 import { MessageThread } from "../components/MessageThread";
 import { SelectField, type SelectOption } from "../components/SelectField";
 import {
@@ -25,7 +26,9 @@ import {
   InvalidOwnerError,
   patchTicketItPriority,
   patchTicketOwner,
+  patchTicketStatus,
   postComment,
+  StatusTransitionConflictError,
   TicketNotFoundError,
   type RequestedPriority,
   type TicketAttachment,
@@ -56,6 +59,65 @@ const IT_PRIORITY_OPTIONS: SegmentedControlOption[] = [
   { value: "MEDIUM", label: "Medium" },
   { value: "HIGH", label: "High" },
 ];
+
+/**
+ * Status transition matrix (specification.md §5.1) — mirrors the server's
+ * own `TICKET_STATUS_TRANSITIONS` (`server/src/routes/tickets.ts`) exactly,
+ * so the Status select never offers a destination the server would reject
+ * as `409 INVALID_TRANSITION` (ui-spec.md §10: "listing only the
+ * transitions §5.1 permits"). `CANCELLED` is terminal — an empty array,
+ * not an absent key, so a lookup here never needs a separate "unknown
+ * status" branch.
+ */
+const STATUS_TRANSITIONS: Record<StatusValue, StatusValue[]> = {
+  NEW: ["OPEN", "IN_PROGRESS", "CANCELLED"],
+  OPEN: ["IN_PROGRESS", "WAITING_FOR_REQUESTER", "RESOLVED", "CANCELLED"],
+  IN_PROGRESS: ["WAITING_FOR_REQUESTER", "RESOLVED", "CANCELLED"],
+  WAITING_FOR_REQUESTER: ["IN_PROGRESS", "RESOLVED", "CANCELLED"],
+  RESOLVED: ["CLOSED", "REOPENED"],
+  CLOSED: ["REOPENED"],
+  REOPENED: ["IN_PROGRESS", "WAITING_FOR_REQUESTER", "RESOLVED", "CANCELLED"],
+  CANCELLED: [],
+};
+
+/**
+ * Destinations that require the confirm dialog before saving
+ * (specification.md §5.1's notes column: "Closing/Reopening/cancelling
+ * requires confirmation in the UI"; ui-spec.md §10: "Close, Reopen and
+ * Cancel open a confirm dialog first"). Every other destination saves
+ * immediately on select-change, same as Owner/IT Priority.
+ */
+const STATUS_CONFIRM_REQUIRED = new Set<string>([
+  "CLOSED",
+  "REOPENED",
+  "CANCELLED",
+]);
+
+/**
+ * Confirm dialog copy per destination status (ui-spec.md §10 doesn't
+ * dictate exact wording for these three, only that a dialog appears —
+ * `STATUS_CONFIRM_REQUIRED`'s three keys, kept in sync with it).
+ */
+const STATUS_CONFIRM_COPY: Record<
+  string,
+  { title: string; body: string; confirmLabel: string }
+> = {
+  CLOSED: {
+    title: "Close this ticket?",
+    body: "The requester will see this ticket as Closed. It can be reopened later if the issue comes back.",
+    confirmLabel: "Close ticket",
+  },
+  REOPENED: {
+    title: "Reopen this ticket?",
+    body: "This moves the ticket back into an active state so work on it can continue.",
+    confirmLabel: "Reopen ticket",
+  },
+  CANCELLED: {
+    title: "Cancel this ticket?",
+    body: "This action cannot be undone — a cancelled ticket can't be reopened or moved to any other status.",
+    confirmLabel: "Cancel ticket",
+  },
+};
 
 /**
  * Active image MIME types (specification.md BR-21/BR-34): only these get an
@@ -149,15 +211,23 @@ type DetailState =
  * Administrators plus "Unassigned" (`fetchAssignableUsers`,
  * `client/src/staff/api.ts`), a Claim button shown only while unassigned,
  * and the save via `patchTicketOwner` (`client/src/tickets/api.ts`). This
- * dispatch adds IT Priority's control — a `SegmentedControl` of the three
+ * dispatch added IT Priority's control — a `SegmentedControl` of the three
  * priority values, saving via `patchTicketItPriority`
  * (`client/src/tickets/api.ts`); both IT_STAFF and ADMINISTRATOR may use
  * it (api-spec.md §5.2), so unlike Ticket Owner/Status there's no
- * role-based disabling here. Status still lives in this card as a
- * relocated read-only badge, carrying its own
- * `TODO(#72): editable in a later dispatch` comment marking where its own
- * dispatch replaces it with its interactive control. Internal Notes
- * (ui-spec.md §8) is also a later dispatch and is not present here at all.
+ * role-based disabling here. This dispatch adds the last of the three
+ * controls: Status, a `SelectField` listing only the destinations
+ * `STATUS_TRANSITIONS` (a client-side copy of the server's own
+ * `TICKET_STATUS_TRANSITIONS`, `server/src/routes/tickets.ts`) permits from
+ * the current status, saving via `patchTicketStatus`
+ * (`client/src/tickets/api.ts`). Selecting CLOSED/REOPENED/CANCELLED opens
+ * `ConfirmStatusChangeDialog` first (ui-spec.md §10); every other
+ * destination saves immediately. A `409` (`StatusTransitionConflictError`)
+ * closes that dialog if open and renders a page-level conflict banner
+ * (`statusConflictMessage`) instead of a field-level error — same "the
+ * record moved on, refresh" pattern as `TicketDetailScreen.tsx`'s own
+ * `conflictMessage`. Internal Notes (ui-spec.md §8) is a later dispatch and
+ * is not present here at all.
  *
  * Reachable by both IT_STAFF and ADMINISTRATOR (App.tsx wraps this route
  * with `RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}`, unlike
@@ -235,6 +305,27 @@ export function StaffTicketDetailScreen() {
     null,
   );
 
+  // Status control's own inline save state (ui-spec.md §10) — same
+  // shape/convention as Ticket Owner/IT Priority above, plus two things
+  // neither of those needs: `pendingStatus` (the destination awaiting
+  // confirmation in the dialog, or null when no dialog is open) and
+  // `statusConflictMessage` (a rejected 409 transition, rendered as a
+  // page-level banner rather than a field-level error — same pattern as
+  // `TicketDetailScreen.tsx`'s own `conflictMessage`/`RequesterResolvedConflictError`
+  // handling, since it's the same "the record moved on, refresh" concept).
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusError, setStatusError] = useState<string | undefined>(
+    undefined,
+  );
+  const [statusSaved, setStatusSaved] = useState(false);
+  const statusSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [statusConflictMessage, setStatusConflictMessage] = useState<
+    string | null
+  >(null);
+
   // Download/preview wiring for AttachmentList (copied from
   // AttachmentSection's own handleDownload/handlePreview — see this file's
   // doc comment above for why that component isn't reused directly).
@@ -291,6 +382,9 @@ export function StaffTicketDetailScreen() {
       if (itPrioritySavedTimerRef.current) {
         clearTimeout(itPrioritySavedTimerRef.current);
       }
+      if (statusSavedTimerRef.current) {
+        clearTimeout(statusSavedTimerRef.current);
+      }
     };
   }, []);
 
@@ -331,6 +425,28 @@ export function StaffTicketDetailScreen() {
     }
     return options;
   }, [assignableUsers, currentOwner]);
+
+  /**
+   * The current status plus only the destinations `STATUS_TRANSITIONS`
+   * permits from it (ui-spec.md §10: "listing only the transitions §5.1
+   * permits from the current status"). The current status is always
+   * included first so the select's `value` always matches one of its own
+   * `<option>`s — same reasoning as `ownerOptions` always including the
+   * current owner above. For `CANCELLED` (terminal), `STATUS_TRANSITIONS`
+   * contributes nothing, so this is a single-option list containing only
+   * the current status — handled by disabling the select below rather than
+   * rendering a dropdown with no real choice in it.
+   */
+  const currentStatus =
+    state.phase === "loaded" ? (state.ticket.status as StatusValue) : null;
+  const statusOptions = useMemo<SelectOption[]>(() => {
+    if (!currentStatus) return [];
+    const permitted = STATUS_TRANSITIONS[currentStatus] ?? [];
+    return [
+      { value: currentStatus, label: getStatusLabel(currentStatus) },
+      ...permitted.map((next) => ({ value: next, label: getStatusLabel(next) })),
+    ];
+  }, [currentStatus]);
 
   function handleRetry() {
     setReloadToken((token) => token + 1);
@@ -453,6 +569,88 @@ export function StaffTicketDetailScreen() {
     saveItPriority(value as RequestedPriority);
   }
 
+  function showStatusSavedTick() {
+    setStatusSaved(true);
+    if (statusSavedTimerRef.current) clearTimeout(statusSavedTimerRef.current);
+    statusSavedTimerRef.current = setTimeout(() => {
+      setStatusSaved(false);
+    }, SAVED_TICK_DURATION_MS);
+  }
+
+  /**
+   * Status control's save path (`PATCH /api/tickets/:id/status`,
+   * api-spec.md §5.3) — shared by both the direct select-change path (most
+   * destinations) and the confirm dialog's Confirm button (Close/Reopen/
+   * Cancel). Same update-in-place-on-success convention as
+   * `saveOwner`/`saveItPriority`, plus the one behaviour those two don't
+   * need: a `409` (`StatusTransitionConflictError`) closes the confirm
+   * dialog (if one was open) and renders the page-level conflict banner
+   * instead of a field-level error (ui-spec.md §10's frozen conflict copy,
+   * `STATUS_TRANSITION_CONFLICT_MESSAGE`).
+   */
+  function saveStatus(nextStatus: string) {
+    if (state.phase !== "loaded") return;
+    setStatusSaving(true);
+    setStatusError(undefined);
+
+    patchTicketStatus(state.ticket.id, nextStatus)
+      .then((updated) => {
+        setState((previous) => {
+          if (previous.phase !== "loaded") return previous;
+          return {
+            phase: "loaded",
+            ticket: { ...previous.ticket, status: updated.status },
+          };
+        });
+        setPendingStatus(null);
+        showStatusSavedTick();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof StatusTransitionConflictError) {
+          setPendingStatus(null);
+          setStatusConflictMessage(error.message);
+          return;
+        }
+        setStatusError(
+          "Could not update the ticket status. Please check your connection and try again.",
+        );
+      })
+      .finally(() => {
+        setStatusSaving(false);
+      });
+  }
+
+  /**
+   * Select's onChange: Close/Reopen/Cancel destinations open the confirm
+   * dialog instead of saving immediately (ui-spec.md §10); every other
+   * destination saves right away, same as Owner/IT Priority.
+   */
+  function handleStatusSelectChange(value: string) {
+    if (state.phase !== "loaded") return;
+    if (value === state.ticket.status) return;
+    if (STATUS_CONFIRM_REQUIRED.has(value)) {
+      setStatusError(undefined);
+      setPendingStatus(value);
+      return;
+    }
+    saveStatus(value);
+  }
+
+  function handleStatusConfirm() {
+    if (pendingStatus) saveStatus(pendingStatus);
+  }
+
+  function handleStatusCancelConfirm() {
+    if (statusSaving) return;
+    setPendingStatus(null);
+    setStatusError(undefined);
+  }
+
+  function handleStatusConflictRefresh() {
+    setStatusConflictMessage(null);
+    handleRetry();
+  }
+
   async function handleDownload(attachment: TicketAttachment) {
     setDownloadError(null);
     try {
@@ -505,6 +703,20 @@ export function StaffTicketDetailScreen() {
       </div>
 
       <h1>Ticket Details</h1>
+
+      {/* Status transition conflict (ui-spec.md §10: "A rejected transition
+          (409) renders the conflict state") — same page-level banner
+          pattern as TicketDetailScreen.tsx's own conflictMessage for
+          RequesterResolvedConflictError, since it's the same "the record
+          moved on since you loaded it, refresh" concept. */}
+      {statusConflictMessage && (
+        <div role="alert" className="zen-staff-detail__conflict-banner">
+          <span>{statusConflictMessage}</span>
+          <Button variant="secondary" onClick={handleStatusConflictRefresh}>
+            Refresh
+          </Button>
+        </div>
+      )}
 
       {state.phase === "loading" && <LoadingState label="Loading ticket…" />}
 
@@ -581,10 +793,8 @@ export function StaffTicketDetailScreen() {
               accent") — visually distinct from the read-only ticket
               information card above, same way that card's own fields use
               `--zen-readonly-bg` (ui-spec.md §10 intro: "Read-only and
-              editable regions are visually separated"). Status was
-              relocated here from that card as a plain read-only badge for
-              now (see its own TODO comment below); Ticket Owner and IT
-              Priority are interactive. */}
+              editable regions are visually separated"). All three controls
+              — Ticket Owner, IT Priority and Status — are interactive. */}
           <section className="zen-staff-detail__card zen-staff-detail__card--operations">
             <h2>Ticket Operations</h2>
 
@@ -611,14 +821,29 @@ export function StaffTicketDetailScreen() {
                 )}
               </div>
 
-              {/* TODO(#72): editable in a later dispatch — replace with the
-                  Status select limited to the transitions the current status
-                  permits (ui-spec.md §10's editable table; server transition
-                  matrix at api-spec.md §5.3). Now lives in the operational
-                  panel card, still read-only. */}
-              <StaticBadgeField label="Current Status">
-                <StatusBadge value={state.ticket.status} />
-              </StaticBadgeField>
+              {/* Status (ui-spec.md §10's editable table): a select
+                  listing only the transitions STATUS_TRANSITIONS permits
+                  from the current status. CANCELLED is terminal, so
+                  `statusOptions` there is just the current value — the
+                  select is disabled rather than offered as a real choice
+                  with nothing in it. Close/Reopen/Cancel open the confirm
+                  dialog below instead of saving immediately. */}
+              <div className="zen-staff-detail__status-control">
+                <SelectField
+                  id="staff-ticket-status"
+                  label="Current Status"
+                  value={state.ticket.status}
+                  onChange={handleStatusSelectChange}
+                  options={statusOptions}
+                  disabled={statusSaving || statusOptions.length <= 1}
+                  error={statusError}
+                />
+                {statusSaved && (
+                  <span role="status" className="zen-staff-detail__save-tick">
+                    <span aria-hidden="true">✓</span> Saved
+                  </span>
+                )}
+              </div>
 
               {/* Ticket Owner (ui-spec.md §10's editable table): a select of
                   active IT Staff and Administrators plus "Unassigned"
@@ -694,6 +919,18 @@ export function StaffTicketDetailScreen() {
 
       {preview && IMAGE_MIME_TYPES.has(preview.mimeType) && (
         <ImagePreviewDialog attachment={preview} onClose={handlePreviewClose} />
+      )}
+
+      {pendingStatus && STATUS_CONFIRM_COPY[pendingStatus] && (
+        <ConfirmStatusChangeDialog
+          title={STATUS_CONFIRM_COPY[pendingStatus].title}
+          body={STATUS_CONFIRM_COPY[pendingStatus].body}
+          confirmLabel={STATUS_CONFIRM_COPY[pendingStatus].confirmLabel}
+          busy={statusSaving}
+          errorMessage={statusError}
+          onCancel={handleStatusCancelConfirm}
+          onConfirm={handleStatusConfirm}
+        />
       )}
     </AppShell>
   );

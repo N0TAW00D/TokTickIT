@@ -95,6 +95,21 @@ function humanizeUnknown(rawValue: string): string {
 }
 
 /**
+ * `STATUS_PRESENTATION`'s label for one status value, humanized the same
+ * way `StatusBadge` itself falls back for a value outside the known set.
+ * Exported so any control that needs to *talk about* a status in plain text
+ * — e.g. the Status select's option labels on the IT Staff Ticket Detail
+ * screen (`StaffTicketDetailScreen.tsx`) — uses this exact wording instead
+ * of a second, independently-maintained label set that could drift from
+ * the badge shown elsewhere for the same value.
+ */
+export function getStatusLabel(value: StatusValue | (string & {})): string {
+  return isKnownStatus(value)
+    ? STATUS_PRESENTATION[value].label
+    : humanizeUnknown(value);
+}
+
+/**
  * Current Status badge (lab-03/ui-spec.md §3.1). Shared by My Tickets,
  * Ticket Detail and the IT Staff Ticket Queue.
  *
