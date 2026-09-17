@@ -121,3 +121,38 @@ staffRouter.get('/tickets', authenticate, passwordChangeGate, requireRole('IT_ST
     internalError(res);
   }
 });
+
+// GET /api/staff/assignable-users — api-spec.md §4.2. Added post-review (PR
+// #80): the queue's Owner filter (ui-spec.md §9) and Ticket Detail's Ticket
+// Owner select (ui-spec.md §10) both need to list active IT Staff and
+// Administrator users (BR-19: "an active IT Staff or Administrator user"),
+// but GET /api/users (§6.1) is Administrator-only and gives an IT Staff
+// caller 403. This route is the minimal, IT-Staff-callable alternative.
+//
+// Auth: "IT Staff only" per §4.2 — matching the same
+// requireRole('IT_STAFF')-alone convention as /tickets above, an
+// Administrator gets the same before-any-lookup 403 a Requester does (§4.2's
+// parenthetical explains why they don't need this route — they have
+// GET /api/users — not that they're specially admitted here).
+staffRouter.get(
+  '/assignable-users',
+  authenticate,
+  passwordChangeGate,
+  requireRole('IT_STAFF'),
+  async (_req: Request, res: Response) => {
+    try {
+      // Minimal shape by design (§4.2): no email, isActive or
+      // mustChangePassword — those belong to §6.1's Administrator-only view.
+      const users = await prisma.user.findMany({
+        where: { isActive: true, role: { in: ['IT_STAFF', 'ADMINISTRATOR'] } },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, role: true },
+      });
+
+      res.status(200).json(users);
+    } catch (error) {
+      console.error('Error listing assignable users:', error);
+      internalError(res);
+    }
+  }
+);
