@@ -1251,6 +1251,151 @@ ticketsRouter.patch(
 );
 
 // ---------------------------------------------------------------------------
+// GET /api/tickets/:id/notes (api-spec.md §5.4)
+// ---------------------------------------------------------------------------
+
+interface InternalNoteRow {
+  id: number;
+  body: string;
+  createdAt: Date;
+  author: { id: number; name: string; role: string };
+}
+
+/**
+ * Same entry shape as `commentToJson` above (id/body/createdAt/author) — a
+ * separate function rather than reusing `commentToJson` directly because the
+ * two are drawn from different Prisma models (`PublicComment` vs.
+ * `InternalNote`) with distinct row types; the codebase's existing pattern
+ * (see `COMMENT_AUTHOR_SELECT`, reused verbatim below) is a small parallel
+ * helper over renaming a two-call-site identifier.
+ */
+function noteToJson(note: InternalNoteRow) {
+  return {
+    id: note.id,
+    body: note.body,
+    createdAt: note.createdAt,
+    author: note.author,
+  };
+}
+
+ticketsRouter.get(
+  '/:id/notes',
+  authenticate,
+  passwordChangeGate,
+  // requireRole lets every role through (same "decide precisely inside the
+  // handler" pattern as PATCH /:id/owner, /:id/it-priority and /:id/status
+  // above) so a Requester and an unknown ticket id both fall through to the
+  // same resolveTicketAccess-driven 404 below, instead of requireRole
+  // intercepting the Requester case with a 403 first.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.4/BR-04: unlike GET /:id/comments (where the owning
+      // Requester's own 'owner' branch is a valid read path), Internal Notes
+      // have no Requester read path at all — the §1.4 case-2 rule applies
+      // even to the ticket's own Requester, so both the 'not-found' and
+      // 'owner' classifications resolveTicketAccess can produce for a
+      // REQUESTER caller collapse to the same 404 here (AC-04): neither the
+      // notes nor the ticket's existence is confirmed to them.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: both IT Staff and Administrator may
+      // read (BR-04) — no further role check, unlike the POST route below.
+      const notes = await prisma.internalNote.findMany({
+        where: { ticketId },
+        orderBy: { createdAt: 'asc' },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(200).json(notes.map(noteToJson));
+    } catch (error) {
+      console.error('Error listing internal notes:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/tickets/:id/notes (api-spec.md §5.5)
+// ---------------------------------------------------------------------------
+
+ticketsRouter.post(
+  '/:id/notes',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // Same "decide precisely inside the handler" pattern as the routes above.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.5: same collapse as GET /:id/notes above — a
+      // Requester has no path to notes at all, owning the ticket or not.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: Administrator already has a read path
+      // (GET /:id/notes above) but api-spec.md §5.5 reserves the write for
+      // IT Staff only — same divergence, and same reasoning (a safe 403,
+      // never a 404, since the read path already exists) as POST
+      // /:id/comments' identical ADMINISTRATOR check above.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      const bodyResult = validateCommentBody(req.body.body);
+      if (!bodyResult.ok) {
+        validationFailed(res, [bodyResult.error]);
+        return;
+      }
+
+      // BR-16: author and createdAt are always server-set — any
+      // client-supplied `author`/`createdAt` in the body is read nowhere
+      // above and is therefore silently ignored.
+      const note = await prisma.internalNote.create({
+        data: {
+          ticketId,
+          authorId: req.authUser!.id,
+          body: bodyResult.value,
+        },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(201).json(noteToJson(note));
+    } catch (error) {
+      console.error('Error creating internal note:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/tickets/:id/requester-resolved (api-spec.md §3.3)
 // ---------------------------------------------------------------------------
 
