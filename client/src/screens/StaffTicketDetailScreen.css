@@ -50,7 +50,8 @@
   background: var(--zen-pale);
 }
 
-.zen-staff-detail__owner-control {
+.zen-staff-detail__owner-control,
+.zen-staff-detail__it-priority-control {
   display: flex;
   flex-direction: column;
   gap: 4px;

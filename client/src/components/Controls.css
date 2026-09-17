@@ -59,3 +59,59 @@
 .zen-select[aria-invalid="true"] {
   border-color: var(--zen-error);
 }
+
+/* Segmented control (SegmentedControl.tsx): a row of mutually-exclusive
+   buttons, same control height/border language as .zen-select above so it
+   sits comfortably next to other fields in a form grid. */
+.zen-segmented {
+  display: inline-flex;
+  width: 100%;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.zen-segmented--invalid {
+  border-color: var(--zen-error);
+}
+
+.zen-segmented__option {
+  flex: 1 1 0;
+  box-sizing: border-box;
+  height: var(--zen-control-height);
+  padding: 0 12px;
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-body);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text);
+  background: var(--zen-surface);
+  border: none;
+  border-right: 1px solid var(--zen-border);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.zen-segmented__option:last-child {
+  border-right: none;
+}
+
+.zen-segmented__option:hover:not(:disabled):not(.zen-segmented__option--active) {
+  background: var(--zen-pale);
+}
+
+.zen-segmented__option--active {
+  background: var(--zen-primary);
+  color: var(--zen-surface);
+}
+
+.zen-segmented__option:disabled {
+  cursor: not-allowed;
+  color: var(--zen-text-muted);
+}
+
+.zen-segmented__option--active:disabled {
+  background: var(--zen-primary);
+  color: var(--zen-surface);
+  opacity: 0.7;
+}

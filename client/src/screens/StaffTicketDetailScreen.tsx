@@ -11,6 +11,10 @@ import { AttachmentList } from "../components/AttachmentList";
 import { ImagePreviewDialog } from "../components/ImagePreviewDialog";
 import { MessageThread } from "../components/MessageThread";
 import { SelectField, type SelectOption } from "../components/SelectField";
+import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "../components/SegmentedControl";
 import { useAuth } from "../auth/AuthContext";
 import { fetchAssignableUsers, type AssignableUser } from "../staff/api";
 import {
@@ -19,9 +23,11 @@ import {
   fetchComments,
   fetchTicketDetail,
   InvalidOwnerError,
+  patchTicketItPriority,
   patchTicketOwner,
   postComment,
   TicketNotFoundError,
+  type RequestedPriority,
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
@@ -38,6 +44,18 @@ const UNASSIGNED_OWNER_VALUE = "unassigned";
 
 /** How long the inline "Saved" tick stays visible after a successful save (ui-spec.md §10: "a success tick on save"). */
 const SAVED_TICK_DURATION_MS = 2000;
+
+/**
+ * IT Priority segmented control's three options (ui-spec.md §10). Labels
+ * match `PriorityBadge`'s own LOW/MEDIUM/HIGH presentation table
+ * (`PriorityBadge.tsx`) so the segmented control's labels never drift from
+ * the badge shown elsewhere for the same values.
+ */
+const IT_PRIORITY_OPTIONS: SegmentedControlOption[] = [
+  { value: "LOW", label: "Low" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "HIGH", label: "High" },
+];
 
 /**
  * Active image MIME types (specification.md BR-21/BR-34): only these get an
@@ -125,14 +143,18 @@ type DetailState =
  * An earlier dispatch (Issue #72) built the read-only scaffold: the header
  * fields, Attachments (download/preview — no upload or removal), and the
  * Public Comments thread, plus the screen's loading/not-found/error states.
- * This dispatch adds the operational panel card (ui-spec.md §10's editable
- * table) between the ticket information card and Attachments, and
- * implements its Ticket Owner control — a `SelectField` of active IT Staff
- * and Administrators plus "Unassigned" (`fetchAssignableUsers`,
+ * A later dispatch added the operational panel card (ui-spec.md §10's
+ * editable table) between the ticket information card and Attachments, and
+ * its Ticket Owner control — a `SelectField` of active IT Staff and
+ * Administrators plus "Unassigned" (`fetchAssignableUsers`,
  * `client/src/staff/api.ts`), a Claim button shown only while unassigned,
- * and the save via `patchTicketOwner` (`client/src/tickets/api.ts`). IT
- * Priority and Status now live inside that same card too, but only as
- * relocated read-only badges — each still carries its own
+ * and the save via `patchTicketOwner` (`client/src/tickets/api.ts`). This
+ * dispatch adds IT Priority's control — a `SegmentedControl` of the three
+ * priority values, saving via `patchTicketItPriority`
+ * (`client/src/tickets/api.ts`); both IT_STAFF and ADMINISTRATOR may use
+ * it (api-spec.md §5.2), so unlike Ticket Owner/Status there's no
+ * role-based disabling here. Status still lives in this card as a
+ * relocated read-only badge, carrying its own
  * `TODO(#72): editable in a later dispatch` comment marking where its own
  * dispatch replaces it with its interactive control. Internal Notes
  * (ui-spec.md §8) is also a later dispatch and is not present here at all.
@@ -198,6 +220,21 @@ export function StaffTicketDetailScreen() {
   const [ownerSaved, setOwnerSaved] = useState(false);
   const ownerSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // IT Priority control's own inline save state (ui-spec.md §10) — same
+  // shape/convention as the Ticket Owner state above, just for
+  // `itPriority`. The segmented control's displayed value is always
+  // derived from `state.ticket.itPriority` (never a separate local
+  // "pending" value), so a failed save "restores the previous value" the
+  // same way: by never having applied the new one.
+  const [itPrioritySaving, setItPrioritySaving] = useState(false);
+  const [itPriorityError, setItPriorityError] = useState<string | undefined>(
+    undefined,
+  );
+  const [itPrioritySaved, setItPrioritySaved] = useState(false);
+  const itPrioritySavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   // Download/preview wiring for AttachmentList (copied from
   // AttachmentSection's own handleDownload/handlePreview — see this file's
   // doc comment above for why that component isn't reused directly).
@@ -244,12 +281,15 @@ export function StaffTicketDetailScreen() {
       .catch(() => {});
   }, []);
 
-  // Clears the pending "Saved" tick timeout on unmount, so it never fires
+  // Clears the pending "Saved" tick timeouts on unmount, so they never fire
   // setState after this screen is gone.
   useEffect(() => {
     return () => {
       if (ownerSavedTimerRef.current) {
         clearTimeout(ownerSavedTimerRef.current);
+      }
+      if (itPrioritySavedTimerRef.current) {
+        clearTimeout(itPrioritySavedTimerRef.current);
       }
     };
   }, []);
@@ -358,6 +398,59 @@ export function StaffTicketDetailScreen() {
   function handleClaim() {
     if (!user) return;
     saveOwner(user.id);
+  }
+
+  function showItPrioritySavedTick() {
+    setItPrioritySaved(true);
+    if (itPrioritySavedTimerRef.current) {
+      clearTimeout(itPrioritySavedTimerRef.current);
+    }
+    itPrioritySavedTimerRef.current = setTimeout(() => {
+      setItPrioritySaved(false);
+    }, SAVED_TICK_DURATION_MS);
+  }
+
+  /**
+   * IT Priority segmented control's save path (`PATCH
+   * /api/tickets/:id/it-priority`, api-spec.md §5.2) — same
+   * update-in-place-on-success/leave-untouched-on-failure convention as
+   * `saveOwner` above. Both IT Staff and Administrator can call this route
+   * (api-spec.md §5.2's one staff-write route Administrator isn't blocked
+   * from), so unlike `saveOwner`/Status there's no role check here and a
+   * failure is always the generic "something unexpected happened" message
+   * — `patchTicketItPriority` never raises a more specific error to show
+   * instead.
+   */
+  function saveItPriority(nextItPriority: RequestedPriority) {
+    if (state.phase !== "loaded") return;
+    setItPrioritySaving(true);
+    setItPriorityError(undefined);
+
+    patchTicketItPriority(state.ticket.id, nextItPriority)
+      .then((updated) => {
+        setState((previous) => {
+          if (previous.phase !== "loaded") return previous;
+          return {
+            phase: "loaded",
+            ticket: { ...previous.ticket, itPriority: updated.itPriority },
+          };
+        });
+        showItPrioritySavedTick();
+      })
+      .catch(() => {
+        setItPriorityError(
+          "Could not update the IT priority. Please check your connection and try again.",
+        );
+      })
+      .finally(() => {
+        setItPrioritySaving(false);
+      });
+  }
+
+  function handleItPriorityChange(value: string) {
+    if (state.phase !== "loaded") return;
+    if (value === state.ticket.itPriority) return;
+    saveItPriority(value as RequestedPriority);
   }
 
   async function handleDownload(attachment: TicketAttachment) {
@@ -488,24 +581,35 @@ export function StaffTicketDetailScreen() {
               accent") — visually distinct from the read-only ticket
               information card above, same way that card's own fields use
               `--zen-readonly-bg` (ui-spec.md §10 intro: "Read-only and
-              editable regions are visually separated"). IT Priority and
-              Status were relocated here from that card as plain read-only
-              badges for now (see their own TODO comments below); only
-              Ticket Owner is interactive in this dispatch. */}
+              editable regions are visually separated"). Status was
+              relocated here from that card as a plain read-only badge for
+              now (see its own TODO comment below); Ticket Owner and IT
+              Priority are interactive. */}
           <section className="zen-staff-detail__card zen-staff-detail__card--operations">
             <h2>Ticket Operations</h2>
 
             <div className="zen-staff-detail__grid">
-              {/* TODO(#72): editable in a later dispatch — replace with the
-                  IT Priority segmented control (ui-spec.md §10's editable
-                  table: three values, saves on change). Now lives in the
-                  operational panel card, still read-only. */}
-              <StaticBadgeField label="IT Priority">
-                <PriorityBadge
+              {/* IT Priority (ui-spec.md §10's editable table): a
+                  segmented control of the three priority values, saving on
+                  change. Both IT Staff and Administrator may use it
+                  (api-spec.md §5.2) — no role-based disabling here, unlike
+                  Ticket Owner/Status. */}
+              <div className="zen-staff-detail__it-priority-control">
+                <SegmentedControl
+                  id="staff-it-priority"
+                  label="IT Priority"
                   value={state.ticket.itPriority ?? ""}
-                  variant="it"
+                  onChange={handleItPriorityChange}
+                  options={IT_PRIORITY_OPTIONS}
+                  disabled={itPrioritySaving}
+                  error={itPriorityError}
                 />
-              </StaticBadgeField>
+                {itPrioritySaved && (
+                  <span role="status" className="zen-staff-detail__save-tick">
+                    <span aria-hidden="true">✓</span> Saved
+                  </span>
+                )}
+              </div>
 
               {/* TODO(#72): editable in a later dispatch — replace with the
                   Status select limited to the transitions the current status
