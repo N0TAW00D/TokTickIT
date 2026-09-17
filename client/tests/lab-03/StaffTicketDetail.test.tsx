@@ -38,6 +38,9 @@ const TICKET_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}`;
 const ASSIGNABLE_URL = `${API_BASE_URL}/api/staff/assignable-users`;
 const COMMENTS_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}/comments`;
 const NOTES_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}/notes`;
+const OWNER_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}/owner`;
+const IT_PRIORITY_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}/it-priority`;
+const STATUS_URL = `${API_BASE_URL}/api/tickets/${TICKET_ID}/status`;
 
 function downloadUrl(id: number): string {
   return `${API_BASE_URL}/api/attachments/${id}/download`;
@@ -141,6 +144,14 @@ interface MockOptions {
   postComment?: (init?: RequestInit) => Promise<Response>;
   postNote?: (init?: RequestInit) => Promise<Response>;
   download?: (id: number) => Promise<Response>;
+  /** GET /api/staff/assignable-users response body (defaults to []: same as the pre-existing hardcoded stub every earlier test relied on). */
+  assignableUsers?: unknown[];
+  /** PATCH /api/tickets/:id/owner (ui-spec.md §10 Ticket Owner control). */
+  patchOwner?: (init?: RequestInit) => Promise<Response>;
+  /** PATCH /api/tickets/:id/it-priority (ui-spec.md §10 IT Priority control). */
+  patchItPriority?: (init?: RequestInit) => Promise<Response>;
+  /** PATCH /api/tickets/:id/status (ui-spec.md §10 Status control). */
+  patchStatus?: (init?: RequestInit) => Promise<Response>;
 }
 
 function mockFetch({
@@ -150,9 +161,22 @@ function mockFetch({
   postComment,
   postNote,
   download,
+  assignableUsers = [],
+  patchOwner,
+  patchItPriority,
+  patchStatus,
 }: MockOptions = {}) {
   const fetchMock = vi.fn((input: string, init?: RequestInit) => {
-    if (input === ASSIGNABLE_URL) return jsonResponse(200, []);
+    if (input === ASSIGNABLE_URL) return jsonResponse(200, assignableUsers);
+    if (input === OWNER_URL && init?.method === "PATCH") {
+      return (patchOwner ?? (() => jsonResponse(200, baseTicket())))(init);
+    }
+    if (input === IT_PRIORITY_URL && init?.method === "PATCH") {
+      return (patchItPriority ?? (() => jsonResponse(200, baseTicket())))(init);
+    }
+    if (input === STATUS_URL && init?.method === "PATCH") {
+      return (patchStatus ?? (() => jsonResponse(200, baseTicket())))(init);
+    }
     if (input === TICKET_URL && init?.method === undefined) {
       return (ticket ?? (() => jsonResponse(200, baseTicket())))();
     }
@@ -257,6 +281,29 @@ function infoCard(container: HTMLElement): HTMLElement {
   const card = container.querySelector(".zen-staff-detail__card");
   if (!card) throw new Error("ticket information card did not render");
   return card as HTMLElement;
+}
+
+/** Scopes queries to just the Ticket Owner control, so its own "Saved" tick/error is never confused with IT Priority's or Status's identical DOM shapes. */
+function ownerControl(container: HTMLElement): HTMLElement {
+  const control = container.querySelector(".zen-staff-detail__owner-control");
+  if (!control) throw new Error("owner control did not render");
+  return control as HTMLElement;
+}
+
+/** Scopes queries to just the IT Priority control (see `ownerControl` above). */
+function priorityControl(container: HTMLElement): HTMLElement {
+  const control = container.querySelector(
+    ".zen-staff-detail__it-priority-control",
+  );
+  if (!control) throw new Error("IT priority control did not render");
+  return control as HTMLElement;
+}
+
+/** Scopes queries to just the Status control (see `ownerControl` above). */
+function statusControl(container: HTMLElement): HTMLElement {
+  const control = container.querySelector(".zen-staff-detail__status-control");
+  if (!control) throw new Error("status control did not render");
+  return control as HTMLElement;
 }
 
 afterEach(() => {
@@ -665,5 +712,468 @@ describe("Administrator read access (ui-spec.md §10, api-spec.md §5)", () => {
       await screen.findByRole("heading", { name: "Internal notes" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Internal-only note.")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #72, operational panel dispatch: Ticket Owner, IT Priority and
+// Status — the three editable controls in "Ticket Operations"
+// (StaffTicketDetailScreen.tsx). Deferred-promise busy-state assertions
+// follow lab-02/CreateTicket.test.tsx's own `resolveCreate` convention
+// (construct the pending Promise<Response> up front, assert the busy DOM,
+// then resolve it and assert the settled DOM).
+// ---------------------------------------------------------------------------
+
+const ASSIGNABLE_USERS = [
+  { id: 9, name: "Jordan Lee", role: "IT_STAFF" },
+  { id: 20, name: "Sam Patel", role: "IT_STAFF" },
+  { id: 15, name: "Casey Morgan", role: "ADMINISTRATOR" },
+];
+
+describe("Ticket Owner control (ui-spec.md §10)", () => {
+  it("shows Unassigned plus each assignable user as select options", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ owner: null })),
+      assignableUsers: ASSIGNABLE_USERS,
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Ticket Owner") as HTMLSelectElement;
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+    expect(labels).toEqual(["Unassigned", "Jordan Lee", "Sam Patel", "Casey Morgan"]);
+  });
+
+  it("changing the select saves the new owner: busy during the call, updated owner + success tick on 200", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = mockFetch({
+      ticket: () =>
+        jsonResponse(200, baseTicket({ owner: { id: 9, name: "Jordan Lee" } })),
+      assignableUsers: ASSIGNABLE_USERS,
+      patchOwner: () => pending,
+    });
+    const { container } = renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Ticket Owner") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "20" } });
+
+    expect(select).toBeDisabled();
+
+    resolvePatch({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(baseTicket({ owner: { id: 20, name: "Sam Patel" } })),
+    } as Response);
+
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    expect(select.value).toBe("20");
+    expect(
+      within(ownerControl(container)).getByRole("status"),
+    ).toHaveTextContent("Saved");
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === OWNER_URL && init?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    const [, init] = patchCall as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ ownerId: 20 });
+  });
+
+  it("a 409 INVALID_OWNER restores the previous selection and shows a field-level error", async () => {
+    mockFetch({
+      ticket: () =>
+        jsonResponse(200, baseTicket({ owner: { id: 9, name: "Jordan Lee" } })),
+      assignableUsers: ASSIGNABLE_USERS,
+      patchOwner: () =>
+        jsonResponse(409, {
+          error: "INVALID_OWNER",
+          message: "That user can't be assigned to this ticket.",
+        }),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Ticket Owner") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "20" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That user can't be assigned to this ticket.",
+    );
+    expect(select.value).toBe("9");
+  });
+
+  it("shows a Claim button while unassigned; claiming PATCHes with the current user's own id; the button disappears once owned", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ owner: null })),
+      assignableUsers: ASSIGNABLE_USERS,
+      patchOwner: () => pending,
+    });
+    renderScreen({ user: IT_STAFF_USER });
+
+    await screen.findByText("TKT-2026-000021");
+    const claimButton = screen.getByRole("button", { name: "Claim" });
+    fireEvent.click(claimButton);
+
+    resolvePatch({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          baseTicket({
+            owner: { id: IT_STAFF_USER.id, name: IT_STAFF_USER.name },
+          }),
+        ),
+    } as Response);
+
+    await vi.waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Claim" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === OWNER_URL && init?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    const [, init] = patchCall as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ ownerId: IT_STAFF_USER.id });
+  });
+
+  // Regression check (fix commit on this branch): the owner select's
+  // `value` is always `state.ticket.owner`'s id, but `assignableUsers` may
+  // not contain that owner — e.g. an Administrator viewer, for whom
+  // `GET /api/staff/assignable-users` is IT-Staff-only server-side and
+  // always fails, leaving `assignableUsers` empty. A native <select> whose
+  // value matches no <option> silently falls back to displaying the first
+  // option ("Unassigned"), which would misrepresent an actually-assigned
+  // ticket. `ownerOptions` guards this by synthesizing the current owner's
+  // own option when it's missing from the fetched pool.
+  it("still displays the current owner's name as selected when they're absent from assignable-users (regression)", async () => {
+    mockFetch({
+      ticket: () =>
+        jsonResponse(200, baseTicket({ owner: { id: 42, name: "Alex Rivera" } })),
+      assignableUsers: [],
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Ticket Owner") as HTMLSelectElement;
+
+    expect(select.value).toBe("42");
+    expect(
+      within(select).getByRole("option", { name: "Alex Rivera" }),
+    ).toBeInTheDocument();
+    expect(select).not.toHaveDisplayValue("Unassigned");
+  });
+});
+
+describe("IT Priority control (ui-spec.md §10)", () => {
+  it("shows Low/Medium/High with the current value active via aria-checked", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ itPriority: "MEDIUM" })),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const group = screen.getByRole("radiogroup", { name: "IT Priority" });
+    const options = within(group).getAllByRole("radio");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Low",
+      "Medium",
+      "High",
+    ]);
+
+    expect(within(group).getByRole("radio", { name: "Low" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(
+      within(group).getByRole("radio", { name: "Medium" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(within(group).getByRole("radio", { name: "High" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  it("clicking a different value saves it: busy during the call, updated value + success tick on 200", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ itPriority: "MEDIUM" })),
+      patchItPriority: () => pending,
+    });
+    const { container } = renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const highOption = screen.getByRole("radio", { name: "High" });
+    fireEvent.click(highOption);
+
+    expect(highOption).toBeDisabled();
+
+    resolvePatch({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(baseTicket({ itPriority: "HIGH" })),
+    } as Response);
+
+    await vi.waitFor(() => expect(highOption).not.toBeDisabled());
+    expect(highOption).toHaveAttribute("aria-checked", "true");
+    expect(
+      within(priorityControl(container)).getByRole("status"),
+    ).toHaveTextContent("Saved");
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === IT_PRIORITY_URL && init?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    const [, init] = patchCall as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ itPriority: "HIGH" });
+  });
+
+  it("a failed save (500) restores the previous value and shows an error", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ itPriority: "MEDIUM" })),
+      patchItPriority: () => jsonResponse(500, { error: "INTERNAL" }),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const highOption = screen.getByRole("radio", { name: "High" });
+    fireEvent.click(highOption);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not update the IT priority. Please check your connection and try again.",
+    );
+    expect(highOption).toHaveAttribute("aria-checked", "false");
+    expect(
+      screen.getByRole("radio", { name: "Medium" }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+});
+
+describe("Status control — allowed transitions (specification.md §5.1)", () => {
+  it("from NEW offers OPEN/IN_PROGRESS/CANCELLED and not RESOLVED/CLOSED/REOPENED/WAITING_FOR_REQUESTER", async () => {
+    mockFetch({ ticket: () => jsonResponse(200, baseTicket({ status: "NEW" })) });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+    expect(labels).toEqual(["New", "Open", "In Progress", "Cancelled"]);
+    expect(labels).not.toContain("Resolved");
+    expect(labels).not.toContain("Closed");
+    expect(labels).not.toContain("Reopened");
+    expect(labels).not.toContain("Waiting for Requester");
+  });
+
+  it("from RESOLVED offers only CLOSED/REOPENED", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+    expect(labels).toEqual(["Resolved", "Closed", "Reopened"]);
+    expect(labels).not.toContain("Open");
+    expect(labels).not.toContain("In Progress");
+    expect(labels).not.toContain("New");
+    expect(labels).not.toContain("Cancelled");
+  });
+});
+
+describe("Status control — immediate save (non-confirm destinations)", () => {
+  it("selecting OPEN from NEW saves immediately with no confirm dialog", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "NEW" })),
+      patchStatus: () => pending,
+    });
+    const { container } = renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "OPEN" } });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(select).toBeDisabled();
+
+    resolvePatch({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(baseTicket({ status: "OPEN" })),
+    } as Response);
+
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    expect(select.value).toBe("OPEN");
+    expect(
+      within(statusControl(container)).getByRole("status"),
+    ).toHaveTextContent("Saved");
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === STATUS_URL && init?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    const [, init] = patchCall as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ status: "OPEN" });
+  });
+});
+
+describe("Status control — confirm-required destinations (Close/Reopen/Cancel)", () => {
+  it("selecting CLOSED opens a confirm dialog without saving; confirming then saves and closes it", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fetchMock = mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
+      patchStatus: () => pending,
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "CLOSED" } });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Close this ticket?");
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]: [string, RequestInit?]) =>
+          url === STATUS_URL && init?.method === "PATCH",
+      ),
+    ).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close ticket" }));
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]: [string, RequestInit?]) =>
+        url === STATUS_URL && init?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    const [, init] = patchCall as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ status: "CLOSED" });
+
+    resolvePatch({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(baseTicket({ status: "CLOSED" })),
+    } as Response);
+
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(select.value).toBe("CLOSED");
+  });
+
+  it("cancelling the dialog does not save and closes it", async () => {
+    const fetchMock = mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "CLOSED" } });
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]: [string, RequestInit?]) =>
+          url === STATUS_URL && init?.method === "PATCH",
+      ),
+    ).toBe(false);
+    expect(select.value).toBe("RESOLVED");
+  });
+});
+
+describe("Status control — 409 conflict banner (ui-spec.md §10)", () => {
+  it("a 409 INVALID_TRANSITION (via the confirm dialog) shows the frozen conflict banner and closes the dialog", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
+      patchStatus: () => jsonResponse(409, { error: "INVALID_TRANSITION" }),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "CLOSED" } });
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close ticket" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That status change is no longer possible — the ticket has moved on. Refresh to see its current state.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("a 409 OWNER_REQUIRED (direct, non-confirm destination) also shows the conflict banner", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "NEW" })),
+      patchStatus: () => jsonResponse(409, { error: "OWNER_REQUIRED" }),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "IN_PROGRESS" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That status change is no longer possible — the ticket has moved on. Refresh to see its current state.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Status control — terminal status (CANCELLED)", () => {
+  it("disables the select and offers no other destination when the ticket is CANCELLED", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "CANCELLED" })),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+
+    expect(select).toBeDisabled();
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(labels).toEqual(["Cancelled"]);
   });
 });
