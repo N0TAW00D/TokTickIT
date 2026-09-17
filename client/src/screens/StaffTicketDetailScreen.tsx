@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -10,11 +10,16 @@ import { StatusBadge } from "../components/StatusBadge";
 import { AttachmentList } from "../components/AttachmentList";
 import { ImagePreviewDialog } from "../components/ImagePreviewDialog";
 import { MessageThread } from "../components/MessageThread";
+import { SelectField, type SelectOption } from "../components/SelectField";
+import { useAuth } from "../auth/AuthContext";
+import { fetchAssignableUsers, type AssignableUser } from "../staff/api";
 import {
   AttachmentRemovedError,
   downloadAttachment,
   fetchComments,
   fetchTicketDetail,
+  InvalidOwnerError,
+  patchTicketOwner,
   postComment,
   TicketNotFoundError,
   type TicketAttachment,
@@ -23,6 +28,16 @@ import {
 import { saveBlob } from "../tickets/downloadFile";
 import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./StaffTicketDetailScreen.css";
+
+/**
+ * Sentinel value for the Ticket Owner select's "Unassigned" option
+ * (ui-spec.md §10). Never collides with a real owner option's value, which
+ * is always a stringified numeric user id.
+ */
+const UNASSIGNED_OWNER_VALUE = "unassigned";
+
+/** How long the inline "Saved" tick stays visible after a successful save (ui-spec.md §10: "a success tick on save"). */
+const SAVED_TICK_DURATION_MS = 2000;
 
 /**
  * Active image MIME types (specification.md BR-21/BR-34): only these get an
@@ -107,16 +122,20 @@ type DetailState =
 /**
  * IT Staff Ticket Detail screen (ui-spec.md §10, `/staff/tickets/:id`).
  *
- * This dispatch (Issue #72) builds the read-only scaffold only: the header
+ * An earlier dispatch (Issue #72) built the read-only scaffold: the header
  * fields, Attachments (download/preview — no upload or removal), and the
  * Public Comments thread, plus the screen's loading/not-found/error states.
- * The operational panel (editable Ticket Owner, IT Priority and Status —
- * ui-spec.md §10's editable table) is intentionally NOT built here; each of
- * those three controls is called out below with a
- * `TODO(#72): editable in a later dispatch` comment marking exactly where a
- * later dispatch replaces the read-only rendering with its interactive
- * control. Internal Notes (ui-spec.md §8) is also a later dispatch and is
- * not present here at all.
+ * This dispatch adds the operational panel card (ui-spec.md §10's editable
+ * table) between the ticket information card and Attachments, and
+ * implements its Ticket Owner control — a `SelectField` of active IT Staff
+ * and Administrators plus "Unassigned" (`fetchAssignableUsers`,
+ * `client/src/staff/api.ts`), a Claim button shown only while unassigned,
+ * and the save via `patchTicketOwner` (`client/src/tickets/api.ts`). IT
+ * Priority and Status now live inside that same card too, but only as
+ * relocated read-only badges — each still carries its own
+ * `TODO(#72): editable in a later dispatch` comment marking where its own
+ * dispatch replaces it with its interactive control. Internal Notes
+ * (ui-spec.md §8) is also a later dispatch and is not present here at all.
  *
  * Reachable by both IT_STAFF and ADMINISTRATOR (App.tsx wraps this route
  * with `RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}`, unlike
@@ -147,8 +166,37 @@ export function StaffTicketDetailScreen() {
   const parsedId = params.id !== undefined ? Number(params.id) : NaN;
   const validId = Number.isInteger(parsedId) && parsedId > 0;
 
+  const { user } = useAuth();
+
   const [state, setState] = useState<DetailState>({ phase: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
+
+  // Ticket Owner select's option pool (ui-spec.md §10: "active IT Staff and
+  // Administrators, plus Unassigned") — fetched once on mount, same
+  // fetch-and-swallow-failure pattern StaffTicketQueueScreen.tsx already
+  // uses for its own Owner filter. Unlike that filter (ui-spec.md §9,
+  // IT_STAFF only), this control keeps BOTH roles `fetchAssignableUsers`
+  // returns — ui-spec.md §10 asks for "active IT Staff and Administrators"
+  // here, no role filter. A failed fetch just leaves the dropdown at
+  // "Unassigned" only (e.g. an Administrator caller: this endpoint is
+  // IT-Staff-only server-side, so an Administrator viewing this screen sees
+  // an empty pool here — consistent with the several other write actions
+  // this screen already denies them) — it must never break the rest of the
+  // screen.
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+
+  // Ticket Owner control's own inline save state (ui-spec.md §10: "Each
+  // control shows its own inline busy state and a success tick on save; a
+  // failed save restores the previous value ..."). Shared by both the
+  // select and the Claim button since they're the same control with two
+  // triggers. The select's displayed value is always derived from
+  // `state.ticket.owner` (never a separate local "pending" value), so a
+  // failed save "restores the previous value" simply by never having
+  // applied the new one — no extra revert logic needed.
+  const [ownerSaving, setOwnerSaving] = useState(false);
+  const [ownerError, setOwnerError] = useState<string | undefined>(undefined);
+  const [ownerSaved, setOwnerSaved] = useState(false);
+  const ownerSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Download/preview wiring for AttachmentList (copied from
   // AttachmentSection's own handleDownload/handlePreview — see this file's
@@ -190,12 +238,106 @@ export function StaffTicketDetailScreen() {
     };
   }, [parsedId, validId, reloadToken]);
 
+  useEffect(() => {
+    fetchAssignableUsers()
+      .then(setAssignableUsers)
+      .catch(() => {});
+  }, []);
+
+  // Clears the pending "Saved" tick timeout on unmount, so it never fires
+  // setState after this screen is gone.
+  useEffect(() => {
+    return () => {
+      if (ownerSavedTimerRef.current) {
+        clearTimeout(ownerSavedTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * "Unassigned" plus one option per active IT Staff/Administrator user
+   * (ui-spec.md §10) — value is the sentinel or the user's id, stringified,
+   * so it round-trips through `handleOwnerSelectChange` below exactly like
+   * the queue's own Owner filter does for "unassigned"/"me"/an id
+   * (StaffTicketQueueScreen.tsx).
+   */
+  const ownerOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: UNASSIGNED_OWNER_VALUE, label: "Unassigned" },
+      ...assignableUsers.map((assignable) => ({
+        value: String(assignable.id),
+        label: assignable.name,
+      })),
+    ],
+    [assignableUsers],
+  );
+
   function handleRetry() {
     setReloadToken((token) => token + 1);
   }
 
   function handleBack() {
     navigate("/staff/tickets");
+  }
+
+  function showOwnerSavedTick() {
+    setOwnerSaved(true);
+    if (ownerSavedTimerRef.current) clearTimeout(ownerSavedTimerRef.current);
+    ownerSavedTimerRef.current = setTimeout(() => {
+      setOwnerSaved(false);
+    }, SAVED_TICK_DURATION_MS);
+  }
+
+  /**
+   * Shared save path for both the select's onChange and the Claim button
+   * (`PATCH /api/tickets/:id/owner`, api-spec.md §5.1). Updates
+   * `state.ticket.owner` in place from the server's response on success —
+   * same "no full re-fetch" convention as `TicketDetailScreen.tsx`'s
+   * `handleAttachmentRemoved`/`handleAttachmentAdded` — and on failure
+   * leaves `state.ticket.owner` untouched (which is also what the select is
+   * bound to, so it "reverts" for free) while surfacing a field-level
+   * error.
+   */
+  function saveOwner(nextOwnerId: number | null) {
+    if (state.phase !== "loaded") return;
+    setOwnerSaving(true);
+    setOwnerError(undefined);
+
+    patchTicketOwner(state.ticket.id, nextOwnerId)
+      .then((updated) => {
+        setState((previous) => {
+          if (previous.phase !== "loaded") return previous;
+          return {
+            phase: "loaded",
+            ticket: { ...previous.ticket, owner: updated.owner },
+          };
+        });
+        showOwnerSavedTick();
+      })
+      .catch((error: unknown) => {
+        setOwnerError(
+          error instanceof InvalidOwnerError
+            ? error.message
+            : "Could not update the ticket owner. Please check your connection and try again.",
+        );
+      })
+      .finally(() => {
+        setOwnerSaving(false);
+      });
+  }
+
+  function handleOwnerSelectChange(value: string) {
+    if (state.phase !== "loaded") return;
+    const currentValue = state.ticket.owner
+      ? String(state.ticket.owner.id)
+      : UNASSIGNED_OWNER_VALUE;
+    if (value === currentValue) return;
+    saveOwner(value === UNASSIGNED_OWNER_VALUE ? null : Number(value));
+  }
+
+  function handleClaim() {
+    if (!user) return;
+    saveOwner(user.id);
   }
 
   async function handleDownload(attachment: TicketAttachment) {
@@ -295,33 +437,9 @@ export function StaffTicketDetailScreen() {
               <StaticBadgeField label="Requested Priority">
                 <PriorityBadge value={state.ticket.requestedPriority} />
               </StaticBadgeField>
-              {/* TODO(#72): editable in a later dispatch — replace with the
-                  IT Priority segmented control (ui-spec.md §10's editable
-                  table: three values, saves on change). Read-only for now. */}
-              <StaticBadgeField label="IT Priority">
-                <PriorityBadge
-                  value={state.ticket.itPriority ?? ""}
-                  variant="it"
-                />
-              </StaticBadgeField>
-              {/* TODO(#72): editable in a later dispatch — replace with the
-                  Status select limited to the transitions the current status
-                  permits (ui-spec.md §10's editable table; server transition
-                  matrix at api-spec.md §5.3). Read-only for now. */}
-              <StaticBadgeField label="Current Status">
-                <StatusBadge value={state.ticket.status} />
-              </StaticBadgeField>
               <StaticField
                 label="Related System"
                 value={state.ticket.relatedSystem.name}
-              />
-              {/* TODO(#72): editable in a later dispatch — replace with the
-                  Ticket Owner select (active IT Staff + Administrators, plus
-                  "Unassigned") and its Claim button (ui-spec.md §10's
-                  editable table). Read-only for now. */}
-              <StaticField
-                label="Ticket Owner"
-                value={state.ticket.owner?.name ?? "Unassigned"}
               />
             </div>
 
@@ -346,17 +464,75 @@ export function StaffTicketDetailScreen() {
             )}
           </section>
 
-          {/*
-           * TODO(#72): editable in a later dispatch — the operational panel
-           * (ui-spec.md §10: one card, `--zen-pale` accent) belongs here,
-           * between the ticket information card above and the Attachments
-           * card below. It replaces the three read-only fields marked above
-           * (IT Priority, Current Status, Ticket Owner) with their
-           * interactive controls; it is intentionally omitted entirely in
-           * this dispatch rather than stubbed, since ui-spec.md §10 draws it
-           * as its own visually-distinct card, not a fragment slotted into
-           * the read-only one.
-           */}
+          {/* Operational panel (ui-spec.md §10: "one card, `--zen-pale`
+              accent") — visually distinct from the read-only ticket
+              information card above, same way that card's own fields use
+              `--zen-readonly-bg` (ui-spec.md §10 intro: "Read-only and
+              editable regions are visually separated"). IT Priority and
+              Status were relocated here from that card as plain read-only
+              badges for now (see their own TODO comments below); only
+              Ticket Owner is interactive in this dispatch. */}
+          <section className="zen-staff-detail__card zen-staff-detail__card--operations">
+            <h2>Ticket Operations</h2>
+
+            <div className="zen-staff-detail__grid">
+              {/* TODO(#72): editable in a later dispatch — replace with the
+                  IT Priority segmented control (ui-spec.md §10's editable
+                  table: three values, saves on change). Now lives in the
+                  operational panel card, still read-only. */}
+              <StaticBadgeField label="IT Priority">
+                <PriorityBadge
+                  value={state.ticket.itPriority ?? ""}
+                  variant="it"
+                />
+              </StaticBadgeField>
+
+              {/* TODO(#72): editable in a later dispatch — replace with the
+                  Status select limited to the transitions the current status
+                  permits (ui-spec.md §10's editable table; server transition
+                  matrix at api-spec.md §5.3). Now lives in the operational
+                  panel card, still read-only. */}
+              <StaticBadgeField label="Current Status">
+                <StatusBadge value={state.ticket.status} />
+              </StaticBadgeField>
+
+              {/* Ticket Owner (ui-spec.md §10's editable table): a select of
+                  active IT Staff and Administrators plus "Unassigned"
+                  (fetchAssignableUsers), with a Claim button shown only
+                  while unassigned. */}
+              <div className="zen-staff-detail__owner-control">
+                <div className="zen-staff-detail__owner-row">
+                  <SelectField
+                    id="staff-ticket-owner"
+                    label="Ticket Owner"
+                    value={
+                      state.ticket.owner
+                        ? String(state.ticket.owner.id)
+                        : UNASSIGNED_OWNER_VALUE
+                    }
+                    onChange={handleOwnerSelectChange}
+                    options={ownerOptions}
+                    disabled={ownerSaving}
+                    error={ownerError}
+                  />
+                  {state.ticket.owner === null && user && (
+                    <Button
+                      variant="secondary"
+                      busy={ownerSaving}
+                      onClick={handleClaim}
+                    >
+                      Claim
+                    </Button>
+                  )}
+                </div>
+                {ownerSaved && (
+                  <span role="status" className="zen-staff-detail__save-tick">
+                    <span aria-hidden="true">✓</span> Saved
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Clear separation from the ticket information card above
               (ui-spec.md §10, labsheet §8.5) — mirrors the Requester

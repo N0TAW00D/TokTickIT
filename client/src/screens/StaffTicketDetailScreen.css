@@ -41,6 +41,40 @@
   margin-top: var(--zen-space-section-gap);
 }
 
+/* Operational panel card (ui-spec.md §10: "one card, `--zen-pale`
+   accent") — the pale background is what visually separates the editable
+   region from the white `.zen-staff-detail__card` ticket-information card
+   above it, mirroring how that card's own fields lean on
+   `--zen-readonly-bg` for the same read-only/editable contrast. */
+.zen-staff-detail__card--operations {
+  background: var(--zen-pale);
+}
+
+.zen-staff-detail__owner-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.zen-staff-detail__owner-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--zen-space-unit);
+}
+
+.zen-staff-detail__owner-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Transient "Saved" tick (ui-spec.md §10: "a success tick on save"). */
+.zen-staff-detail__save-tick {
+  color: var(--zen-success);
+  font-size: var(--zen-font-size-helper);
+  font-weight: var(--zen-font-weight-label);
+}
+
 .zen-staff-detail__resolved-note {
   color: var(--zen-text-muted);
   font-size: var(--zen-font-size-helper);
