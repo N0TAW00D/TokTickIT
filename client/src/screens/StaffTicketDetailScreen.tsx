@@ -260,17 +260,37 @@ export function StaffTicketDetailScreen() {
    * so it round-trips through `handleOwnerSelectChange` below exactly like
    * the queue's own Owner filter does for "unassigned"/"me"/an id
    * (StaffTicketQueueScreen.tsx).
+   *
+   * The select's `value` is always `state.ticket.owner`'s id (or the
+   * "unassigned" sentinel), but `assignableUsers` may not contain that
+   * owner — either because `fetchAssignableUsers` hasn't resolved yet, or
+   * (for an Administrator viewer) because `GET /api/staff/assignable-users`
+   * is IT-Staff-only server-side and always fails for them. A native
+   * `<select>` whose `value` matches no `<option>` silently falls back to
+   * displaying the first option ("Unassigned"), which would misrepresent
+   * an actually-assigned ticket. So the current owner is always included,
+   * synthesized from `state.ticket.owner` if it isn't already present.
    */
-  const ownerOptions = useMemo<SelectOption[]>(
-    () => [
+  const currentOwner = state.phase === "loaded" ? state.ticket.owner : null;
+  const ownerOptions = useMemo<SelectOption[]>(() => {
+    const options = [
       { value: UNASSIGNED_OWNER_VALUE, label: "Unassigned" },
       ...assignableUsers.map((assignable) => ({
         value: String(assignable.id),
         label: assignable.name,
       })),
-    ],
-    [assignableUsers],
-  );
+    ];
+    if (
+      currentOwner &&
+      !assignableUsers.some((assignable) => assignable.id === currentOwner.id)
+    ) {
+      options.push({
+        value: String(currentOwner.id),
+        label: currentOwner.name,
+      });
+    }
+    return options;
+  }, [assignableUsers, currentOwner]);
 
   function handleRetry() {
     setReloadToken((token) => token + 1);
