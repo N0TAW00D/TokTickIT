@@ -1,7 +1,7 @@
 import multer, { MulterError } from 'multer';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { authenticate, passwordChangeGate, requireRole, type AuthenticatedUser } from '../middleware/authContext.ts';
-import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
+import { validateTicketFields, PRIORITIES, type FieldError, type Priority } from '../validation/ticketFields.ts';
 import { validateCommentBody } from '../validation/commentFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError, TICKET_INCLUDE } from '../services/createTicket.ts';
@@ -956,6 +956,105 @@ ticketsRouter.patch(
       });
     } catch (error) {
       console.error('Error updating ticket owner:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/tickets/:id/it-priority (api-spec.md §5.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape-validates the `itPriority` field for `PATCH /api/tickets/:id/it-priority`:
+ * unlike `validateOwnerIdShape` above, there is no meaningful "clear" value
+ * here — the field is required and must be exactly one of the three
+ * `Priority` enum strings (api-spec.md §5.2). This mirrors
+ * `validateRequestedPriority` in ticketFields.ts, but that helper is tied to
+ * the `requestedPriority` field name/message (ticket-creation, §4-fields) and
+ * this route touches a different field (`itPriority`) with its own message,
+ * so it isn't directly reusable — the `PRIORITIES` enum itself is reused
+ * instead of redeclaring it.
+ */
+function validateItPriorityShape(raw: unknown): FieldError | null {
+  if (typeof raw !== 'string' || !PRIORITIES.includes(raw as Priority)) {
+    return { field: 'itPriority', message: 'itPriority must be one of LOW, MEDIUM, HIGH.' };
+  }
+  return null;
+}
+
+ticketsRouter.patch(
+  '/:id/it-priority',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // Same "decide precisely inside the handler" pattern as PATCH
+  // /:id/owner above: requireRole lets every role through so a Requester
+  // and an unknown ticket id both fall through to the same
+  // resolveTicketAccess-driven 404 below, instead of requireRole
+  // intercepting the Requester case with a 403 first.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    const itPriorityError = validateItPriorityShape(req.body.itPriority);
+    if (itPriorityError) {
+      validationFailed(res, [itPriorityError]);
+      return;
+    }
+    // Shape check above guarantees this is one of the three Priority values.
+    const requestedItPriority = req.body.itPriority as Priority;
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.2: a Requester never gets a write path here,
+      // regardless of ownership — same collapse as PATCH /:id/owner — both
+      // the 'not-found' and 'owner' classifications resolveTicketAccess can
+      // produce for a REQUESTER caller become the identical 404 here.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: unlike PATCH /:id/owner (IT Staff
+      // only), api-spec.md §5.2/BR-22 lets BOTH IT Staff and Administrator
+      // perform this write — the one staff-write route where the two roles
+      // do not diverge — so there is no further role check.
+      const ticket = await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { itPriority: requestedItPriority },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        itPriority: ticket.itPriority,
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        owner: ticket.owner,
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error updating ticket IT priority:', error);
       internalError(res);
     }
   },
