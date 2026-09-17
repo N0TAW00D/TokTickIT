@@ -256,11 +256,13 @@ type DetailState =
  * unconditionally wires a Remove button, and ui-spec.md §10 gives IT Staff
  * "download only — no upload, no removal." Instead this screen uses the
  * lower-level, purely presentational `AttachmentList` directly, passing only
- * `onDownload`/`onPreview` (no `onRemove`, which naturally hides that
- * button — see `AttachmentList`'s own optional-prop handling), and
- * replicates just the download-fetch-and-save and preview-lightbox wiring
- * `AttachmentSection` owns internally (`handleDownload`/`handlePreview`
- * below mirror its logic exactly).
+ * `onDownload`/`onPreview` plus `showRemove={false}` (omitting `onRemove`
+ * alone would NOT hide the button — `AttachmentList`'s `ActiveRow` renders
+ * Remove unconditionally by default; `showRemove` is the actual mechanism,
+ * see `AttachmentList`'s own doc comment), and replicates just the
+ * download-fetch-and-save and preview-lightbox wiring `AttachmentSection`
+ * owns internally (`handleDownload`/`handlePreview` below mirror its logic
+ * exactly).
  */
 export function StaffTicketDetailScreen() {
   const params = useParams<{ id: string }>();
@@ -908,6 +910,7 @@ export function StaffTicketDetailScreen() {
               attachments={state.ticket.attachments}
               onDownload={handleDownload}
               onPreview={handlePreview}
+              showRemove={false}
             />
 
             {downloadError && (

@@ -426,25 +426,20 @@ describe("Attachments — read-only (no upload, no remove)", () => {
     ).toHaveLength(1);
   });
 
-  // KNOWN BUG, tracked via `it.fails` rather than papered over — a real
-  // regression this dispatch's job was to surface, not hide (test-only
-  // dispatch: fixing it is out of scope; see this file's own header
-  // comment). This screen's own doc comment claims that passing
-  // AttachmentList only `onDownload`/`onPreview` (omitting `onRemove`)
-  // "naturally hides that button". It does not: AttachmentList.tsx's
-  // ActiveRow renders the destructive Remove button unconditionally on
-  // every active row regardless of whether `onRemove` is wired — confirmed
-  // by AttachmentSection.test.tsx's own already-passing C-21 case, which
-  // renders `<AttachmentList>` with no `onRemove` prop at all and asserts
-  // the Remove button IS present. So IT Staff currently sees an inert but
-  // visible destructive "Remove" control on every active attachment row on
-  // this screen, contradicting ui-spec.md §10's "download only — no
-  // upload, no removal". `it.fails` keeps this assertion written to the
-  // correct, spec-mandated behavior (never adjusted to match the current
-  // buggy output) while keeping the suite green; the day a fix lands this
-  // wrapper will itself start failing (an "unexpectedly passed" error),
-  // which is the prompt to flip it back to a plain `it`.
-  it.fails("shows no Remove control anywhere in the attachment list (ui-spec.md §10)", async () => {
+  // Previously a KNOWN BUG tracked via `it.fails` rather than papered over.
+  // This screen's doc comment used to claim that passing AttachmentList
+  // only `onDownload`/`onPreview` (omitting `onRemove`) "naturally hides
+  // that button". It did not: AttachmentList.tsx's ActiveRow rendered the
+  // destructive Remove button unconditionally on every active row
+  // regardless of whether `onRemove` was wired — confirmed by
+  // AttachmentSection.test.tsx's own C-21 case, which renders
+  // `<AttachmentList>` with no `onRemove` prop and asserts Remove IS
+  // present (that default behavior is frozen and unchanged). The fix added
+  // an explicit `showRemove?: boolean` prop (default `true`, so every
+  // existing caller keeps the old behavior) and this screen now passes
+  // `showRemove={false}`, which actually omits the button. Flipped back to
+  // a plain `it` now that the underlying behavior is fixed for real.
+  it("shows no Remove control anywhere in the attachment list (ui-spec.md §10)", async () => {
     mockFetch();
     renderScreen();
 
