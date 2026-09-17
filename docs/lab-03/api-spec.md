@@ -296,6 +296,36 @@ first (D-10). `itPriority` sorts by severity (`HIGH` > `MEDIUM` > `LOW`), not al
 - **401**, **403**, **500**.
 - **Traceability:** FR-19; BR-35; AC-26…AC-31, AC-33.
 
+### 4.2 `GET /api/staff/assignable-users`
+
+Added post-review (PR #80): the queue's Owner filter (`ui-spec.md` §9) and Ticket Detail's Ticket
+Owner select (`ui-spec.md` §10) both need to offer real users as options, but the only existing
+user-listing route (`GET /api/users`, §6.1) is Administrator-only — an IT Staff caller gets `403`
+there. This route is the minimal, IT-Staff-callable alternative, scoped to exactly what a Ticket
+Owner may legally be (BR-19: "an active IT Staff or Administrator user").
+
+- **Auth:** IT Staff only. Requester → `403`. (Administrator does not need this route — they have
+  `GET /api/users`.)
+- **200:** array of active IT Staff and Administrator users, ordered by name ascending, minimal
+  shape — no email, no `isActive`/`mustChangePassword` (those belong to §6.1's Administrator-only
+  view; this route exposes only what an assignment picker needs):
+
+```json
+[
+  { "id": 7, "name": "Suda Chaiyaporn", "role": "IT_STAFF" },
+  { "id": 12, "name": "Kanya Boonmee", "role": "ADMINISTRATOR" }
+]
+```
+
+- Inactive users and Requesters are never included — filtering happens server-side, not left to
+  the client.
+- The queue's Owner filter (`ui-spec.md` §9: "plus each active IT Staff") renders only the
+  `IT_STAFF` entries from this list; Ticket Detail's Ticket Owner select (§10: "active IT Staff and
+  Administrators") renders both roles, matching BR-19 exactly.
+- **401**, **403**, **500**.
+- **Traceability:** supports FR-19 (queue Owner filter) and BR-19/AC-35 (valid reassignment
+  targets); no new FR/AC minted — this route is infrastructure for requirements already specified.
+
 ---
 
 ## 5. IT Staff ticket operations
@@ -466,6 +496,7 @@ role history, multi-role assignment, and any email-sending endpoint.
 | `POST /api/tickets/:id/comments` | 16, 24 | 04, 15, 16, 17, 18 | 21, 22, 23, 65 |
 | `POST /api/tickets/:id/requester-resolved` | 17, 18 | 05, 26 | 24, 25 |
 | `GET /api/staff/tickets` | 19 | 35 | 26–31, 33 |
+| `GET /api/staff/assignable-users` | 19 | 19 | 31, 35 |
 | `GET /api/tickets/:id` (staff view) | 20 | 13 | 43, 44, 67 |
 | `PATCH /api/tickets/:id/owner` | 21 | 19, 20 | 34, 35, 36 |
 | `PATCH /api/tickets/:id/it-priority` | 22 | 21, 22 | 37, 68 |
