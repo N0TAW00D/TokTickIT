@@ -23,11 +23,13 @@ import {
   downloadAttachment,
   fetchComments,
   fetchTicketDetail,
+  fetchTicketNotes,
   InvalidOwnerError,
   patchTicketItPriority,
   patchTicketOwner,
   patchTicketStatus,
   postComment,
+  postTicketNote,
   StatusTransitionConflictError,
   TicketNotFoundError,
   type RequestedPriority,
@@ -226,8 +228,17 @@ type DetailState =
  * closes that dialog if open and renders a page-level conflict banner
  * (`statusConflictMessage`) instead of a field-level error — same "the
  * record moved on, refresh" pattern as `TicketDetailScreen.tsx`'s own
- * `conflictMessage`. Internal Notes (ui-spec.md §8) is a later dispatch and
- * is not present here at all.
+ * `conflictMessage`. This dispatch adds the last piece, the Internal Notes
+ * thread (ui-spec.md §8/§10) — a second `MessageThread`, `variant="internal"`,
+ * rendered directly after the Public Comments one, wired to
+ * `fetchTicketNotes`/`postTicketNote` (`client/src/tickets/api.ts`) exactly
+ * as Public Comments is wired to `fetchComments`/`postComment`. Both
+ * IT_STAFF and ADMINISTRATOR can read notes (`GET
+ * /api/tickets/:id/notes` allows both), but only IT_STAFF can post them —
+ * `MessageThread` needs no role-awareness for this: an Administrator's
+ * composer submit simply fails via `postEntry`'s existing generic failure
+ * path (403), the same way an Administrator posting a Public Comment
+ * already fails without any special-case UI.
  *
  * Reachable by both IT_STAFF and ADMINISTRATOR (App.tsx wraps this route
  * with `RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}`, unlike
@@ -906,13 +917,18 @@ export function StaffTicketDetailScreen() {
             )}
           </section>
 
-          {/* ui-spec.md §8/§10: Public Comments thread. Internal Notes
-              (ui-spec.md §8) is a later dispatch and is deliberately not
-              present here. */}
+          {/* ui-spec.md §8/§10: Public Comments card, then Internal Notes
+              card, in that order — "the internal card second." */}
           <MessageThread
             variant="public"
             fetchEntries={() => fetchComments(state.ticket.id)}
             postEntry={(body) => postComment(state.ticket.id, body)}
+          />
+
+          <MessageThread
+            variant="internal"
+            fetchEntries={() => fetchTicketNotes(state.ticket.id)}
+            postEntry={(body) => postTicketNote(state.ticket.id, body)}
           />
         </>
       )}
