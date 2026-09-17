@@ -16,7 +16,9 @@ import { formatDateTime } from "../tickets/formatDateTime";
 import { useAuth } from "../auth/AuthContext";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
+  fetchAssignableUsers,
   fetchStaffTickets,
+  type AssignableUser,
   type ItPriority,
   type OwnerFilterValue,
   type StaffQueueStatus,
@@ -92,11 +94,13 @@ const IT_PRIORITY_OPTIONS: SelectOption[] = [
 ];
 
 /**
- * "Each active IT Staff" (ui-spec.md §9's third Owner option group) is not
- * included here — no endpoint exists yet to list IT Staff users (see this
- * dispatch's report). Anyone/Unassigned/Me is the full set until one does.
+ * The two Owner options that never depend on the network (ui-spec.md §9's
+ * first two option groups). "Anyone" isn't a real option here — it's the
+ * SelectField's placeholder for `owner === ""`. "Each active IT Staff" (the
+ * third group) is appended at render time from `GET /api/staff/assignable-
+ * users` — see `ownerOptions` below.
  */
-const OWNER_OPTIONS: SelectOption[] = [
+const OWNER_BASE_OPTIONS: SelectOption[] = [
   { value: "unassigned", label: "Unassigned" },
   { value: "me", label: "Me" },
 ];
@@ -472,6 +476,7 @@ export function StaffTicketQueueScreen() {
   const [state, setState] = useState<ListState>({ phase: "loading" });
 
   const [categories, setCategories] = useState<ReferenceOption[]>([]);
+  const [assignableStaff, setAssignableStaff] = useState<AssignableUser[]>([]);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -508,6 +513,16 @@ export function StaffTicketQueueScreen() {
   useEffect(() => {
     fetchCategories()
       .then(setCategories)
+      .catch(() => {});
+  }, []);
+
+  // Reference data for the Owner filter's "each active IT Staff" group
+  // (ui-spec.md §9) — loaded once, same as Category above. A failure here
+  // simply leaves the Owner filter at Anyone/Unassigned/Me only; it must
+  // never break the rest of the screen.
+  useEffect(() => {
+    fetchAssignableUsers()
+      .then(setAssignableStaff)
       .catch(() => {});
   }, []);
 
@@ -636,6 +651,27 @@ export function StaffTicketQueueScreen() {
     [categories],
   );
 
+  /**
+   * Anyone (placeholder) / Unassigned / Me / then each active IT Staff
+   * member by name, value being their id so it round-trips through
+   * `resolveOwnerParam` to `fetchStaffTickets`'s `owner=<id>` param exactly
+   * like "unassigned"/"me" already do. ui-spec.md §9 says "plus each active
+   * IT Staff" — the `ADMINISTRATOR` entries `fetchAssignableUsers` also
+   * returns (for a later Ticket Owner select, §10) are filtered out here.
+   */
+  const ownerOptions = useMemo<SelectOption[]>(
+    () => [
+      ...OWNER_BASE_OPTIONS,
+      ...assignableStaff
+        .filter((staffMember) => staffMember.role === "IT_STAFF")
+        .map((staffMember) => ({
+          value: String(staffMember.id),
+          label: staffMember.name,
+        })),
+    ],
+    [assignableStaff],
+  );
+
   const variant: QueueVariant =
     state.phase === "loaded"
       ? classifyQueue(state.items, state.totalItems, hasActiveQuery)
@@ -715,7 +751,7 @@ export function StaffTicketQueueScreen() {
               onChange={handleOwnerChange}
               placeholder="Anyone"
               disabled={isLoading}
-              options={OWNER_OPTIONS}
+              options={ownerOptions}
             />
             <SelectField
               id="staff-queue-sort"
