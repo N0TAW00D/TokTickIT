@@ -70,9 +70,9 @@ describe("StatusBadge", () => {
   });
 
   it("falls back to a humanized label and the default style for an unknown value, without crashing", () => {
-    render(<StatusBadge value="IN_PROGRESS" />);
+    render(<StatusBadge value="PENDING_REVIEW" />);
 
-    const badge = screen.getByText("In Progress").closest(".zen-badge");
+    const badge = screen.getByText("Pending Review").closest(".zen-badge");
     expect(badge).not.toBeNull();
     expect(badge).toHaveClass("zen-badge--unknown");
   });
