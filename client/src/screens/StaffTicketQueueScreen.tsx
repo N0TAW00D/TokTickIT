@@ -14,6 +14,7 @@ import { OwnerCell } from "../components/OwnerCell";
 import { fetchCategories, type ReferenceOption } from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
 import { useAuth } from "../auth/AuthContext";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   fetchStaffTickets,
   type ItPriority,
@@ -24,6 +25,14 @@ import {
   type StaffTicketQueueItem,
 } from "../staff/api";
 import "./StaffTicketQueueScreen.css";
+
+/** Table (`≥ 768px`) / card (`< 768px`) breakpoint — same query and JS-driven
+ *  split as My Tickets (ui-spec.md §9, §12; MyTicketsScreen.tsx's own
+ *  `DESKTOP_QUERY`): exactly one of the two markups is ever in the DOM,
+ *  never both with one hidden by CSS, so assistive tech never sees a row
+ *  twice and jsdom (no CSS engine) can still be driven to either layout by
+ *  stubbing `window.matchMedia`. */
+const DESKTOP_QUERY = "(min-width: 768px)";
 
 /** Search → `search` param debounce delay, matching My Tickets (ui-spec.md §9). */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -235,6 +244,17 @@ interface QueueTableProps {
  * a hidden "Actions" header plus an explicit "View" link give the same
  * affordance to assistive tech and keyboard users without a second visible
  * column.
+ *
+ * Category's `<th>`/`<td>` carry `zen-staff-queue__category-col`, which
+ * StaffTicketQueueScreen.css hides below 992px — this table only ever
+ * mounts at `≥ 768px` (below that, StaffTicketQueueScreen renders
+ * `QueueCards` instead), so in practice that CSS rule is what turns the
+ * seven-column desktop table into the tablet's six-column one (ui-spec.md
+ * §12: "Tablet 768–991px: Queue stays a table but drops Category"). A CSS
+ * rule rather than a second JS-branched markup because this is a single
+ * column disappearing from one table, not a second layout — no row is
+ * duplicated in the DOM for assistive tech either way, which is what
+ * `useMediaQuery`'s table-vs-cards split above exists to avoid.
  */
 function QueueTable({ items, sort, direction, onToggleSort, disabled }: QueueTableProps) {
   return (
@@ -250,7 +270,9 @@ function QueueTable({ items, sort, direction, onToggleSort, disabled }: QueueTab
               disabled={disabled}
             />
             <th scope="col">Summary</th>
-            <th scope="col">Category</th>
+            <th scope="col" className="zen-staff-queue__category-col">
+              Category
+            </th>
             <SortableHeader
               field="itPriority"
               sort={sort}
@@ -289,7 +311,7 @@ function QueueTable({ items, sort, direction, onToggleSort, disabled }: QueueTab
               >
                 {ticket.summary}
               </td>
-              <td>{ticket.category.name}</td>
+              <td className="zen-staff-queue__category-col">{ticket.category.name}</td>
               <td>
                 <PriorityBadge value={ticket.itPriority} variant="it" />
               </td>
@@ -325,6 +347,15 @@ function QueueTable({ items, sort, direction, onToggleSort, disabled }: QueueTab
  * blocks instead of real cells. The table itself is `aria-hidden` (it
  * carries no real information); the visually-hidden text is what actually
  * gets announced.
+ *
+ * Rendered at every viewport `≥ 768px` (mobile shows `QueueCards` instead
+ * once loaded, but there's no card-shaped skeleton — a brief loading table
+ * at card widths would be an unnecessary third shape for a state that's on
+ * screen only momentarily). The Category column carries the same
+ * `zen-staff-queue__category-col` class as the real table so the skeleton
+ * narrows to six columns at tablet width exactly like the loaded state
+ * will, rather than flashing a seven-column skeleton that then loses a
+ * column once real data arrives.
  */
 function QueueLoadingSkeleton({ rows = 6 }: { rows?: number }) {
   return (
@@ -338,7 +369,11 @@ function QueueLoadingSkeleton({ rows = 6 }: { rows?: number }) {
         <thead>
           <tr>
             {COLUMN_HEADERS.map((label) => (
-              <th scope="col" key={label}>
+              <th
+                scope="col"
+                key={label}
+                className={label === "Category" ? "zen-staff-queue__category-col" : undefined}
+              >
                 {label}
               </th>
             ))}
@@ -348,7 +383,10 @@ function QueueLoadingSkeleton({ rows = 6 }: { rows?: number }) {
           {Array.from({ length: rows }).map((_, rowIndex) => (
             <tr key={rowIndex}>
               {COLUMN_HEADERS.map((label) => (
-                <td key={label}>
+                <td
+                  key={label}
+                  className={label === "Category" ? "zen-staff-queue__category-col" : undefined}
+                >
                   <span className="zen-staff-queue__skeleton-block" />
                 </td>
               ))}
@@ -361,15 +399,76 @@ function QueueLoadingSkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 /**
- * IT Staff Ticket Queue screen (ui-spec.md §9, `/staff/tickets`) —
- * desktop-width list mode only (the `< 768px` card layout is a separate
- * slice). Data fetch, controls (search/filter/sort/clear), pagination and
- * the loading/empty/no-results/failure states. The forbidden state
+ * Mobile cards (ui-spec.md §9): "Ticket Number + Status on the first line,
+ * Summary on the second, then IT Priority, Owner and Last Updated as a
+ * wrapped meta row." Category and the Requested-Priority column are both
+ * absent here too — the spec's card field list names exactly those five
+ * fields, dropping Category on top of what the tablet table already drops.
+ *
+ * The whole card is the link (ui-spec.md §9), via the same stretched-link
+ * pattern as the desktop table: `zen-staff-queue__row-link` and
+ * `zen-staff-queue__view-link` are reused as-is (StaffTicketQueueScreen.css
+ * defines both generically, not scoped to `<table>`), so the card only
+ * needs its own `position: relative` for the stretched `::after` to cover.
+ */
+function QueueCards({ items }: { items: StaffTicketQueueItem[] }) {
+  return (
+    <ul className="zen-staff-queue__cards">
+      {items.map((ticket) => (
+        <li key={ticket.id} className="zen-staff-queue__card">
+          <div className="zen-staff-queue__card-header">
+            <Link
+              to={`/staff/tickets/${ticket.id}`}
+              className="zen-staff-queue__card-number zen-staff-queue__row-link"
+            >
+              {ticket.ticketNumber}
+            </Link>
+            <StatusBadge value={ticket.status} />
+          </div>
+
+          <p
+            className="zen-staff-queue__card-summary zen-staff-queue__truncate"
+            title={ticket.summary}
+          >
+            {ticket.summary}
+          </p>
+
+          <div className="zen-staff-queue__card-meta">
+            <PriorityBadge value={ticket.itPriority} variant="it" />
+            <OwnerCell owner={ticket.owner} />
+            <span className="zen-staff-queue__card-timestamp">
+              {formatDateTime(ticket.updatedAt)}
+            </span>
+          </div>
+
+          <Link
+            to={`/staff/tickets/${ticket.id}`}
+            className="zen-staff-queue__card-view zen-staff-queue__view-link"
+          >
+            {"View "}
+            <span className="zen-visually-hidden">
+              ticket {ticket.ticketNumber}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * IT Staff Ticket Queue screen (ui-spec.md §9, `/staff/tickets`) — list
+ * mode across all three breakpoints (ui-spec.md §12): the seven-column
+ * table at `≥ 992px`, the same table minus Category at `768–991px` (CSS,
+ * see QueueTable's doc comment), and `QueueCards` below `768px`. Data
+ * fetch, controls (search/filter/sort/clear), pagination and the
+ * loading/empty/no-results/failure states. The forbidden state
  * (ui-spec.md §4.3) is handled entirely by the `RequireRole` wrapper this
  * screen is mounted under, not here.
  */
 export function StaffTicketQueueScreen() {
   const { user } = useAuth();
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [state, setState] = useState<ListState>({ phase: "loading" });
 
   const [categories, setCategories] = useState<ReferenceOption[]>([]);
@@ -636,13 +735,17 @@ export function StaffTicketQueueScreen() {
 
       {state.phase === "loaded" && variant === "rows" && (
         <>
-          <QueueTable
-            items={state.items}
-            sort={sort}
-            direction={direction}
-            onToggleSort={handleToggleSort}
-            disabled={isLoading}
-          />
+          {isDesktop ? (
+            <QueueTable
+              items={state.items}
+              sort={sort}
+              direction={direction}
+              onToggleSort={handleToggleSort}
+              disabled={isLoading}
+            />
+          ) : (
+            <QueueCards items={state.items} />
+          )}
           <Pagination
             page={state.page}
             pageSize={state.pageSize as PageSizeValue}
