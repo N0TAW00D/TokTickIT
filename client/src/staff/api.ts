@@ -1,4 +1,5 @@
 import type { RequestedPriority } from "../tickets/api";
+import type { Role } from "../auth/api";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
@@ -76,6 +77,18 @@ export interface FetchStaffTicketsParams {
   direction?: StaffSortDirection;
   page?: number;
   pageSize?: number;
+}
+
+/**
+ * One row of `GET /api/staff/assignable-users` (server/src/routes/staff.ts,
+ * api-spec.md §4.2): the active IT Staff and Administrator users BR-19
+ * allows as a Ticket Owner. `role` reuses `Role` (auth/api.ts) narrowed to
+ * the two values this endpoint ever returns — a Requester is never included.
+ */
+export interface AssignableUser {
+  id: number;
+  name: string;
+  role: Extract<Role, "IT_STAFF" | "ADMINISTRATOR">;
 }
 
 /** One `{ field, message }` entry from a `400 INVALID_QUERY` body (server/src/routes/staff.ts). */
@@ -183,6 +196,33 @@ export async function fetchStaffTickets(
       }
     }
     throw new Error(`Failed to load the ticket queue (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * `GET /api/staff/assignable-users` (server/src/routes/staff.ts, api-spec.md
+ * §4.2): active IT Staff and Administrator users, ordered by name ascending
+ * — the full pool BR-19 allows as a Ticket Owner. IT Staff only; a
+ * Requester or Administrator caller gets a `403` (Administrator has
+ * `GET /api/users`, §6.1, instead), which surfaces here as the generic
+ * `Error` path exactly like `fetchStaffTickets`'s own 403 handling — the
+ * `RequireRole` guard is what actually keeps the wrong role off this
+ * screen.
+ *
+ * The queue's Owner filter (ui-spec.md §9: "plus each active IT Staff")
+ * further narrows this response to `role === "IT_STAFF"` client-side — the
+ * `ADMINISTRATOR` entries this endpoint also returns exist for a later
+ * Ticket Owner select (§10) that needs both roles, not for this screen.
+ */
+export async function fetchAssignableUsers(): Promise<AssignableUser[]> {
+  const response = await fetch(`${API_BASE_URL}/api/staff/assignable-users`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load assignable users (status ${response.status})`);
   }
 
   return response.json();
