@@ -115,6 +115,17 @@ describe('GET /api/staff/assignable-users', () => {
       expect(Array.isArray(res.body)).toBe(false);
     });
 
+    it('403 FORBIDDEN for an Administrator, before any lookup', async () => {
+      const admin = await prisma.user.findFirstOrThrow({ where: { isActive: true, role: 'ADMINISTRATOR' } });
+      const cookie = await loginAndGetCookie(admin.email);
+
+      const res = await getAssignableUsers(cookie);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('FORBIDDEN');
+      expect(Array.isArray(res.body)).toBe(false);
+    });
+
     it('200 for IT Staff', async () => {
       const cookie = await getStaffCookie();
 
