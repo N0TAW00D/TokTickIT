@@ -7,6 +7,7 @@ import { ChangePasswordScreen } from "./screens/ChangePasswordScreen";
 import { MyTicketsScreen } from "./screens/MyTicketsScreen";
 import { CreateTicketScreen } from "./screens/CreateTicketScreen";
 import { TicketDetailScreen } from "./screens/TicketDetailScreen";
+import { StaffTicketQueueScreen } from "./screens/StaffTicketQueueScreen";
 
 /**
  * Client routing root (specification.md FR-01..FR-09, FR-14..FR-18).
@@ -21,6 +22,12 @@ import { TicketDetailScreen } from "./screens/TicketDetailScreen";
  * the wrong role -> the forbidden state, and only an authenticated
  * Requester ever reaches these screens. `/select-requester` is gone with
  * the selector it served.
+ *
+ * `/staff/tickets` (ui-spec.md §9) follows the identical
+ * `RequireRole(['IT_STAFF'])` pattern — an unauthenticated caller lands on
+ * Login (via `RequireRole`'s internal `RequireAuth`) and an authenticated
+ * non-IT_STAFF caller sees the forbidden state (ui-spec.md §4.3), never
+ * `StaffTicketQueueScreen` itself.
  */
 function App() {
   return (
@@ -57,6 +64,14 @@ function App() {
           element={
             <RequireRole allowedRoles={["REQUESTER"]}>
               <TicketDetailScreen />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/staff/tickets"
+          element={
+            <RequireRole allowedRoles={["IT_STAFF"]}>
+              <StaffTicketQueueScreen />
             </RequireRole>
           }
         />

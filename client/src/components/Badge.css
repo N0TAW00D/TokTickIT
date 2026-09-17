@@ -41,10 +41,68 @@
   color: var(--zen-error);
 }
 
-/* Status variants (ui-spec.md §7.2). Lab 3 adds rows here, not new markup. */
+/* Status variants (ui-spec.md §7.2, lab-03/ui-spec.md §3.1). Lab 3 adds the
+   seven rows below — same markup, no new component logic. None of these
+   pairs share both background and text colour with a priority badge
+   (lab-03/ui-spec.md §3.1), since status and priority sit on the same
+   queue row. */
 .zen-badge--status-new {
   background: var(--zen-pale);
   color: var(--zen-secondary);
+}
+
+.zen-badge--status-open {
+  background: var(--zen-status-open-bg);
+  color: var(--zen-status-open-text);
+}
+
+.zen-badge--status-in-progress {
+  background: var(--zen-status-in-progress-bg);
+  color: var(--zen-status-in-progress-text);
+}
+
+.zen-badge--status-waiting-for-requester {
+  background: var(--zen-status-waiting-bg);
+  color: var(--zen-status-waiting-text);
+}
+
+.zen-badge--status-resolved {
+  background: var(--zen-status-resolved-bg);
+  color: var(--zen-status-resolved-text);
+}
+
+.zen-badge--status-closed {
+  background: var(--zen-status-closed-bg);
+  color: var(--zen-status-closed-text);
+}
+
+.zen-badge--status-reopened {
+  background: var(--zen-status-reopened-bg);
+  color: var(--zen-status-reopened-text);
+}
+
+.zen-badge--status-cancelled {
+  background: var(--zen-status-cancelled-bg);
+  color: var(--zen-status-cancelled-text);
+}
+
+/* Unassigned owner token (lab-03/ui-spec.md §3.4, `OwnerCell`). Assigned
+   owners render as plain text, not a badge — see OwnerCell.tsx. */
+.zen-badge--unassigned {
+  background: var(--zen-unassigned-bg);
+  color: var(--zen-unassigned);
+}
+
+/* IT Priority variant (lab-03/ui-spec.md §3.2): same three priority
+   colours as the Requested variant, plus a solid 2px left border in the
+   text colour so it is never confused with Requested Priority on the same
+   row. `currentColor` picks up whichever priority text colour the badge
+   already has, so this needs no colour of its own. Padding is trimmed by
+   the border's width to keep the same total left inset as every other
+   badge. */
+.zen-badge--it-priority {
+  border-left: 2px solid currentColor;
+  padding-left: 6px;
 }
 
 /*

@@ -1,0 +1,313 @@
+/*
+ * IT Staff Ticket Queue screen (ui-spec.md §9, §12) — all three
+ * breakpoints: desktop table (`≥ 992px`, seven columns), tablet table
+ * (`768–991px`, Category hidden), and mobile cards (`< 768px`, chosen in
+ * JS via `useMediaQuery` — this file only styles whichever markup is
+ * actually in the DOM, same convention as MyTicketsScreen.css). Structure
+ * and naming mirror MyTicketsScreen.css, adapted to this screen's own
+ * seven columns, controls and card fields.
+ */
+
+.zen-staff-queue__intro {
+  color: var(--zen-text-muted);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+/* ---- Header row: title + Clear filters (ui-spec.md §9) ---- */
+
+.zen-staff-queue__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-field-gap);
+  flex-wrap: wrap;
+}
+
+.zen-staff-queue__header h1 {
+  margin: 0;
+}
+
+.zen-staff-queue__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--zen-space-unit);
+  flex-shrink: 0;
+}
+
+/* ---- Controls bar: search + filters + sort (ui-spec.md §9) ---- */
+
+.zen-staff-queue__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--zen-space-field-gap);
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  padding: var(--zen-space-field-gap);
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+.zen-staff-queue__search-field {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.zen-staff-queue__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zen-space-field-gap);
+  flex: 2 1 480px;
+}
+
+.zen-staff-queue__filters > * {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .zen-staff-queue__filters > * {
+    flex: 0 1 auto;
+    min-width: max-content;
+  }
+
+  .zen-staff-queue__filters {
+    min-width: max-content;
+  }
+}
+
+/* Mobile: controls wrap to full-width stacked selects (ui-spec.md §9, §11 —
+   no horizontal page scroll at any viewport; matches MyTicketsScreen.css). */
+@media (max-width: 767px) {
+  .zen-staff-queue__search-field,
+  .zen-staff-queue__filters,
+  .zen-staff-queue__filters > * {
+    flex-basis: 100%;
+  }
+
+  .zen-staff-queue__header-actions {
+    width: 100%;
+  }
+
+  .zen-staff-queue__header-actions .zen-btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Visually hidden but screen-reader reachable (ui-spec.md §12: the
+   row-level "View" affordance and per-row accessible names must stay
+   distinguishable without adding visible clutter). */
+.zen-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* ---- Desktop table ---- */
+
+/* Own scroll container, not the page (ui-spec.md §11: no horizontal page
+   scroll at any viewport) — a wide table scrolls inside itself. */
+.zen-staff-queue__table-scroll {
+  position: relative;
+  overflow-x: auto;
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+}
+
+.zen-staff-queue__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-staff-queue__table th,
+.zen-staff-queue__table td {
+  text-align: left;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--zen-border);
+  white-space: nowrap;
+}
+
+.zen-staff-queue__table th {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text-muted);
+}
+
+/* Sortable column header (ui-spec.md §13: a button with `aria-sort` on the
+   active column's `<th>`). The caret is pure CSS `::after` content, not a
+   DOM text node, so this never changes what a test reading `th.textContent`
+   sees; the button's `aria-label`/`title` is what actually names the
+   control for assistive tech. */
+.zen-staff-queue__sort-toggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text-muted);
+  cursor: pointer;
+}
+
+.zen-staff-queue__sort-toggle::after {
+  content: "⇅";
+  font-size: 0.75em;
+}
+
+.zen-staff-queue__sort-toggle[data-sort-state="asc"]::after {
+  content: "▲";
+}
+
+.zen-staff-queue__sort-toggle[data-sort-state="desc"]::after {
+  content: "▼";
+}
+
+.zen-staff-queue__sort-toggle:not(:disabled):hover {
+  color: var(--zen-text);
+}
+
+.zen-staff-queue__sort-toggle:focus-visible {
+  outline: 2px solid var(--zen-focus-ring);
+  outline-offset: 2px;
+}
+
+.zen-staff-queue__sort-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.zen-staff-queue__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.zen-staff-queue__table tbody tr:hover {
+  background: var(--zen-pale);
+}
+
+/* Whole-row-clickable via the "stretched link" pattern (matches
+   MyTicketsScreen.css) rather than a row-level onClick or a second
+   overlapping anchor. */
+.zen-staff-queue__table tbody tr {
+  position: relative;
+}
+
+.zen-staff-queue__row-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.zen-staff-queue__view-link {
+  position: relative;
+  z-index: 1;
+}
+
+/* Long summaries truncate with an ellipsis, never silently clip
+   (ui-spec.md §11) — the `title` attribute on the cell carries the full
+   text. */
+.zen-staff-queue__truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-staff-queue__table .zen-staff-queue__truncate--summary {
+  max-width: 220px;
+}
+
+/* Tablet (768–991px, ui-spec.md §12) drops the Category column — this
+   table only ever mounts at `≥ 768px` (StaffTicketQueueScreen.tsx renders
+   `QueueCards` below that), so this single rule is what separates the
+   tablet's six-column table from the desktop's seven-column one at
+   `≥ 992px`. A CSS column-hide rather than a second JS-branched table
+   markup, since it's one column disappearing from one table, not a second
+   layout with its own duplicated rows. */
+@media (max-width: 991px) {
+  .zen-staff-queue__category-col {
+    display: none;
+  }
+}
+
+/* ---- Loading skeleton (ui-spec.md §9: `role="status"` skeleton rows) ---- */
+
+.zen-staff-queue__skeleton-block {
+  display: inline-block;
+  height: 14px;
+  width: 100%;
+  max-width: 96px;
+  border-radius: var(--zen-radius-control);
+  background: var(--zen-readonly-bg);
+}
+
+/* ---- Mobile cards (ui-spec.md §9, §12: `< 768px`) ---- */
+
+.zen-staff-queue__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-field-gap);
+}
+
+.zen-staff-queue__card {
+  /* Containing block for the identity link's stretched ::after — same
+     pattern and rationale as the desktop row above. */
+  position: relative;
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-mobile);
+}
+
+/* First line: Ticket Number + Status (ui-spec.md §9). */
+.zen-staff-queue__card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-staff-queue__card-number {
+  font-weight: var(--zen-font-weight-label);
+}
+
+/* Second line: Summary (ui-spec.md §9). */
+.zen-staff-queue__card-summary {
+  margin: 0 0 var(--zen-space-unit);
+  color: var(--zen-text);
+}
+
+.zen-staff-queue__card .zen-staff-queue__truncate {
+  max-width: 100%;
+}
+
+/* Wrapped meta row: IT Priority, Owner, Last Updated (ui-spec.md §9). */
+.zen-staff-queue__card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--zen-space-unit);
+  color: var(--zen-text-muted);
+}
+
+.zen-staff-queue__card-timestamp {
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+  white-space: nowrap;
+}
+
+.zen-staff-queue__card-view {
+  display: inline-block;
+  margin-top: var(--zen-space-unit);
+}

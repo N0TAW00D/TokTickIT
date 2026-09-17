@@ -5,6 +5,7 @@ import { relatedSystemsRouter } from './routes/relatedSystems.ts';
 import { ticketsRouter } from './routes/tickets.ts';
 import { attachmentsRouter } from './routes/attachments.ts';
 import { authRouter } from './routes/auth.ts';
+import { staffRouter } from './routes/staff.ts';
 
 const app: Express = express();
 
@@ -93,5 +94,6 @@ app.use('/api/related-systems', relatedSystemsRouter);
 app.use('/api/tickets', ticketsRouter);
 app.use('/api/attachments', attachmentsRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/staff', staffRouter);
 
 export default app;

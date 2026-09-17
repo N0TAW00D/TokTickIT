@@ -43,6 +43,30 @@
   --zen-role-bg: #ecf1fa;
   --zen-role-text: #3a3f58;
 
+  /* ---- Unassigned owner token (ui-spec.md §2, §3.4) ---- */
+  --zen-unassigned: #7a5d2b;
+  --zen-unassigned-bg: #fbf3e4;
+
+  /* ---- Status badge — the seven Lab 3 statuses beyond NEW
+     (ui-spec.md §3.1, which lists these as literal hex values in its
+     table rather than named tokens; named here so StatusBadge.css never
+     needs a hard-coded hex, per the "only theme.css" rule at the top of
+     this file). NEW itself keeps reusing --zen-pale/--zen-secondary. */
+  --zen-status-open-bg: #e3eef7;
+  --zen-status-open-text: #215c84;
+  --zen-status-in-progress-bg: #ede7f6;
+  --zen-status-in-progress-text: #4a3a78;
+  --zen-status-waiting-bg: #fbefd9;
+  --zen-status-waiting-text: #7a5320;
+  --zen-status-resolved-bg: #e4f3ea;
+  --zen-status-resolved-text: #166534;
+  --zen-status-closed-bg: #ecefed;
+  --zen-status-closed-text: #4a5a52;
+  --zen-status-reopened-bg: #fbe4e4;
+  --zen-status-reopened-text: #9b2c2c;
+  --zen-status-cancelled-bg: #efeded;
+  --zen-status-cancelled-text: #6b6b6b;
+
   /* ---- Internal Note surface (ui-spec.md §2, §8) ----
      Used by MessageThread's variant="internal" — issue #70 only wires up
      variant="public" (Public Comments), but the shared component and its
