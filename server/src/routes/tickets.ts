@@ -22,7 +22,9 @@ import type { Prisma, TicketStatus } from '../generated/prisma/client.ts';
 // AC-09, AC-22..AC-31).
 //
 // GET /api/tickets/:id — api-spec.md §3.3 (BR-14, BR-33, BR-38, BR-39,
-// BR-42; FR-32..FR-34; AC-32, AC-37, AC-38).
+// BR-42; FR-32..FR-34; AC-32, AC-37, AC-38), reused unchanged for Requesters
+// and extended per api-spec.md §5 (FR-20, AC-67) so IT Staff/Administrators
+// can fetch any ticket and additionally see `itPriority`.
 //
 // POST /api/tickets/:id/attachments — api-spec.md §4.1 (BR-14, BR-21..23,
 // BR-27, BR-29, BR-30; AC-18..21).
@@ -323,77 +325,99 @@ const TICKET_DETAIL_ATTACHMENT_SELECT = {
   createdAt: true,
 } as const;
 
-ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
-  // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
-  // treated as a resource that does not exist, never a 400 — same helper
-  // the attachments route below already uses for its own `:id`.
-  const ticketId = parseTicketIdParam(String(req.params.id));
-  if (ticketId === null) {
-    ticketNotFound(res);
-    return;
-  }
+// The `include` shared by both the Requester and staff lookups below —
+// identical fields either way; only the `where` clause (own-ticket-only vs.
+// any-ticket) and the response's `itPriority` key differ by role.
+const TICKET_DETAIL_INCLUDE = {
+  ...TICKET_INCLUDE,
+  // ui-spec.md §7: Ticket Owner shows as a read-only row ("Unassigned" or
+  // the owner's name) for every role that can reach this route.
+  owner: { select: { id: true, name: true } },
+  attachments: {
+    // BR-33: both active and soft-removed attachments are listed here
+    // (unlike GET /api/tickets's activeAttachmentCount, which counts only
+    // non-removed rows) — no `where` filter on `isRemoved` at all. Ordered
+    // by id asc (creation order, with the same tie-break convention as
+    // BR-18) purely for a stable, deterministic response; the spec does not
+    // mandate a particular order.
+    orderBy: { id: 'asc' },
+    select: TICKET_DETAIL_ATTACHMENT_SELECT,
+  },
+} satisfies Prisma.TicketInclude;
 
-  try {
-    // Ownership folded straight into the `where` clause (BR-15's pattern,
-    // reused here) rather than fetched-then-compared: an unknown id and one
-    // owned by another Requester both simply fail to match this single
-    // query and fall into the one `if (!ticket)` branch below, which calls
-    // the one shared `ticketNotFound` helper. There is deliberately no
-    // second branch that decides "not owned" separately from "not found" —
-    // BR-14/BR-42's byte-identical requirement can't drift apart if there is
-    // only one code path that ever produces the 404.
-    const ticket = await prisma.ticket.findFirst({
-      where: { id: ticketId, requesterId: req.authUser!.id },
-      include: {
-        ...TICKET_INCLUDE,
-        // ui-spec.md §7: Ticket Owner shows as a read-only row
-        // ("Unassigned" or the owner's name) — IT Priority is deliberately
-        // NOT selected/returned here, since it is never shown to the
-        // Requester (api-spec.md §9: "a Requester never sees itPriority").
-        owner: { select: { id: true, name: true } },
-        attachments: {
-          // BR-33: both active and soft-removed attachments are listed here
-          // (unlike GET /api/tickets's activeAttachmentCount, which counts
-          // only non-removed rows) — no `where` filter on `isRemoved` at
-          // all. Ordered by id asc (creation order, with the same tie-break
-          // convention as BR-18) purely for a stable, deterministic
-          // response; the spec does not mandate a particular order.
-          orderBy: { id: 'asc' },
-          select: TICKET_DETAIL_ATTACHMENT_SELECT,
-        },
-      },
-    });
-
-    if (!ticket) {
+ticketsRouter.get(
+  '/:id',
+  authenticate,
+  passwordChangeGate,
+  // api-spec.md §5: reused for Ticket Detail — IT Staff and Administrators
+  // may fetch any ticket, a Requester only their own (FR-20, AC-67).
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
+    // treated as a resource that does not exist, never a 400 — same helper
+    // the attachments route below already uses for its own `:id`.
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
       ticketNotFound(res);
       return;
     }
 
-    res.status(200).json({
-      id: ticket.id,
-      ticketNumber: ticket.ticketNumber,
-      requester: ticket.requester,
-      category: ticket.category,
-      relatedSystem: ticket.relatedSystem,
-      requestedPriority: ticket.requestedPriority,
-      status: ticket.status,
-      summary: ticket.summary,
-      description: ticket.description,
-      createdAt: ticket.createdAt,
-      updatedAt: ticket.updatedAt,
-      attachments: ticket.attachments,
-      // api-spec.md §9 (Lab 3 change): null when unassigned — the client
-      // renders that as "Unassigned" (ui-spec.md §7).
-      owner: ticket.owner,
-      // BR-26: null until the Requester has indicated the problem appears
-      // resolved; never cleared by this route.
-      requesterResolvedAt: ticket.requesterResolvedAt,
-    });
-  } catch (error) {
-    console.error('Error fetching ticket:', error);
-    internalError(res);
-  }
-});
+    const isStaff = req.authUser!.role === 'IT_STAFF' || req.authUser!.role === 'ADMINISTRATOR';
+
+    try {
+      // Same "fold the access check into the query, not fetch-then-compare"
+      // shape `resolveTicketAccess` (below, used by the comments routes)
+      // applies — it isn't called directly here because those routes only
+      // need a thin `TicketAccessRow`, while this one needs the full detail
+      // payload (with `include`) in the same round trip. A Requester's
+      // `where` still folds ownership straight in (BR-15's pattern): an
+      // unknown id and one owned by another Requester both simply fail to
+      // match and fall into the one `if (!ticket)` branch below, which
+      // calls the one shared `ticketNotFound` helper — there is
+      // deliberately no second branch that decides "not owned" separately
+      // from "not found", so BR-14/BR-42's byte-identical requirement can't
+      // drift apart. IT Staff/Administrators have no ownership restriction
+      // at all: any existing id resolves, unknown ids still 404.
+      const ticket = await prisma.ticket.findFirst({
+        where: isStaff ? { id: ticketId } : { id: ticketId, requesterId: req.authUser!.id },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      if (!ticket) {
+        ticketNotFound(res);
+        return;
+      }
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        // api-spec.md §5/§9: IT Staff and Administrators additionally get
+        // `itPriority`; a Requester never sees it (ui-spec.md §7) — the key
+        // is omitted entirely for them, never sent as `null`.
+        ...(isStaff ? { itPriority: ticket.itPriority } : {}),
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        // api-spec.md §9 (Lab 3 change): null when unassigned — the client
+        // renders that as "Unassigned" (ui-spec.md §7).
+        owner: ticket.owner,
+        // BR-26: null until the Requester has indicated the problem appears
+        // resolved; never cleared by this route.
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error fetching ticket:', error);
+      internalError(res);
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // POST /api/tickets/:id/attachments (api-spec.md §4.1)

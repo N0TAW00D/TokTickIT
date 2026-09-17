@@ -213,11 +213,15 @@ export async function fetchMyTickets(
  * `POST /api/tickets` `201` body, plus a populated `attachments` array and
  * (Lab 3) `owner`/`requesterResolvedAt` — `owner` is `null` when
  * unassigned (ui-spec.md §7: rendered as "Unassigned"); `itPriority` is
- * deliberately never included for a Requester caller (api-spec.md §9).
+ * deliberately never included for a Requester caller (api-spec.md §9), so
+ * it is optional here rather than nullable — the key is simply absent from
+ * that response, never sent as `null`. IT Staff/Administrator callers
+ * (api-spec.md §5) do get it.
  */
 export interface TicketDetailResponse extends CreateTicketResponse {
   owner: { id: number; name: string } | null;
   requesterResolvedAt: string | null;
+  itPriority?: RequestedPriority;
 }
 
 /**
