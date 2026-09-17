@@ -304,8 +304,8 @@ user-listing route (`GET /api/users`, §6.1) is Administrator-only — an IT Sta
 there. This route is the minimal, IT-Staff-callable alternative, scoped to exactly what a Ticket
 Owner may legally be (BR-19: "an active IT Staff or Administrator user").
 
-- **Auth:** IT Staff only. Requester → `403`. (Administrator does not need this route — they have
-  `GET /api/users`.)
+- **Auth:** IT Staff only. Requester and Administrator → `403` (§1.4) — Administrator has
+  `GET /api/users` instead and does not need this route.
 - **200:** array of active IT Staff and Administrator users, ordered by name ascending, minimal
   shape — no email, no `isActive`/`mustChangePassword` (those belong to §6.1's Administrator-only
   view; this route exposes only what an assignment picker needs):
