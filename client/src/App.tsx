@@ -8,6 +8,7 @@ import { MyTicketsScreen } from "./screens/MyTicketsScreen";
 import { CreateTicketScreen } from "./screens/CreateTicketScreen";
 import { TicketDetailScreen } from "./screens/TicketDetailScreen";
 import { StaffTicketQueueScreen } from "./screens/StaffTicketQueueScreen";
+import { StaffTicketDetailScreen } from "./screens/StaffTicketDetailScreen";
 
 /**
  * Client routing root (specification.md FR-01..FR-09, FR-14..FR-18).
@@ -28,6 +29,12 @@ import { StaffTicketQueueScreen } from "./screens/StaffTicketQueueScreen";
  * Login (via `RequireRole`'s internal `RequireAuth`) and an authenticated
  * non-IT_STAFF caller sees the forbidden state (ui-spec.md §4.3), never
  * `StaffTicketQueueScreen` itself.
+ *
+ * `/staff/tickets/:id` (ui-spec.md §10, Issue #72) is reachable by BOTH
+ * `IT_STAFF` and `ADMINISTRATOR` — api-spec.md §5 gives Administrator a read
+ * path here even though several write actions on this screen are denied to
+ * them server-side. Everyone else (including an unauthenticated caller, or
+ * a REQUESTER) is handled by `RequireRole` exactly as above.
  */
 function App() {
   return (
@@ -72,6 +79,14 @@ function App() {
           element={
             <RequireRole allowedRoles={["IT_STAFF"]}>
               <StaffTicketQueueScreen />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/staff/tickets/:id"
+          element={
+            <RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}>
+              <StaffTicketDetailScreen />
             </RequireRole>
           }
         />
