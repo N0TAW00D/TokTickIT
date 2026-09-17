@@ -827,6 +827,141 @@ ticketsRouter.post(
 );
 
 // ---------------------------------------------------------------------------
+// PATCH /api/tickets/:id/owner (api-spec.md §5.1)
+// ---------------------------------------------------------------------------
+
+function invalidOwner(res: Response): void {
+  // BR-20/AC-36: an inactive user, a Requester, and a nonexistent id all
+  // return this identical body — never a hint as to which one it was.
+  res.status(409).json({
+    error: 'INVALID_OWNER',
+    message: 'ownerId must reference an active IT Staff or Administrator user.',
+  });
+}
+
+/**
+ * Shape-validates the `ownerId` field for `PATCH /api/tickets/:id/owner`:
+ * unlike `validateReferenceIdShape` above (required, always an int), this
+ * field's contract (api-spec.md §5.1) is `number | null` — `null` is a
+ * legal, meaningful value ("unassign"), not a missing-field failure. So a
+ * present `null` passes shape validation; anything present but neither an
+ * integer nor `null` (a string, a float, a boolean, an array/object, or the
+ * key simply missing) is a 400 VALIDATION_FAILED, matching this file's
+ * existing "malformed shape -> 400, valid shape that fails a lookup -> a
+ * dedicated conflict/not-found code" split.
+ */
+function validateOwnerIdShape(raw: unknown): FieldError | null {
+  if (raw === null) {
+    return null;
+  }
+  if (typeof raw !== 'number' || !Number.isInteger(raw)) {
+    return { field: 'ownerId', message: 'ownerId is required and must be an integer or null.' };
+  }
+  return null;
+}
+
+ticketsRouter.patch(
+  '/:id/owner',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // requireRole lets every role through here (rather than gating to
+  // IT_STAFF alone) so a Requester and an unknown ticket id both fall
+  // through to the same resolveTicketAccess-driven 404 below, instead of
+  // requireRole intercepting the Requester case with a 403 first — the same
+  // "decide precisely inside the handler" pattern the comments/
+  // requester-resolved routes above already use.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    const ownerIdError = validateOwnerIdShape(req.body.ownerId);
+    if (ownerIdError) {
+      validationFailed(res, [ownerIdError]);
+      return;
+    }
+    // Shape check above guarantees this is `number | null`.
+    const requestedOwnerId = req.body.ownerId as number | null;
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.1: a Requester never gets a write path here,
+      // regardless of ownership — unlike POST /api/tickets/:id/comments
+      // above (where the owning Requester's own 'owner' branch is a valid
+      // write path), this route has no Requester write path at all, so both
+      // the 'not-found' and 'owner' classifications resolveTicketAccess can
+      // produce for a REQUESTER caller collapse to the same 404 here.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: IT Staff and Administrator both have
+      // a read path to this ticket (GET /api/tickets/:id, api-spec.md §5),
+      // but api-spec.md §5.1 reserves the write for IT Staff only — an
+      // Administrator's read path makes this a safe 403, never a 404.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      if (requestedOwnerId !== null) {
+        const candidate = await prisma.user.findUnique({
+          where: { id: requestedOwnerId },
+          select: { role: true, isActive: true },
+        });
+        // BR-19/BR-20: the candidate must exist, be active, and not be a
+        // Requester (a Ticket Owner may only be an active IT Staff or
+        // Administrator user) — any failure of the three is the identical
+        // 409 INVALID_OWNER, checked together so no branch can leak which
+        // one it was.
+        if (!candidate || !candidate.isActive || candidate.role === 'REQUESTER') {
+          invalidOwner(res);
+          return;
+        }
+      }
+
+      const ticket = await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { ownerId: requestedOwnerId },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        itPriority: ticket.itPriority,
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        owner: ticket.owner,
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error updating ticket owner:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/tickets/:id/requester-resolved (api-spec.md §3.3)
 // ---------------------------------------------------------------------------
 
