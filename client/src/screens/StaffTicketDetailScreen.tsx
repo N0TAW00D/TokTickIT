@@ -342,6 +342,10 @@ export function StaffTicketDetailScreen() {
   const [statusConflictMessage, setStatusConflictMessage] = useState<
     string | null
   >(null);
+  // Set (not called directly) by saveStatus's success/conflict branches —
+  // see the effect below and restoreStatusFocus's own doc comment for why
+  // this indirection is needed only on those two paths.
+  const restoreStatusFocusAfterSaveRef = useRef(false);
 
   // Download/preview wiring for AttachmentList (copied from
   // AttachmentSection's own handleDownload/handlePreview — see this file's
@@ -404,6 +408,22 @@ export function StaffTicketDetailScreen() {
       }
     };
   }, []);
+
+  // Finishes the focus-restore that saveStatus's success/conflict branches
+  // request via restoreStatusFocusAfterSaveRef (see that ref's own comment
+  // above): a `.then()`/`.catch()` callback runs before React has committed
+  // the re-render that clears `statusSaving`, so calling `.focus()`
+  // synchronously in there lands on a still-`disabled` select and is a
+  // silent no-op (DOM: a disabled element cannot become document.activeElement).
+  // This effect runs after that commit, once `statusSaving` has actually
+  // reached `false`, so the select is focusable again — ui-spec.md §13:
+  // "confirm dialogs trap focus and restore it".
+  useEffect(() => {
+    if (!statusSaving && restoreStatusFocusAfterSaveRef.current) {
+      restoreStatusFocusAfterSaveRef.current = false;
+      restoreStatusFocus();
+    }
+  }, [statusSaving]);
 
   /**
    * "Unassigned" plus one option per active IT Staff/Administrator user
@@ -621,11 +641,16 @@ export function StaffTicketDetailScreen() {
         });
         setPendingStatus(null);
         showStatusSavedTick();
+        // Deferred to the effect above — statusSaving is still `true` here
+        // (only .finally() below clears it), so the select is still
+        // `disabled` in the committed DOM and can't take focus yet.
+        restoreStatusFocusAfterSaveRef.current = true;
       })
       .catch((error: unknown) => {
         if (error instanceof StatusTransitionConflictError) {
           setPendingStatus(null);
           setStatusConflictMessage(error.message);
+          restoreStatusFocusAfterSaveRef.current = true;
           return;
         }
         setStatusError(
@@ -657,10 +682,34 @@ export function StaffTicketDetailScreen() {
     if (pendingStatus) saveStatus(pendingStatus);
   }
 
+  /**
+   * Returns focus to the Status select once `ConfirmStatusChangeDialog`
+   * closes (ui-spec.md §13: "confirm dialogs trap focus and restore it") —
+   * same convention as `AttachmentSection`'s `triggerRef`/`previewTriggerRef`
+   * and this screen's own `previewTriggerRef` for `ImagePreviewDialog`.
+   * Looked up by DOM id rather than captured in a ref: the trigger here is
+   * a `<select>`, and `SelectField` (shared/frozen since Lab 2, reused by
+   * MyTicketsScreen/CreateTicketScreen/Pagination/StaffTicketQueueScreen)
+   * doesn't forward refs — this repo's convention is a small local fix
+   * over changing a shared component's behaviour for one screen's need
+   * (see 55ee7ec), and `"staff-ticket-status"` is already a stable, unique
+   * id, so looking it up here is simpler than adding ref-forwarding.
+   *
+   * Called two ways: directly from `handleStatusCancelConfirm` below, where
+   * `statusSaving` is already `false` (guarded) so the select is already
+   * enabled; and indirectly, via `restoreStatusFocusAfterSaveRef` and the
+   * effect above, from `saveStatus`'s success/conflict branches, where the
+   * select is still mid-save (`disabled`) at the moment those branches run.
+   */
+  function restoreStatusFocus() {
+    document.getElementById("staff-ticket-status")?.focus();
+  }
+
   function handleStatusCancelConfirm() {
     if (statusSaving) return;
     setPendingStatus(null);
     setStatusError(undefined);
+    restoreStatusFocus();
   }
 
   function handleStatusConflictRefresh() {

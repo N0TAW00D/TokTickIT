@@ -1045,9 +1045,13 @@ describe("Status control — confirm-required destinations (Close/Reopen/Cancel)
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(select.value).toBe("CLOSED");
+    // ui-spec.md §13: "confirm dialogs trap focus and restore it" — a
+    // successful confirm closes the dialog and returns focus to the
+    // triggering Status select.
+    expect(document.activeElement).toBe(select);
   });
 
-  it("cancelling the dialog does not save and closes it", async () => {
+  it("cancelling the dialog does not save, closes it, and restores focus to the Status select", async () => {
     const fetchMock = mockFetch({
       ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
     });
@@ -1070,6 +1074,28 @@ describe("Status control — confirm-required destinations (Close/Reopen/Cancel)
       ),
     ).toBe(false);
     expect(select.value).toBe("RESOLVED");
+    // ui-spec.md §13: dialogs restore focus to their trigger on close.
+    expect(document.activeElement).toBe(select);
+  });
+
+  it("pressing Escape cancels the dialog the same way and restores focus to the Status select", async () => {
+    mockFetch({
+      ticket: () => jsonResponse(200, baseTicket({ status: "RESOLVED" })),
+    });
+    renderScreen();
+
+    await screen.findByText("TKT-2026-000021");
+    const select = screen.getByLabelText("Current Status") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "CLOSED" } });
+
+    await screen.findByRole("dialog");
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(select.value).toBe("RESOLVED");
+    expect(document.activeElement).toBe(select);
   });
 });
 
@@ -1092,6 +1118,9 @@ describe("Status control — 409 conflict banner (ui-spec.md §10)", () => {
       "That status change is no longer possible — the ticket has moved on. Refresh to see its current state.",
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // ui-spec.md §13: the 409 path also closes the dialog, so it restores
+    // focus to the Status select same as Cancel/Esc/success.
+    expect(document.activeElement).toBe(select);
   });
 
   it("a 409 OWNER_REQUIRED (direct, non-confirm destination) also shows the conflict banner", async () => {
