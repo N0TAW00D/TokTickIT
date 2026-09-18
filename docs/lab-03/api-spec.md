@@ -334,10 +334,14 @@ Owner may legally be (BR-19: "an active IT Staff or Administrator user").
 returns any ticket and additionally carries `itPriority`, `owner` and `requesterResolvedAt`; for a
 Requester it returns only their own and omits `itPriority` (FR-20, AC-67).
 
-`GET /api/tickets/:id/attachments` and `GET /api/attachments/:id/download` are reused unchanged, so
-Attachments created in Lab 2 stay listable and downloadable from IT Staff Ticket Detail (FR-27,
-AC-43). IT Staff have read access only — upload and soft-removal remain Requester-owned operations
-(`specification.md` §4.1).
+`GET /api/tickets/:id/attachments` (the `attachments` array on the ticket detail response) is reused
+unchanged. `GET /api/attachments/:id/download` is **not** reused unchanged — its role guard is widened
+(§9) to admit IT Staff and Administrator alongside Requester, with no ownership check for either
+staff role, so Attachments created in Lab 2 stay downloadable from IT Staff Ticket Detail (FR-27,
+AC-43). IT Staff and Administrator have read access only — upload and soft-removal remain
+Requester-owned operations (`specification.md` §4.1); `GET /api/attachments/:id` (metadata) and
+`DELETE /api/attachments/:id` are unaffected by this change and stay Requester-only,
+ownership-checked exactly as in Lab 2.
 
 ### 5.1 `PATCH /api/tickets/:id/owner`
 
@@ -553,6 +557,8 @@ exist (§9).
 | Ticket routes open to any caller with a valid header | Require a session; ownership from the authenticated user (BR-03). |
 | `GET /api/tickets/:id` returns Lab 2 fields | Adds `itPriority`, `owner`, `requesterResolvedAt` for IT Staff and Administrator; a Requester never sees `itPriority`. |
 | No comment or note routes | §3.1, §3.2, §5.4, §5.5. |
+| `GET /api/attachments/:id/download` — Requester only, ownership-checked | Role guard widened to Requester, IT Staff **and** Administrator (§5); IT Staff/Administrator resolve any existing attachment with no ownership check (a soft-removed one still `410`s, BR-33, regardless of role), a Requester keeps the exact Lab 2 behavior. `GET /api/attachments/:id` (metadata) and `DELETE /api/attachments/:id` are unchanged — still Requester-only, ownership-checked. |
 
-Every other Lab 2 endpoint keeps its path, request shape, response shape, validation rules and
+Every other Lab 2 endpoint — including `GET /api/attachments/:id` and `DELETE /api/attachments/:id`
+above — keeps its path, request shape, response shape, validation rules and
 status codes unchanged (FR-15, AC-19).

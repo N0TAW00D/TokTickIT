@@ -11,6 +11,7 @@
 // exist, and is its ticket owned by this caller".
 
 import { prisma } from '../lib/prisma.ts';
+import type { AuthenticatedUser } from '../middleware/authContext.ts';
 
 /**
  * Thrown when the attachment id doesn't exist, or exists but its parent
@@ -44,6 +45,38 @@ export async function getOwnedAttachment(attachmentId: number, requesterId: numb
   });
 
   if (!attachment || attachment.ticket.requesterId !== requesterId) {
+    throw new AttachmentNotFoundError();
+  }
+
+  return attachment;
+}
+
+/**
+ * The download-route counterpart to `getOwnedAttachment`, for
+ * GET /api/attachments/:id/download only (api-spec.md §4.3, §5 preamble):
+ * a REQUESTER caller is still ownership-checked exactly as above, but
+ * IT_STAFF/ADMINISTRATOR have no ownership restriction at all — the same
+ * "fold the role check into the query, not fetch-then-compare" idiom
+ * routes/tickets.ts's `GET /:id` uses for `isStaff` (BR-14 still applies to
+ * a Requester; §5's read-any-ticket grant for staff extends to the
+ * attachments on it, so a not-owning Requester and a staff caller reading
+ * the very same row take different branches here, not two different
+ * functions).
+ *
+ * GET /api/attachments/:id (metadata) and DELETE /api/attachments/:id stay
+ * on `getOwnedAttachment` — this function exists only because the download
+ * route's auth was widened, not because ownership semantics changed for
+ * the other two.
+ */
+export async function getDownloadableAttachment(attachmentId: number, caller: Pick<AuthenticatedUser, 'id' | 'role'>) {
+  const isStaff = caller.role === 'IT_STAFF' || caller.role === 'ADMINISTRATOR';
+
+  const attachment = await prisma.attachment.findUnique({
+    where: { id: attachmentId },
+    include: { ticket: { select: { requesterId: true } } },
+  });
+
+  if (!attachment || (!isStaff && attachment.ticket.requesterId !== caller.id)) {
     throw new AttachmentNotFoundError();
   }
 
