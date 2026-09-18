@@ -57,6 +57,16 @@ export interface AttachmentListProps {
    * click didn't itself move focus (e.g. `fireEvent.click` in tests).
    */
   onRemove?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
+  /**
+   * Whether active rows render the destructive Remove button at all
+   * (default `true`, matching every existing caller's behavior — see
+   * tests.md C-21). Omitting `onRemove` does NOT hide the button; it only
+   * makes the click a no-op, since `ActiveRow` renders Remove
+   * unconditionally by default. Pass `showRemove={false}` (Staff Ticket
+   * Detail, ui-spec.md §10: "download only — no upload, no removal") to
+   * actually omit the button.
+   */
+  showRemove?: boolean;
 }
 
 /**
@@ -71,6 +81,7 @@ export function AttachmentList({
   onDownload,
   onPreview,
   onRemove,
+  showRemove = true,
 }: AttachmentListProps) {
   if (attachments.length === 0) return null;
 
@@ -86,6 +97,7 @@ export function AttachmentList({
             onDownload={onDownload}
             onPreview={onPreview}
             onRemove={onRemove}
+            showRemove={showRemove}
           />
         ),
       )}
@@ -98,13 +110,20 @@ interface ActiveRowProps {
   onDownload?: (attachment: TicketAttachment) => void;
   onPreview?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
   onRemove?: (attachment: TicketAttachment, trigger: HTMLButtonElement) => void;
+  showRemove?: boolean;
 }
 
 /**
  * Active, image (BR-34): Preview + Download + Remove.
  * Active, PDF (BR-34): Download + Remove only — no Preview.
  */
-function ActiveRow({ attachment, onDownload, onPreview, onRemove }: ActiveRowProps) {
+function ActiveRow({
+  attachment,
+  onDownload,
+  onPreview,
+  onRemove,
+  showRemove = true,
+}: ActiveRowProps) {
   const isImage = IMAGE_MIME_TYPES.has(attachment.mimeType);
 
   return (
@@ -138,15 +157,17 @@ function ActiveRow({ attachment, onDownload, onPreview, onRemove }: ActiveRowPro
         >
           Download
         </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={(event) =>
-            onRemove?.(attachment, event.currentTarget)
-          }
-        >
-          Remove
-        </Button>
+        {showRemove && (
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={(event) =>
+              onRemove?.(attachment, event.currentTarget)
+            }
+          >
+            Remove
+          </Button>
+        )}
       </span>
     </li>
   );
