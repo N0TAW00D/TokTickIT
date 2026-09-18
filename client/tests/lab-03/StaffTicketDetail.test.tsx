@@ -210,14 +210,6 @@ const IT_STAFF_USER: AuthUser = {
   mustChangePassword: false,
 };
 
-const ADMIN_USER: AuthUser = {
-  id: 15,
-  name: "Casey Morgan",
-  email: "casey.morgan@example.edu",
-  role: "ADMINISTRATOR",
-  mustChangePassword: false,
-};
-
 /** Seeds AuthContext before the screen mounts (StaffTicketQueue.test.tsx's own pattern) — the screen calls `useAuth()` directly, so it must never mount without this. */
 function AuthBootstrap({
   children,
@@ -672,46 +664,6 @@ describe("Internal Notes thread (variant=internal)", () => {
     expect(postCall).toBeDefined();
     const [, init] = postCall as [string, RequestInit];
     expect(init.credentials).toBe("include");
-  });
-});
-
-describe("Administrator read access (ui-spec.md §10, api-spec.md §5)", () => {
-  it("an ADMINISTRATOR can also load the read-only view and see both threads", async () => {
-    mockFetch({
-      comments: [
-        {
-          id: 1,
-          body: "Public comment visible to the requester.",
-          createdAt: "2026-09-01T09:00:00.000Z",
-          author: { id: 9, name: "Jordan Lee", role: "IT_STAFF" },
-        },
-      ],
-      notes: [
-        {
-          id: 2,
-          body: "Internal-only note.",
-          createdAt: "2026-09-01T09:05:00.000Z",
-          author: { id: 9, name: "Jordan Lee", role: "IT_STAFF" },
-        },
-      ],
-    });
-    const { container } = renderScreen({ user: ADMIN_USER });
-
-    await screen.findByText("TKT-2026-000021");
-    const detail = within(infoCard(container));
-    expect(detail.getByText("Jennifer Anderson")).toBeInTheDocument();
-
-    expect(
-      await screen.findByRole("heading", { name: "Comments" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Public comment visible to the requester."),
-    ).toBeInTheDocument();
-
-    expect(
-      await screen.findByRole("heading", { name: "Internal notes" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Internal-only note.")).toBeInTheDocument();
   });
 });
 

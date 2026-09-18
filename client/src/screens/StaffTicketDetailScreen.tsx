@@ -240,11 +240,15 @@ type DetailState =
  * path (403), the same way an Administrator posting a Public Comment
  * already fails without any special-case UI.
  *
- * Reachable by both IT_STAFF and ADMINISTRATOR (App.tsx wraps this route
- * with `RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}`, unlike
- * `/staff/tickets` which is IT_STAFF only) — api-spec.md §5 gives
- * Administrator a read path here even though several write actions are
- * later denied to them server-side.
+ * IT_STAFF-only in the UI (App.tsx wraps this route with
+ * `RequireRole allowedRoles={["IT_STAFF"]}`, same as `/staff/tickets`) —
+ * ui-spec.md §4.2's role-specific navigation table gives Administrator
+ * exactly one destination (User Management), and this screen is titled
+ * "Screen: IT Staff Ticket Detail" and appears in no Administrator nav.
+ * That `GET /api/tickets/:id` also serves Administrator reads
+ * (api-spec.md §5) is a fact about the read API, not a grant of this UI
+ * route — see App.tsx's route comment for the same distinction. Several
+ * write actions on this screen are IT_STAFF-only server-side regardless.
  *
  * Data comes from the existing `fetchTicketDetail`, the same call the
  * Requester screen uses — the server already returns `itPriority`/`owner`/

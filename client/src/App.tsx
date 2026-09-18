@@ -30,11 +30,19 @@ import { StaffTicketDetailScreen } from "./screens/StaffTicketDetailScreen";
  * non-IT_STAFF caller sees the forbidden state (ui-spec.md §4.3), never
  * `StaffTicketQueueScreen` itself.
  *
- * `/staff/tickets/:id` (ui-spec.md §10, Issue #72) is reachable by BOTH
- * `IT_STAFF` and `ADMINISTRATOR` — api-spec.md §5 gives Administrator a read
- * path here even though several write actions on this screen are denied to
- * them server-side. Everyone else (including an unauthenticated caller, or
- * a REQUESTER) is handled by `RequireRole` exactly as above.
+ * `/staff/tickets/:id` (ui-spec.md §10, Issue #72) is `IT_STAFF`-only in
+ * the UI, same as `/staff/tickets` above: the role-specific navigation
+ * table (ui-spec.md §4.2) gives Administrator exactly one destination
+ * (User Management), this screen is titled "Screen: IT Staff Ticket
+ * Detail" and appears in no Administrator nav, and §4.3 says a role that
+ * reaches a route it may not use gets the forbidden state, not the
+ * screen. Don't conflate this with `GET /api/tickets/:id` also serving
+ * ADMINISTRATOR reads (api-spec.md §5) — that's a fact about the read
+ * API, not a grant of this UI route, and conflating the two is exactly
+ * how an Administrator previously ended up on a screen whose Ticket
+ * Owner/Status controls are IT_STAFF-only server-side and 403 on submit.
+ * Everyone else (including an unauthenticated caller, or a REQUESTER) is
+ * handled by `RequireRole` exactly as above.
  */
 function App() {
   return (
@@ -85,7 +93,7 @@ function App() {
         <Route
           path="/staff/tickets/:id"
           element={
-            <RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}>
+            <RequireRole allowedRoles={["IT_STAFF"]}>
               <StaffTicketDetailScreen />
             </RequireRole>
           }
