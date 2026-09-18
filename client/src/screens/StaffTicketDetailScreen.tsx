@@ -805,173 +805,195 @@ export function StaffTicketDetailScreen() {
 
       {state.phase === "loaded" && (
         <>
-          <section className="zen-staff-detail__card">
-            <h2>Ticket information</h2>
+          {/* Desktop two-column layout (ui-spec.md §12: "Ticket Detail is
+              two-column (read-only left, operational panel right)" at
+              >=992px, stacking to one column with the operational panel
+              first below that). Implemented as a CSS grid with named
+              `grid-template-areas` that differ per breakpoint
+              (StaffTicketDetailScreen.css) rather than reordering this JSX,
+              since the DOM order needs to put the read-only column first
+              for the desktop layout but the operations panel needs to
+              *render* first at narrower widths — a grid area swap gets both
+              without fighting either breakpoint. The two read-only cards
+              (Ticket information, Attachments — both listed under §10's
+              "Read-only:") share one column wrapper; Ticket Operations is
+              the other column on its own. Threads stay outside this grid,
+              full-width below it at every breakpoint. */}
+          <div className="zen-staff-detail__layout">
+            <div className="zen-staff-detail__readonly-column">
+              <section className="zen-staff-detail__card">
+                <h2>Ticket information</h2>
 
-            <div className="zen-staff-detail__grid">
-              <StaticField
-                label="Ticket No."
-                value={state.ticket.ticketNumber}
-              />
-              <StaticField
-                label="Ticket Date"
-                value={formatDateTimeWithYear(state.ticket.createdAt)}
-              />
-              <StaticField
-                label="Category"
-                value={state.ticket.category.name}
-              />
-              <StaticField
-                label="Requester"
-                value={state.ticket.requester.name}
-              />
-              <StaticBadgeField label="Requested Priority">
-                <PriorityBadge value={state.ticket.requestedPriority} />
-              </StaticBadgeField>
-              <StaticField
-                label="Related System"
-                value={state.ticket.relatedSystem.name}
-              />
+                <div className="zen-staff-detail__grid">
+                  <StaticField
+                    label="Ticket No."
+                    value={state.ticket.ticketNumber}
+                  />
+                  <StaticField
+                    label="Ticket Date"
+                    value={formatDateTimeWithYear(state.ticket.createdAt)}
+                  />
+                  <StaticField
+                    label="Category"
+                    value={state.ticket.category.name}
+                  />
+                  <StaticField
+                    label="Requester"
+                    value={state.ticket.requester.name}
+                  />
+                  <StaticBadgeField label="Requested Priority">
+                    <PriorityBadge value={state.ticket.requestedPriority} />
+                  </StaticBadgeField>
+                  <StaticField
+                    label="Related System"
+                    value={state.ticket.relatedSystem.name}
+                  />
+                </div>
+
+                <StaticField
+                  label="Summary"
+                  value={state.ticket.summary}
+                  fullWidth
+                  multiline
+                />
+                <StaticField
+                  label="Description"
+                  value={state.ticket.description}
+                  fullWidth
+                  multiline
+                />
+
+                {state.ticket.requesterResolvedAt && (
+                  <p className="zen-staff-detail__resolved-note">
+                    The requester reported this looks resolved on{" "}
+                    {formatDateTime(state.ticket.requesterResolvedAt)}.
+                  </p>
+                )}
+              </section>
+
+              {/* Clear separation from the ticket information card above
+                  (ui-spec.md §10, labsheet §8.5) — mirrors the Requester
+                  screen's own Attachments card. */}
+              <section className="zen-staff-detail__card">
+                <h2>
+                  Attachments (
+                  {state.ticket.attachments.filter((a) => !a.isRemoved).length}
+                  {" active / "}
+                  {state.ticket.attachments.length} total)
+                </h2>
+                <AttachmentList
+                  attachments={state.ticket.attachments}
+                  onDownload={handleDownload}
+                  onPreview={handlePreview}
+                  showRemove={false}
+                />
+
+                {downloadError && (
+                  <div
+                    role="alert"
+                    className="zen-staff-detail__download-error"
+                  >
+                    <span aria-hidden="true">⚠</span> {downloadError}
+                  </div>
+                )}
+              </section>
             </div>
 
-            <StaticField
-              label="Summary"
-              value={state.ticket.summary}
-              fullWidth
-              multiline
-            />
-            <StaticField
-              label="Description"
-              value={state.ticket.description}
-              fullWidth
-              multiline
-            />
+            {/* Operational panel (ui-spec.md §10: "one card, `--zen-pale`
+                accent") — visually distinct from the read-only cards
+                alongside it, same way those cards' own fields use
+                `--zen-readonly-bg` (ui-spec.md §10 intro: "Read-only and
+                editable regions are visually separated"). All three
+                controls — Ticket Owner, IT Priority and Status — are
+                interactive. */}
+            <section className="zen-staff-detail__card zen-staff-detail__card--operations">
+              <h2>Ticket Operations</h2>
 
-            {state.ticket.requesterResolvedAt && (
-              <p className="zen-staff-detail__resolved-note">
-                The requester reported this looks resolved on{" "}
-                {formatDateTime(state.ticket.requesterResolvedAt)}.
-              </p>
-            )}
-          </section>
-
-          {/* Operational panel (ui-spec.md §10: "one card, `--zen-pale`
-              accent") — visually distinct from the read-only ticket
-              information card above, same way that card's own fields use
-              `--zen-readonly-bg` (ui-spec.md §10 intro: "Read-only and
-              editable regions are visually separated"). All three controls
-              — Ticket Owner, IT Priority and Status — are interactive. */}
-          <section className="zen-staff-detail__card zen-staff-detail__card--operations">
-            <h2>Ticket Operations</h2>
-
-            <div className="zen-staff-detail__grid">
-              {/* IT Priority (ui-spec.md §10's editable table): a
-                  segmented control of the three priority values, saving on
-                  change. Both IT Staff and Administrator may use it
-                  (api-spec.md §5.2) — no role-based disabling here, unlike
-                  Ticket Owner/Status. */}
-              <div className="zen-staff-detail__it-priority-control">
-                <SegmentedControl
-                  id="staff-it-priority"
-                  label="IT Priority"
-                  value={state.ticket.itPriority ?? ""}
-                  onChange={handleItPriorityChange}
-                  options={IT_PRIORITY_OPTIONS}
-                  disabled={itPrioritySaving}
-                  error={itPriorityError}
-                />
-                {itPrioritySaved && (
-                  <span role="status" className="zen-staff-detail__save-tick">
-                    <span aria-hidden="true">✓</span> Saved
-                  </span>
-                )}
-              </div>
-
-              {/* Status (ui-spec.md §10's editable table): a select
-                  listing only the transitions STATUS_TRANSITIONS permits
-                  from the current status. CANCELLED is terminal, so
-                  `statusOptions` there is just the current value — the
-                  select is disabled rather than offered as a real choice
-                  with nothing in it. Close/Reopen/Cancel open the confirm
-                  dialog below instead of saving immediately. */}
-              <div className="zen-staff-detail__status-control">
-                <SelectField
-                  id="staff-ticket-status"
-                  label="Current Status"
-                  value={state.ticket.status}
-                  onChange={handleStatusSelectChange}
-                  options={statusOptions}
-                  disabled={statusSaving || statusOptions.length <= 1}
-                  error={statusError}
-                />
-                {statusSaved && (
-                  <span role="status" className="zen-staff-detail__save-tick">
-                    <span aria-hidden="true">✓</span> Saved
-                  </span>
-                )}
-              </div>
-
-              {/* Ticket Owner (ui-spec.md §10's editable table): a select of
-                  active IT Staff and Administrators plus "Unassigned"
-                  (fetchAssignableUsers), with a Claim button shown only
-                  while unassigned. */}
-              <div className="zen-staff-detail__owner-control">
-                <div className="zen-staff-detail__owner-row">
-                  <SelectField
-                    id="staff-ticket-owner"
-                    label="Ticket Owner"
-                    value={
-                      state.ticket.owner
-                        ? String(state.ticket.owner.id)
-                        : UNASSIGNED_OWNER_VALUE
-                    }
-                    onChange={handleOwnerSelectChange}
-                    options={ownerOptions}
-                    disabled={ownerSaving}
-                    error={ownerError}
+              <div className="zen-staff-detail__grid">
+                {/* IT Priority (ui-spec.md §10's editable table): a
+                    segmented control of the three priority values, saving on
+                    change. Both IT Staff and Administrator may use it
+                    (api-spec.md §5.2) — no role-based disabling here, unlike
+                    Ticket Owner/Status. */}
+                <div className="zen-staff-detail__it-priority-control">
+                  <SegmentedControl
+                    id="staff-it-priority"
+                    label="IT Priority"
+                    value={state.ticket.itPriority ?? ""}
+                    onChange={handleItPriorityChange}
+                    options={IT_PRIORITY_OPTIONS}
+                    disabled={itPrioritySaving}
+                    error={itPriorityError}
                   />
-                  {state.ticket.owner === null && user && (
-                    <Button
-                      variant="secondary"
-                      busy={ownerSaving}
-                      onClick={handleClaim}
-                    >
-                      Claim
-                    </Button>
+                  {itPrioritySaved && (
+                    <span role="status" className="zen-staff-detail__save-tick">
+                      <span aria-hidden="true">✓</span> Saved
+                    </span>
                   )}
                 </div>
-                {ownerSaved && (
-                  <span role="status" className="zen-staff-detail__save-tick">
-                    <span aria-hidden="true">✓</span> Saved
-                  </span>
-                )}
-              </div>
-            </div>
-          </section>
 
-          {/* Clear separation from the ticket information card above
-              (ui-spec.md §10, labsheet §8.5) — mirrors the Requester
-              screen's own Attachments card. */}
-          <section className="zen-staff-detail__card">
-            <h2>
-              Attachments (
-              {state.ticket.attachments.filter((a) => !a.isRemoved).length}
-              {" active / "}
-              {state.ticket.attachments.length} total)
-            </h2>
-            <AttachmentList
-              attachments={state.ticket.attachments}
-              onDownload={handleDownload}
-              onPreview={handlePreview}
-              showRemove={false}
-            />
+                {/* Status (ui-spec.md §10's editable table): a select
+                    listing only the transitions STATUS_TRANSITIONS permits
+                    from the current status. CANCELLED is terminal, so
+                    `statusOptions` there is just the current value — the
+                    select is disabled rather than offered as a real choice
+                    with nothing in it. Close/Reopen/Cancel open the confirm
+                    dialog below instead of saving immediately. */}
+                <div className="zen-staff-detail__status-control">
+                  <SelectField
+                    id="staff-ticket-status"
+                    label="Current Status"
+                    value={state.ticket.status}
+                    onChange={handleStatusSelectChange}
+                    options={statusOptions}
+                    disabled={statusSaving || statusOptions.length <= 1}
+                    error={statusError}
+                  />
+                  {statusSaved && (
+                    <span role="status" className="zen-staff-detail__save-tick">
+                      <span aria-hidden="true">✓</span> Saved
+                    </span>
+                  )}
+                </div>
 
-            {downloadError && (
-              <div role="alert" className="zen-staff-detail__download-error">
-                <span aria-hidden="true">⚠</span> {downloadError}
+                {/* Ticket Owner (ui-spec.md §10's editable table): a select of
+                    active IT Staff and Administrators plus "Unassigned"
+                    (fetchAssignableUsers), with a Claim button shown only
+                    while unassigned. */}
+                <div className="zen-staff-detail__owner-control">
+                  <div className="zen-staff-detail__owner-row">
+                    <SelectField
+                      id="staff-ticket-owner"
+                      label="Ticket Owner"
+                      value={
+                        state.ticket.owner
+                          ? String(state.ticket.owner.id)
+                          : UNASSIGNED_OWNER_VALUE
+                      }
+                      onChange={handleOwnerSelectChange}
+                      options={ownerOptions}
+                      disabled={ownerSaving}
+                      error={ownerError}
+                    />
+                    {state.ticket.owner === null && user && (
+                      <Button
+                        variant="secondary"
+                        busy={ownerSaving}
+                        onClick={handleClaim}
+                      >
+                        Claim
+                      </Button>
+                    )}
+                  </div>
+                  {ownerSaved && (
+                    <span role="status" className="zen-staff-detail__save-tick">
+                      <span aria-hidden="true">✓</span> Saved
+                    </span>
+                  )}
+                </div>
               </div>
-            )}
-          </section>
+            </section>
+          </div>
 
           {/* ui-spec.md §8/§10: Public Comments card, then Internal Notes
               card, in that order — "the internal card second." */}

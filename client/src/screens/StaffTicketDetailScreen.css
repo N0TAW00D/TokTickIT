@@ -41,6 +41,62 @@
   margin-top: var(--zen-space-section-gap);
 }
 
+/* Desktop two-column Ticket Detail layout (ui-spec.md §12: "Ticket Detail
+   is two-column (read-only left, operational panel right)" at >=992px,
+   "stacks to one column, operational panel first" below that — both the
+   tablet and mobile rows say this, so the swap happens once at the 991px
+   breakpoint, same as `.zen-staff-detail__grid` below). Two named areas —
+   "readonly" (the Ticket information + Attachments column) and
+   "operations" (the Ticket Operations card) — so the breakpoint override
+   only needs to redeclare `grid-template-areas`/`grid-template-columns`,
+   not touch the JSX order (JSX always renders read-only column first,
+   which is also the source order screen readers/no-CSS agents get).
+   Default (this rule, unguarded) is the desktop, >=992px layout; the
+   max-width overrides below match this file's own cascade convention. */
+.zen-staff-detail__layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas: "readonly operations";
+  gap: var(--zen-space-section-gap);
+  align-items: start;
+}
+
+/* Both read-only cards stack inside their shared grid area exactly like
+   they did as plain siblings before this layout existed — the
+   `.zen-staff-detail__card + .zen-staff-detail__card` rule above still
+   applies between them since they're still adjacent siblings here, just
+   one level deeper. */
+.zen-staff-detail__readonly-column {
+  grid-area: readonly;
+  min-width: 0;
+}
+
+.zen-staff-detail__card--operations {
+  grid-area: operations;
+  min-width: 0;
+}
+
+/* `.zen-staff-detail__card + .zen-message-thread` (above) no longer
+   applies once the Attachments card's next sibling is `.zen-staff-detail__
+   layout` itself rather than a thread — restores the same gap above the
+   first (Public Comments) thread. */
+.zen-staff-detail__layout + .zen-message-thread {
+  margin-top: var(--zen-space-section-gap);
+}
+
+/* Tablet + mobile (ui-spec.md §12: "Ticket Detail stacks to one column,
+   operational panel first" — stated once for both the 768–991px and
+   <768px rows, so both fall under this single max-width:991px override,
+   matching `.zen-staff-detail__grid`'s own breakpoint below). */
+@media (max-width: 991px) {
+  .zen-staff-detail__layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "operations"
+      "readonly";
+  }
+}
+
 /* Operational panel card (ui-spec.md §10: "one card, `--zen-pale`
    accent") — the pale background is what visually separates the editable
    region from the white `.zen-staff-detail__card` ticket-information card
