@@ -928,6 +928,18 @@ ticketsRouter.patch(
       }
 
       if (requestedOwnerId !== null) {
+        // Out-of-int4-range ids cannot reference any row (User.id is int4);
+        // querying with one would raise a driver-level range error instead
+        // of a clean "not found", same as categoryId/relatedSystemId in
+        // POST /api/tickets above. Per api-spec.md §1.4's 403/404-precedence
+        // framing, an id that can't reference any row is indistinguishable
+        // from a nonexistent candidate, so it short-circuits straight to the
+        // same 409 INVALID_OWNER below rather than reaching findUnique.
+        if (Math.abs(requestedOwnerId) > PG_INT4_MAX) {
+          invalidOwner(res);
+          return;
+        }
+
         const candidate = await prisma.user.findUnique({
           where: { id: requestedOwnerId },
           select: { role: true, isActive: true },

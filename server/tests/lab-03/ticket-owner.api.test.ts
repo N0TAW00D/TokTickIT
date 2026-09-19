@@ -241,6 +241,25 @@ describe('PATCH /api/tickets/:id/owner (api-spec.md §5.1)', () => {
     expect(res.body.error).toBe('INVALID_OWNER');
   });
 
+  it('409 INVALID_OWNER (never 500) when ownerId exceeds the int4 range', async () => {
+    // User.id is a Postgres int4 column (max 2_147_483_647); an id past that
+    // can't reference any row, so it's a driver-level range error waiting to
+    // happen rather than a clean "not found" if it ever reached
+    // prisma.user.findUnique. This must be caught before that lookup and
+    // treated identically to the nonexistent-id case above (409
+    // INVALID_OWNER), never surfaced as a 500 INTERNAL.
+    const ticket = await seedTicket({ ownerId: null });
+    const outOfRangeId = 2_147_483_648; // PG_INT4_MAX + 1
+
+    const res = await patchOwner(ticket.id, { ownerId: outOfRangeId }, staffACookie);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('INVALID_OWNER');
+
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(stored.ownerId).toBeNull();
+  });
+
   it('the three INVALID_OWNER causes return a byte-identical body', async () => {
     const ticket = await seedTicket({ ownerId: null });
     const bogusId = staffAId + inactiveStaffId + requesterAId + 1_000_000;
