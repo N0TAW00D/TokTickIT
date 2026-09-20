@@ -45,6 +45,13 @@
   padding: calc(var(--zen-space-unit) * 1) calc(var(--zen-space-unit) * 2);
 }
 
+/* ui-spec.md §8: the internal variant's badge text uses the private-content
+   token, not the generic warning color, so it visually matches the rest of
+   the Internal Notes surface. */
+.thread--internal .zen-message-thread__privacy-badge {
+  color: var(--zen-private-text);
+}
+
 .zen-message-thread__list {
   list-style: none;
   margin: 0 0 var(--zen-space-group-gap);

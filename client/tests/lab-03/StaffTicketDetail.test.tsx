@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { StaffTicketDetailScreen } from "../../src/screens/StaffTicketDetailScreen.tsx";
 import { AuthProvider, useAuth } from "../../src/auth/AuthContext.tsx";
 import type { AuthUser } from "../../src/auth/api.ts";
@@ -647,6 +649,13 @@ describe("Internal Notes thread (variant=internal)", () => {
     const thread = heading.closest(".zen-message-thread") as HTMLElement;
     expect(within(thread).getByText("🔒")).toBeInTheDocument();
 
+    // ui-spec.md §13: Internal Notes is the one thread variant that needs a
+    // non-visual privacy distinction (VARIANT_CONFIG.internal.ariaLabel).
+    expect(thread).toHaveAttribute(
+      "aria-label",
+      "Internal notes, not visible to the requester",
+    );
+
     const textarea = screen.getByLabelText(/add an internal note/i);
     fireEvent.change(textarea, {
       target: { value: "Vendor confirmed a firmware fix is available." },
@@ -1156,5 +1165,53 @@ describe("Status control — terminal status (CANCELLED)", () => {
       .getAllByRole("option")
       .map((option) => option.textContent);
     expect(labels).toEqual(["Cancelled"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stylesheet-contract regressions (vitest here doesn't set `css: true`, so a
+// rendered element's getComputedStyle won't resolve var()-cascaded values —
+// lab-02/ui-style.test.tsx's own convention of asserting against the .css
+// source is followed instead of rendering + computed-style assertions).
+// vitest runs from client/, so src is at cwd/src.
+// ---------------------------------------------------------------------------
+
+const CSS_SRC_DIR = join(process.cwd(), "src");
+
+function readCss(rel: string): string {
+  return readFileSync(join(CSS_SRC_DIR, rel), "utf8");
+}
+
+describe("Internal Notes privacy badge — private-text token (ui-spec.md §8)", () => {
+  it("the internal-variant badge uses --zen-private-text, not the generic warning color", () => {
+    expect(readCss("components/MessageThread.css")).toMatch(
+      /\.thread--internal\s+\.zen-message-thread__privacy-badge\s*\{[^}]*color:\s*var\(--zen-private-text\)/,
+    );
+  });
+});
+
+describe("Status confirm dialog — tablet/mobile layout (ui-spec.md §12)", () => {
+  it("drops the 480px cap for the tablet tier (768-991px)", () => {
+    const css = readCss("components/ConfirmStatusChangeDialog.css");
+    const tabletBlock = css.match(
+      /@media \(max-width:\s*991px\)\s*\{([\s\S]*?)\n\}/,
+    );
+    expect(tabletBlock).not.toBeNull();
+    expect(tabletBlock?.[1]).toMatch(
+      /\.zen-confirm-status\s*\{[^}]*max-width:\s*none/,
+    );
+  });
+
+  it("becomes a full-screen sheet for the mobile tier (<768px)", () => {
+    const css = readCss("components/ConfirmStatusChangeDialog.css");
+    const mobileBlock = css.match(
+      /@media \(max-width:\s*767px\)\s*\{([\s\S]*)\}\s*$/,
+    );
+    expect(mobileBlock).not.toBeNull();
+    const body = mobileBlock?.[1] ?? "";
+    expect(body).toMatch(/\.zen-confirm-status__overlay\s*\{[^}]*padding:\s*0/);
+    expect(body).toMatch(
+      /\.zen-confirm-status\s*\{[^}]*width:\s*100vw[^}]*height:\s*100vh[^}]*border-radius:\s*0/,
+    );
   });
 });
