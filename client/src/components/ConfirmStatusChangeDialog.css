@@ -1,0 +1,98 @@
+/* Status-change confirmation dialog (ui-spec.md §10: Close/Reopen/Cancel).
+   Same shell as ConfirmResolvedDialog.css under its own class prefix, so
+   the two dialogs' styles never cross-affect each other.
+
+   ui-spec.md §12 gives this dialog its own responsive tiers, on top of the
+   Desktop ≥992px centered-card default below:
+     - Tablet 768-991px: full-width with a 24px margin (not the 480px cap).
+     - Mobile <768px: a full-screen sheet — no overlay margin, no floating
+       card, the dialog fills the viewport edge-to-edge. */
+
+.zen-confirm-status__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--zen-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--zen-space-group-gap);
+  z-index: 1000;
+}
+
+.zen-confirm-status {
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 2 * var(--zen-space-group-gap));
+  overflow-y: auto;
+  background: var(--zen-surface);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+.zen-confirm-status__body {
+  color: var(--zen-text);
+  font-size: var(--zen-font-size-body);
+  margin: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.zen-confirm-status__error {
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border-radius: var(--zen-radius-control);
+  padding: 8px 12px;
+  margin-top: var(--zen-space-field-gap);
+  font-size: var(--zen-font-size-error);
+}
+
+.zen-confirm-status__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: var(--zen-space-group-gap);
+}
+
+/* Tablet 768-991px (ui-spec.md §12: "dialogs go full-width with 24px
+   margin"). The overlay already pads 24px on every side (its own
+   `--zen-space-group-gap`), so dropping the 480px cap is enough — the
+   dialog naturally fills exactly that margin instead of staying a narrow
+   centered card with empty space either side of it. This also matches
+   `.zen-staff-detail__layout`'s own max-width:991px convention for the
+   combined tablet+mobile tier (StaffTicketDetailScreen.css), and stays in
+   effect below 767px too unless the mobile block overrides it. */
+@media (max-width: 991px) {
+  .zen-confirm-status {
+    max-width: none;
+  }
+}
+
+/* Mobile <768px (ui-spec.md §12: "dialogs become full-screen sheets") —
+   qualitatively different from the tablet tier above: not a wider card,
+   but no card at all. The overlay's margin/centering is dropped so the
+   dialog fills the viewport edge-to-edge with no rounded corners, and its
+   own padding stands in for the overlay's. */
+@media (max-width: 767px) {
+  .zen-confirm-status__overlay {
+    padding: 0;
+  }
+
+  .zen-confirm-status {
+    max-width: none;
+    max-height: none;
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    padding: var(--zen-space-card-padding-mobile);
+  }
+
+  .zen-confirm-status__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-confirm-status__actions .zen-btn {
+    width: 100%;
+  }
+}

@@ -213,11 +213,15 @@ export async function fetchMyTickets(
  * `POST /api/tickets` `201` body, plus a populated `attachments` array and
  * (Lab 3) `owner`/`requesterResolvedAt` — `owner` is `null` when
  * unassigned (ui-spec.md §7: rendered as "Unassigned"); `itPriority` is
- * deliberately never included for a Requester caller (api-spec.md §9).
+ * deliberately never included for a Requester caller (api-spec.md §9), so
+ * it is optional here rather than nullable — the key is simply absent from
+ * that response, never sent as `null`. IT Staff/Administrator callers
+ * (api-spec.md §5) do get it.
  */
 export interface TicketDetailResponse extends CreateTicketResponse {
   owner: { id: number; name: string } | null;
   requesterResolvedAt: string | null;
+  itPriority?: RequestedPriority;
 }
 
 /**
@@ -718,4 +722,231 @@ export async function postRequesterResolved(ticketId: number): Promise<void> {
     }
     throw new Error(`Failed to record the resolution indication (status ${response.status})`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// IT Staff ticket operations (api-spec.md §5.1-§5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by `patchTicketOwner` on a `409 INVALID_OWNER` (api-spec.md §5.1) —
+ * the given `ownerId` names an inactive user, a Requester, or a user that
+ * does not exist. The server intentionally doesn't say which (BR-20,
+ * AC-36), so this error just carries the response's safe `message` (or a
+ * sensible default) rather than a code to branch on.
+ */
+export class InvalidOwnerError extends Error {
+  constructor(message?: string) {
+    super(message ?? "That user can't be assigned to this ticket.");
+    this.name = "InvalidOwnerError";
+  }
+}
+
+/**
+ * `PATCH /api/tickets/:id/owner` (api-spec.md §5.1): claim, assign or
+ * reassign a ticket's owner as the calling IT Staff member, via the session
+ * cookie (`credentials: "include"`). `ownerId: null` unassigns; claiming is
+ * the client sending its own user id.
+ *
+ * A `409 INVALID_OWNER` raises `InvalidOwnerError`; every other failure
+ * (network error, `404`, `403`, `5xx`) raises a generic `Error`.
+ */
+export async function patchTicketOwner(
+  ticketId: number,
+  ownerId: number | null,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/owner`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ownerId }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      const body = await readErrorBody(response);
+      throw new InvalidOwnerError(extractSafeMessage(body));
+    }
+    throw new Error(`Failed to update ticket owner (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * `PATCH /api/tickets/:id/it-priority` (api-spec.md §5.2): set a ticket's IT
+ * Priority as the calling IT Staff member or Administrator, via the session
+ * cookie. `requestedPriority` is untouched — no endpoint in this API can
+ * change it after creation (BR-21, AC-37).
+ *
+ * A `400` here is a client bug (an out-of-enum value the UI should never
+ * send), not a user-recoverable state, so every non-ok response (including
+ * `400`) raises a generic `Error`.
+ */
+export async function patchTicketItPriority(
+  ticketId: number,
+  itPriority: RequestedPriority,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/it-priority`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ itPriority }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update IT priority (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * The two conflict codes `patchTicketStatus` can raise (api-spec.md §5.3):
+ * `INVALID_TRANSITION` (the (current, requested) pair isn't in
+ * `specification.md` §5.1, including a no-op to the current status —
+ * BR-23, AC-39) and `OWNER_REQUIRED` (target is `IN_PROGRESS` with no
+ * owner — BR-24, AC-40). ui-spec.md §10 shows the same conflict copy for
+ * both, but this error still carries the code so a caller could branch on
+ * it later if that ever changes.
+ */
+export type StatusTransitionConflictCode = "INVALID_TRANSITION" | "OWNER_REQUIRED";
+
+/**
+ * ui-spec.md §10's frozen conflict-state copy for a rejected status
+ * transition — the same message for both `INVALID_TRANSITION` and
+ * `OWNER_REQUIRED` (§10: "A rejected transition (409) renders the conflict
+ * state").
+ */
+export const STATUS_TRANSITION_CONFLICT_MESSAGE =
+  "That status change is no longer possible — the ticket has moved on. Refresh to see its current state.";
+
+/**
+ * Thrown by `patchTicketStatus` for a `409 INVALID_TRANSITION` or `409
+ * OWNER_REQUIRED` (api-spec.md §5.3). Always carries ui-spec.md §10's
+ * literal conflict copy regardless of which of the two codes triggered it,
+ * plus the `code` itself so the UI can distinguish them if it ever needs
+ * to.
+ */
+export class StatusTransitionConflictError extends Error {
+  readonly code: StatusTransitionConflictCode;
+
+  constructor(code: StatusTransitionConflictCode) {
+    super(STATUS_TRANSITION_CONFLICT_MESSAGE);
+    this.name = "StatusTransitionConflictError";
+    this.code = code;
+  }
+}
+
+/**
+ * `PATCH /api/tickets/:id/status` (api-spec.md §5.3): move a ticket to a new
+ * status as the calling IT Staff member, via the session cookie.
+ *
+ * A `409 INVALID_TRANSITION` or `409 OWNER_REQUIRED` raises
+ * `StatusTransitionConflictError` with the matching code; every other
+ * failure (network error, `400`, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function patchTicketStatus(
+  ticketId: number,
+  status: string,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/status`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      const body = await readErrorBody(response);
+      const code =
+        typeof body === "object" &&
+        body !== null &&
+        (body as Record<string, unknown>).error === "OWNER_REQUIRED"
+          ? "OWNER_REQUIRED"
+          : "INVALID_TRANSITION";
+      throw new StatusTransitionConflictError(code);
+    }
+    throw new Error(`Failed to update ticket status (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * `GET /api/tickets/:id/notes` (api-spec.md §5.4): Internal Notes for an IT
+ * Staff or Administrator caller, via the session cookie. Same shape as
+ * comments (§5.4), so this reuses `CommentEntry` rather than a separate
+ * `NoteEntry` type — that same shape also satisfies `MessageThread`'s
+ * `MessageThreadEntry` prop (`client/src/components/MessageThread.tsx`).
+ * Ordered `createdAt` ascending, matching the server's own ordering.
+ *
+ * A Requester caller gets `404`, not `403` (api-spec.md §1.4's rule), which
+ * this mirrors as a generic `Error` like every other non-ok response —
+ * there's no note-specific error to distinguish here.
+ */
+export async function fetchTicketNotes(ticketId: number): Promise<CommentEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/notes`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load notes (status ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
+ * Thrown by `postTicketNote` for a `400 VALIDATION_FAILED` (empty,
+ * whitespace-only, or over 2000 characters — BR-17, api-spec.md §5.5). Kept
+ * independent from `PostCommentValidationError` even though the logic is
+ * identical, matching this file's existing pattern of not sharing error
+ * classes between near-identical call sites (see `RemoveAttachmentError`
+ * vs. `UploadAttachmentError`).
+ */
+export class PostNoteValidationError extends Error {
+  readonly fields: CreateTicketFieldError[];
+
+  constructor(fields: CreateTicketFieldError[]) {
+    super("Note failed validation.");
+    this.name = "PostNoteValidationError";
+    this.fields = fields;
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/notes` (api-spec.md §5.5): post one Internal Note
+ * as the calling IT Staff member, via the session cookie. `author`/
+ * `createdAt` come from the server (BR-16) regardless of what this call
+ * sends — there is nothing to send but `body`.
+ *
+ * A `400 VALIDATION_FAILED` raises `PostNoteValidationError`; every other
+ * failure (network error, `404`, `403`, `5xx`) raises a generic `Error`.
+ */
+export async function postTicketNote(ticketId: number, body: string): Promise<CommentEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/notes`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 400) {
+      const errorBody = await readErrorBody(response);
+      if (
+        typeof errorBody === "object" &&
+        errorBody !== null &&
+        (errorBody as Record<string, unknown>).error === "VALIDATION_FAILED" &&
+        Array.isArray((errorBody as Record<string, unknown>).fields)
+      ) {
+        const fields = ((errorBody as Record<string, unknown>).fields as unknown[]).filter(isFieldError);
+        throw new PostNoteValidationError(fields);
+      }
+    }
+    throw new Error(`Failed to post note (status ${response.status})`);
+  }
+
+  return response.json();
 }

@@ -28,6 +28,8 @@ interface VariantConfig {
   placeholder: string;
   submitLabel: string;
   entryPrefix: string | null;
+  /** ui-spec.md §13: only Internal Notes needs this — Public Comments has no non-visual privacy distinction to carry. */
+  ariaLabel: string | undefined;
 }
 
 /** ui-spec.md §8's per-variant table — the only thing that differs between a Public Comments and an Internal Notes thread. */
@@ -39,6 +41,7 @@ const VARIANT_CONFIG: Record<MessageThreadVariant, VariantConfig> = {
     placeholder: "Write a comment the requester can see…",
     submitLabel: "Post comment",
     entryPrefix: null,
+    ariaLabel: undefined,
   },
   internal: {
     wrapperClass: "thread--internal",
@@ -47,6 +50,7 @@ const VARIANT_CONFIG: Record<MessageThreadVariant, VariantConfig> = {
     placeholder: "Write an internal note. The requester cannot see this.",
     submitLabel: "Save internal note",
     entryPrefix: "🔒",
+    ariaLabel: "Internal notes, not visible to the requester",
   },
 };
 
@@ -136,7 +140,10 @@ export function MessageThread({ variant, fetchEntries, postEntry }: MessageThrea
   }
 
   return (
-    <section className={`zen-message-thread ${config.wrapperClass}`}>
+    <section
+      className={`zen-message-thread ${config.wrapperClass}`}
+      aria-label={config.ariaLabel}
+    >
       <div className="zen-message-thread__heading-row">
         <h2>{config.heading}</h2>
         {config.privacyBadge && (

@@ -1,0 +1,244 @@
+/* IT Staff Ticket Detail screen (ui-spec.md §10). Mirrors
+   TicketDetailScreen.css's structure/tokens under a `zen-staff-detail__`
+   prefix so the two screens stay visual siblings without one screen's CSS
+   changes silently affecting the other. */
+
+.zen-staff-detail__breadcrumb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-staff-detail__breadcrumb {
+  font-size: var(--zen-font-size-body);
+  color: var(--zen-text-muted);
+}
+
+.zen-staff-detail__breadcrumb a {
+  color: var(--zen-secondary);
+}
+
+.zen-staff-detail__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--zen-space-unit);
+}
+
+.zen-staff-detail__card {
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+.zen-staff-detail__card + .zen-staff-detail__card,
+.zen-staff-detail__card + .zen-message-thread {
+  margin-top: var(--zen-space-section-gap);
+}
+
+/* Desktop two-column Ticket Detail layout (ui-spec.md §12: "Ticket Detail
+   is two-column (read-only left, operational panel right)" at >=992px,
+   "stacks to one column, operational panel first" below that — both the
+   tablet and mobile rows say this, so the swap happens once at the 991px
+   breakpoint, same as `.zen-staff-detail__grid` below). Two named areas —
+   "readonly" (the Ticket information + Attachments column) and
+   "operations" (the Ticket Operations card) — so the breakpoint override
+   only needs to redeclare `grid-template-areas`/`grid-template-columns`,
+   not touch the JSX order (JSX always renders read-only column first,
+   which is also the source order screen readers/no-CSS agents get).
+   Default (this rule, unguarded) is the desktop, >=992px layout; the
+   max-width overrides below match this file's own cascade convention. */
+.zen-staff-detail__layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas: "readonly operations";
+  gap: var(--zen-space-section-gap);
+  align-items: start;
+}
+
+/* Both read-only cards stack inside their shared grid area exactly like
+   they did as plain siblings before this layout existed — the
+   `.zen-staff-detail__card + .zen-staff-detail__card` rule above still
+   applies between them since they're still adjacent siblings here, just
+   one level deeper. */
+.zen-staff-detail__readonly-column {
+  grid-area: readonly;
+  min-width: 0;
+}
+
+.zen-staff-detail__card--operations {
+  grid-area: operations;
+  min-width: 0;
+}
+
+/* `.zen-staff-detail__card + .zen-message-thread` (above) no longer
+   applies once the Attachments card's next sibling is `.zen-staff-detail__
+   layout` itself rather than a thread — restores the same gap above the
+   first (Public Comments) thread. */
+.zen-staff-detail__layout + .zen-message-thread {
+  margin-top: var(--zen-space-section-gap);
+}
+
+/* Tablet + mobile (ui-spec.md §12: "Ticket Detail stacks to one column,
+   operational panel first" — stated once for both the 768–991px and
+   <768px rows, so both fall under this single max-width:991px override,
+   matching `.zen-staff-detail__grid`'s own breakpoint below). */
+@media (max-width: 991px) {
+  .zen-staff-detail__layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "operations"
+      "readonly";
+  }
+}
+
+/* Operational panel card (ui-spec.md §10: "one card, `--zen-pale`
+   accent") — the pale background is what visually separates the editable
+   region from the white `.zen-staff-detail__card` ticket-information card
+   above it, mirroring how that card's own fields lean on
+   `--zen-readonly-bg` for the same read-only/editable contrast. */
+.zen-staff-detail__card--operations {
+  background: var(--zen-pale);
+}
+
+.zen-staff-detail__owner-control,
+.zen-staff-detail__it-priority-control,
+.zen-staff-detail__status-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Status transition conflict banner (ui-spec.md §10: "A rejected transition
+   (409) renders the conflict state") — same look as TicketDetailScreen's
+   own `.zen-ticket-detail__conflict-banner`, duplicated under this screen's
+   own prefix so neither screen's CSS can accidentally affect the other. */
+.zen-staff-detail__conflict-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--zen-space-field-gap);
+  flex-wrap: wrap;
+  color: var(--zen-warning);
+  background: var(--zen-warning-bg);
+  border-radius: var(--zen-radius-control);
+  padding: 12px 16px;
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+.zen-staff-detail__owner-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--zen-space-unit);
+}
+
+.zen-staff-detail__owner-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Transient "Saved" tick (ui-spec.md §10: "a success tick on save"). */
+.zen-staff-detail__save-tick {
+  color: var(--zen-success);
+  font-size: var(--zen-font-size-helper);
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-staff-detail__resolved-note {
+  color: var(--zen-text-muted);
+  font-size: var(--zen-font-size-helper);
+  margin: 0;
+}
+
+.zen-staff-detail__download-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border-radius: var(--zen-radius-control);
+  padding: 12px 16px;
+  margin-top: var(--zen-space-field-gap);
+}
+
+@media (max-width: 767px) {
+  .zen-staff-detail__card {
+    padding: var(--zen-space-card-padding-mobile);
+  }
+}
+
+/* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive", same convention as
+   the Requester screen's own grid. */
+.zen-staff-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+@media (max-width: 991px) {
+  .zen-staff-detail__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .zen-staff-detail__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zen-staff-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0; /* lets the ellipsis rule below actually apply in a grid/flex item */
+}
+
+.zen-staff-detail__field--full {
+  margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-staff-detail__field-label {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text);
+}
+
+/* Read-only presentation (ui-spec.md §5.3): same --zen-readonly-bg /
+   --zen-readonly-text look as a readonly input, but a plain <div>. */
+.zen-staff-detail__field-value {
+  box-sizing: border-box;
+  min-height: var(--zen-control-height);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--zen-readonly-bg);
+  color: var(--zen-readonly-text);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-staff-detail__field-value--badge {
+  overflow: visible;
+}
+
+/* Summary/Description: wrap in full rather than truncate. */
+.zen-staff-detail__field-value--multiline {
+  display: block;
+  height: auto;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: visible;
+  text-overflow: clip;
+}

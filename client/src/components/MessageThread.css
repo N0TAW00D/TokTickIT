@@ -1,8 +1,7 @@
-/* Shared comment/note thread (ui-spec.md §8). Only the "public" variant's
-   surface/border is styled here — the "internal" variant's distinct
-   surface/border tokens (--zen-private-bg/-border) belong to whichever
-   issue first renders that variant (#72), per this repo's own precedent of
-   only adding the tokens a change actually uses (see theme.css). */
+/* Shared comment/note thread (ui-spec.md §8). The variant table there
+   drives everything below: `.zen-message-thread` carries the shared shell,
+   `.thread--public`/`.thread--internal` (both applied together, see
+   MessageThread.tsx) override only the surface/border a variant needs. */
 
 .zen-message-thread {
   background: var(--zen-surface);
@@ -10,6 +9,14 @@
   border-radius: var(--zen-radius-card);
   padding: var(--zen-space-card-padding-desktop);
   box-sizing: border-box;
+}
+
+/* ui-spec.md §8: Internal Notes gets its own private surface/border tokens
+   (2px, not the base 1px) so the privacy distinction reads even before the
+   heading/badge text does. */
+.thread--internal {
+  background: var(--zen-private-bg);
+  border: 2px solid var(--zen-private-border);
 }
 
 @media (max-width: 767px) {
@@ -36,6 +43,13 @@
   background: var(--zen-warning-bg);
   border-radius: var(--zen-radius-badge);
   padding: calc(var(--zen-space-unit) * 1) calc(var(--zen-space-unit) * 2);
+}
+
+/* ui-spec.md §8: the internal variant's badge text uses the private-content
+   token, not the generic warning color, so it visually matches the rest of
+   the Internal Notes surface. */
+.thread--internal .zen-message-thread__privacy-badge {
+  color: var(--zen-private-text);
 }
 
 .zen-message-thread__list {

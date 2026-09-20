@@ -1,7 +1,7 @@
 import multer, { MulterError } from 'multer';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { authenticate, passwordChangeGate, requireRole, type AuthenticatedUser } from '../middleware/authContext.ts';
-import { validateTicketFields, type FieldError } from '../validation/ticketFields.ts';
+import { validateTicketFields, PRIORITIES, type FieldError, type Priority } from '../validation/ticketFields.ts';
 import { validateCommentBody } from '../validation/commentFields.ts';
 import { parseTicketListQuery } from '../validation/ticketListQuery.ts';
 import { createTicket, ReferenceNotFoundError, TICKET_INCLUDE } from '../services/createTicket.ts';
@@ -13,7 +13,13 @@ import {
   uploadAttachment,
 } from '../services/uploadAttachment.ts';
 import { prisma } from '../lib/prisma.ts';
-import type { Prisma, TicketStatus } from '../generated/prisma/client.ts';
+import type { Prisma } from '../generated/prisma/client.ts';
+// Imported as a value (not `import type`) here — unlike
+// staffTicketQueueQuery.ts's hand-rolled `STAFF_QUEUE_STATUSES`, PATCH
+// /:id/status (below) validates the incoming `status` field against the
+// generated Prisma enum directly, so the eight permitted strings and the
+// transition matrix's keys can never drift out of sync with schema.prisma.
+import { TicketStatus } from '../generated/prisma/client.ts';
 
 // POST /api/tickets — api-spec.md §3.1 (BR-01, BR-02, BR-04, BR-12, BR-24,
 // BR-25, BR-26, BR-28, BR-36; AC-01, AC-11..AC-14, AC-16, AC-43).
@@ -22,7 +28,9 @@ import type { Prisma, TicketStatus } from '../generated/prisma/client.ts';
 // AC-09, AC-22..AC-31).
 //
 // GET /api/tickets/:id — api-spec.md §3.3 (BR-14, BR-33, BR-38, BR-39,
-// BR-42; FR-32..FR-34; AC-32, AC-37, AC-38).
+// BR-42; FR-32..FR-34; AC-32, AC-37, AC-38), reused unchanged for Requesters
+// and extended per api-spec.md §5 (FR-20, AC-67) so IT Staff/Administrators
+// can fetch any ticket and additionally see `itPriority`.
 //
 // POST /api/tickets/:id/attachments — api-spec.md §4.1 (BR-14, BR-21..23,
 // BR-27, BR-29, BR-30; AC-18..21).
@@ -323,77 +331,99 @@ const TICKET_DETAIL_ATTACHMENT_SELECT = {
   createdAt: true,
 } as const;
 
-ticketsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
-  // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
-  // treated as a resource that does not exist, never a 400 — same helper
-  // the attachments route below already uses for its own `:id`.
-  const ticketId = parseTicketIdParam(String(req.params.id));
-  if (ticketId === null) {
-    ticketNotFound(res);
-    return;
-  }
+// The `include` shared by both the Requester and staff lookups below —
+// identical fields either way; only the `where` clause (own-ticket-only vs.
+// any-ticket) and the response's `itPriority` key differ by role.
+const TICKET_DETAIL_INCLUDE = {
+  ...TICKET_INCLUDE,
+  // ui-spec.md §7: Ticket Owner shows as a read-only row ("Unassigned" or
+  // the owner's name) for every role that can reach this route.
+  owner: { select: { id: true, name: true } },
+  attachments: {
+    // BR-33: both active and soft-removed attachments are listed here
+    // (unlike GET /api/tickets's activeAttachmentCount, which counts only
+    // non-removed rows) — no `where` filter on `isRemoved` at all. Ordered
+    // by id asc (creation order, with the same tie-break convention as
+    // BR-18) purely for a stable, deterministic response; the spec does not
+    // mandate a particular order.
+    orderBy: { id: 'asc' },
+    select: TICKET_DETAIL_ATTACHMENT_SELECT,
+  },
+} satisfies Prisma.TicketInclude;
 
-  try {
-    // Ownership folded straight into the `where` clause (BR-15's pattern,
-    // reused here) rather than fetched-then-compared: an unknown id and one
-    // owned by another Requester both simply fail to match this single
-    // query and fall into the one `if (!ticket)` branch below, which calls
-    // the one shared `ticketNotFound` helper. There is deliberately no
-    // second branch that decides "not owned" separately from "not found" —
-    // BR-14/BR-42's byte-identical requirement can't drift apart if there is
-    // only one code path that ever produces the 404.
-    const ticket = await prisma.ticket.findFirst({
-      where: { id: ticketId, requesterId: req.authUser!.id },
-      include: {
-        ...TICKET_INCLUDE,
-        // ui-spec.md §7: Ticket Owner shows as a read-only row
-        // ("Unassigned" or the owner's name) — IT Priority is deliberately
-        // NOT selected/returned here, since it is never shown to the
-        // Requester (api-spec.md §9: "a Requester never sees itPriority").
-        owner: { select: { id: true, name: true } },
-        attachments: {
-          // BR-33: both active and soft-removed attachments are listed here
-          // (unlike GET /api/tickets's activeAttachmentCount, which counts
-          // only non-removed rows) — no `where` filter on `isRemoved` at
-          // all. Ordered by id asc (creation order, with the same tie-break
-          // convention as BR-18) purely for a stable, deterministic
-          // response; the spec does not mandate a particular order.
-          orderBy: { id: 'asc' },
-          select: TICKET_DETAIL_ATTACHMENT_SELECT,
-        },
-      },
-    });
-
-    if (!ticket) {
+ticketsRouter.get(
+  '/:id',
+  authenticate,
+  passwordChangeGate,
+  // api-spec.md §5: reused for Ticket Detail — IT Staff and Administrators
+  // may fetch any ticket, a Requester only their own (FR-20, AC-67).
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    // §1.4: a non-integer (or otherwise malformed/out-of-range) `:id` is
+    // treated as a resource that does not exist, never a 400 — same helper
+    // the attachments route below already uses for its own `:id`.
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
       ticketNotFound(res);
       return;
     }
 
-    res.status(200).json({
-      id: ticket.id,
-      ticketNumber: ticket.ticketNumber,
-      requester: ticket.requester,
-      category: ticket.category,
-      relatedSystem: ticket.relatedSystem,
-      requestedPriority: ticket.requestedPriority,
-      status: ticket.status,
-      summary: ticket.summary,
-      description: ticket.description,
-      createdAt: ticket.createdAt,
-      updatedAt: ticket.updatedAt,
-      attachments: ticket.attachments,
-      // api-spec.md §9 (Lab 3 change): null when unassigned — the client
-      // renders that as "Unassigned" (ui-spec.md §7).
-      owner: ticket.owner,
-      // BR-26: null until the Requester has indicated the problem appears
-      // resolved; never cleared by this route.
-      requesterResolvedAt: ticket.requesterResolvedAt,
-    });
-  } catch (error) {
-    console.error('Error fetching ticket:', error);
-    internalError(res);
-  }
-});
+    const isStaff = req.authUser!.role === 'IT_STAFF' || req.authUser!.role === 'ADMINISTRATOR';
+
+    try {
+      // Same "fold the access check into the query, not fetch-then-compare"
+      // shape `resolveTicketAccess` (below, used by the comments routes)
+      // applies — it isn't called directly here because those routes only
+      // need a thin `TicketAccessRow`, while this one needs the full detail
+      // payload (with `include`) in the same round trip. A Requester's
+      // `where` still folds ownership straight in (BR-15's pattern): an
+      // unknown id and one owned by another Requester both simply fail to
+      // match and fall into the one `if (!ticket)` branch below, which
+      // calls the one shared `ticketNotFound` helper — there is
+      // deliberately no second branch that decides "not owned" separately
+      // from "not found", so BR-14/BR-42's byte-identical requirement can't
+      // drift apart. IT Staff/Administrators have no ownership restriction
+      // at all: any existing id resolves, unknown ids still 404.
+      const ticket = await prisma.ticket.findFirst({
+        where: isStaff ? { id: ticketId } : { id: ticketId, requesterId: req.authUser!.id },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      if (!ticket) {
+        ticketNotFound(res);
+        return;
+      }
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        // api-spec.md §5/§9: IT Staff and Administrators additionally get
+        // `itPriority`; a Requester never sees it (ui-spec.md §7) — the key
+        // is omitted entirely for them, never sent as `null`.
+        ...(isStaff ? { itPriority: ticket.itPriority } : {}),
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        // api-spec.md §9 (Lab 3 change): null when unassigned — the client
+        // renders that as "Unassigned" (ui-spec.md §7).
+        owner: ticket.owner,
+        // BR-26: null until the Requester has indicated the problem appears
+        // resolved; never cleared by this route.
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error fetching ticket:', error);
+      internalError(res);
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // POST /api/tickets/:id/attachments (api-spec.md §4.1)
@@ -659,6 +689,12 @@ interface TicketAccessRow {
   id: number;
   requesterId: number;
   status: TicketStatus;
+  // Only PATCH /:id/status (below) reads this — OWNER_REQUIRED needs the
+  // ticket's current owner alongside its current status, and both are
+  // needed in the same round trip that already confirms the ticket exists
+  // and classifies the caller's access, so it's folded into this shared
+  // select rather than a second query.
+  ownerId: number | null;
 }
 
 type TicketAccess =
@@ -684,7 +720,7 @@ type TicketAccess =
 async function resolveTicketAccess(ticketId: number, authUser: AuthenticatedUser): Promise<TicketAccess> {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { id: true, requesterId: true, status: true },
+    select: { id: true, requesterId: true, status: true, ownerId: true },
   });
 
   if (!ticket) {
@@ -797,6 +833,575 @@ ticketsRouter.post(
       res.status(201).json(commentToJson(comment));
     } catch (error) {
       console.error('Error creating public comment:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/tickets/:id/owner (api-spec.md §5.1)
+// ---------------------------------------------------------------------------
+
+function invalidOwner(res: Response): void {
+  // BR-20/AC-36: an inactive user, a Requester, and a nonexistent id all
+  // return this identical body — never a hint as to which one it was.
+  res.status(409).json({
+    error: 'INVALID_OWNER',
+    message: 'ownerId must reference an active IT Staff or Administrator user.',
+  });
+}
+
+/**
+ * Shape-validates the `ownerId` field for `PATCH /api/tickets/:id/owner`:
+ * unlike `validateReferenceIdShape` above (required, always an int), this
+ * field's contract (api-spec.md §5.1) is `number | null` — `null` is a
+ * legal, meaningful value ("unassign"), not a missing-field failure. So a
+ * present `null` passes shape validation; anything present but neither an
+ * integer nor `null` (a string, a float, a boolean, an array/object, or the
+ * key simply missing) is a 400 VALIDATION_FAILED, matching this file's
+ * existing "malformed shape -> 400, valid shape that fails a lookup -> a
+ * dedicated conflict/not-found code" split.
+ */
+function validateOwnerIdShape(raw: unknown): FieldError | null {
+  if (raw === null) {
+    return null;
+  }
+  if (typeof raw !== 'number' || !Number.isInteger(raw)) {
+    return { field: 'ownerId', message: 'ownerId is required and must be an integer or null.' };
+  }
+  return null;
+}
+
+ticketsRouter.patch(
+  '/:id/owner',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // requireRole lets every role through here (rather than gating to
+  // IT_STAFF alone) so a Requester and an unknown ticket id both fall
+  // through to the same resolveTicketAccess-driven 404 below, instead of
+  // requireRole intercepting the Requester case with a 403 first — the same
+  // "decide precisely inside the handler" pattern the comments/
+  // requester-resolved routes above already use.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    const ownerIdError = validateOwnerIdShape(req.body.ownerId);
+    if (ownerIdError) {
+      validationFailed(res, [ownerIdError]);
+      return;
+    }
+    // Shape check above guarantees this is `number | null`.
+    const requestedOwnerId = req.body.ownerId as number | null;
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.1: a Requester never gets a write path here,
+      // regardless of ownership — unlike POST /api/tickets/:id/comments
+      // above (where the owning Requester's own 'owner' branch is a valid
+      // write path), this route has no Requester write path at all, so both
+      // the 'not-found' and 'owner' classifications resolveTicketAccess can
+      // produce for a REQUESTER caller collapse to the same 404 here.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: IT Staff and Administrator both have
+      // a read path to this ticket (GET /api/tickets/:id, api-spec.md §5),
+      // but api-spec.md §5.1 reserves the write for IT Staff only — an
+      // Administrator's read path makes this a safe 403, never a 404.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      if (requestedOwnerId !== null) {
+        // Out-of-int4-range ids cannot reference any row (User.id is int4);
+        // querying with one would raise a driver-level range error instead
+        // of a clean "not found", same as categoryId/relatedSystemId in
+        // POST /api/tickets above. Per api-spec.md §1.4's 403/404-precedence
+        // framing, an id that can't reference any row is indistinguishable
+        // from a nonexistent candidate, so it short-circuits straight to the
+        // same 409 INVALID_OWNER below rather than reaching findUnique.
+        if (Math.abs(requestedOwnerId) > PG_INT4_MAX) {
+          invalidOwner(res);
+          return;
+        }
+
+        const candidate = await prisma.user.findUnique({
+          where: { id: requestedOwnerId },
+          select: { role: true, isActive: true },
+        });
+        // BR-19/BR-20: the candidate must exist, be active, and not be a
+        // Requester (a Ticket Owner may only be an active IT Staff or
+        // Administrator user) — any failure of the three is the identical
+        // 409 INVALID_OWNER, checked together so no branch can leak which
+        // one it was.
+        if (!candidate || !candidate.isActive || candidate.role === 'REQUESTER') {
+          invalidOwner(res);
+          return;
+        }
+      }
+
+      const ticket = await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { ownerId: requestedOwnerId },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        itPriority: ticket.itPriority,
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        owner: ticket.owner,
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error updating ticket owner:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/tickets/:id/it-priority (api-spec.md §5.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape-validates the `itPriority` field for `PATCH /api/tickets/:id/it-priority`:
+ * unlike `validateOwnerIdShape` above, there is no meaningful "clear" value
+ * here — the field is required and must be exactly one of the three
+ * `Priority` enum strings (api-spec.md §5.2). This mirrors
+ * `validateRequestedPriority` in ticketFields.ts, but that helper is tied to
+ * the `requestedPriority` field name/message (ticket-creation, §4-fields) and
+ * this route touches a different field (`itPriority`) with its own message,
+ * so it isn't directly reusable — the `PRIORITIES` enum itself is reused
+ * instead of redeclaring it.
+ */
+function validateItPriorityShape(raw: unknown): FieldError | null {
+  if (typeof raw !== 'string' || !PRIORITIES.includes(raw as Priority)) {
+    return { field: 'itPriority', message: 'itPriority must be one of LOW, MEDIUM, HIGH.' };
+  }
+  return null;
+}
+
+ticketsRouter.patch(
+  '/:id/it-priority',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // Same "decide precisely inside the handler" pattern as PATCH
+  // /:id/owner above: requireRole lets every role through so a Requester
+  // and an unknown ticket id both fall through to the same
+  // resolveTicketAccess-driven 404 below, instead of requireRole
+  // intercepting the Requester case with a 403 first.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    const itPriorityError = validateItPriorityShape(req.body.itPriority);
+    if (itPriorityError) {
+      validationFailed(res, [itPriorityError]);
+      return;
+    }
+    // Shape check above guarantees this is one of the three Priority values.
+    const requestedItPriority = req.body.itPriority as Priority;
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.2: a Requester never gets a write path here,
+      // regardless of ownership — same collapse as PATCH /:id/owner — both
+      // the 'not-found' and 'owner' classifications resolveTicketAccess can
+      // produce for a REQUESTER caller become the identical 404 here.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: unlike PATCH /:id/owner (IT Staff
+      // only), api-spec.md §5.2/BR-22 lets BOTH IT Staff and Administrator
+      // perform this write — the one staff-write route where the two roles
+      // do not diverge — so there is no further role check.
+      const ticket = await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { itPriority: requestedItPriority },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        itPriority: ticket.itPriority,
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        owner: ticket.owner,
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error updating ticket IT priority:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/tickets/:id/status (api-spec.md §5.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The status transition matrix (specification.md §5.1): an explicit map of
+ * every status to the list of statuses it may move to directly. A pair not
+ * present here — including a status mapped to itself, which no row lists —
+ * is rejected as `409 INVALID_TRANSITION` (BR-23), so a same-state "no-op"
+ * request is not silently accepted as a 200.
+ *
+ * Keyed off the generated Prisma `TicketStatus` enum (not a hand-rolled
+ * list, unlike `staffTicketQueueQuery.ts`'s `STAFF_QUEUE_STATUSES`) so this
+ * matrix can never fall out of sync with schema.prisma — `Record<TicketStatus,
+ * TicketStatus[]>` also means TypeScript itself enforces that every enum
+ * member has a row.
+ */
+const TICKET_STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
+  [TicketStatus.NEW]: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED],
+  [TicketStatus.OPEN]: [
+    TicketStatus.IN_PROGRESS,
+    TicketStatus.WAITING_FOR_REQUESTER,
+    TicketStatus.RESOLVED,
+    TicketStatus.CANCELLED,
+  ],
+  [TicketStatus.IN_PROGRESS]: [TicketStatus.WAITING_FOR_REQUESTER, TicketStatus.RESOLVED, TicketStatus.CANCELLED],
+  [TicketStatus.WAITING_FOR_REQUESTER]: [TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CANCELLED],
+  [TicketStatus.RESOLVED]: [TicketStatus.CLOSED, TicketStatus.REOPENED],
+  [TicketStatus.CLOSED]: [TicketStatus.REOPENED],
+  [TicketStatus.REOPENED]: [
+    TicketStatus.IN_PROGRESS,
+    TicketStatus.WAITING_FOR_REQUESTER,
+    TicketStatus.RESOLVED,
+    TicketStatus.CANCELLED,
+  ],
+  // Terminal (specification.md §5.1): no row lists CANCELLED as a
+  // destination back out of it, so this list is empty rather than absent —
+  // absent would make `TICKET_STATUS_TRANSITIONS[access.ticket.status]`
+  // `undefined` and require a separate branch below just for this one case.
+  [TicketStatus.CANCELLED]: [],
+};
+
+const ALL_TICKET_STATUSES: readonly string[] = Object.values(TicketStatus);
+
+/**
+ * Shape-validates the `status` field for `PATCH /api/tickets/:id/status`:
+ * required, and must be exactly one of the eight `TicketStatus` enum
+ * strings. Whether that value is actually *reachable* from the ticket's
+ * current status is a separate, later question — a syntactically valid but
+ * unreachable status (e.g. `"CLOSED"` from `NEW`) is a `409
+ * INVALID_TRANSITION` below, not a `400` here (api-spec.md §5.3).
+ */
+function validateStatusShape(raw: unknown): FieldError | null {
+  if (typeof raw !== 'string' || !ALL_TICKET_STATUSES.includes(raw)) {
+    return {
+      field: 'status',
+      message:
+        'status must be one of NEW, OPEN, IN_PROGRESS, WAITING_FOR_REQUESTER, RESOLVED, CLOSED, REOPENED, CANCELLED.',
+    };
+  }
+  return null;
+}
+
+function invalidTransition(res: Response): void {
+  res.status(409).json({
+    error: 'INVALID_TRANSITION',
+    message: 'This status transition is not permitted from the ticket’s current status.',
+  });
+}
+
+function ownerRequired(res: Response): void {
+  res.status(409).json({
+    error: 'OWNER_REQUIRED',
+    message: 'This ticket must have an owner before it can move to In Progress.',
+  });
+}
+
+ticketsRouter.patch(
+  '/:id/status',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // Same "decide precisely inside the handler" pattern as PATCH
+  // /:id/owner and /:id/it-priority above: requireRole lets every role
+  // through so a Requester and an unknown ticket id both fall through to
+  // the same resolveTicketAccess-driven 404 below, instead of requireRole
+  // intercepting the Requester case with a 403 first.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    const statusError = validateStatusShape(req.body.status);
+    if (statusError) {
+      validationFailed(res, [statusError]);
+      return;
+    }
+    // Shape check above guarantees this is one of the eight enum values.
+    const requestedStatus = req.body.status as TicketStatus;
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.3: a Requester never gets a write path here,
+      // regardless of ownership — same collapse as PATCH /:id/owner and
+      // /:id/it-priority — both the 'not-found' and 'owner' classifications
+      // resolveTicketAccess can produce for a REQUESTER caller become the
+      // identical 404 here.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: like PATCH /:id/owner (and unlike
+      // /:id/it-priority), status is IT Staff only — an Administrator
+      // already has a read path to this ticket (GET /api/tickets/:id), so
+      // this is a safe 403, never a 404.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      // BR-23/AC-39: checked against the ticket's CURRENT status, including
+      // the same-state case (no row lists a status as its own successor, so
+      // that pair is simply absent from the list below too).
+      const permittedNextStatuses = TICKET_STATUS_TRANSITIONS[access.ticket.status];
+      if (!permittedNextStatuses.includes(requestedStatus)) {
+        invalidTransition(res);
+        return;
+      }
+
+      // BR-24/AC-40: OWNER_REQUIRED only applies once the transition itself
+      // is otherwise valid per the matrix above — checked second, and only
+      // for the one destination status (IN_PROGRESS) it governs, regardless
+      // of which row supplied the otherwise-valid transition.
+      if (requestedStatus === TicketStatus.IN_PROGRESS && access.ticket.ownerId === null) {
+        ownerRequired(res);
+        return;
+      }
+
+      const ticket = await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { status: requestedStatus },
+        include: TICKET_DETAIL_INCLUDE,
+      });
+
+      res.status(200).json({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        requester: ticket.requester,
+        category: ticket.category,
+        relatedSystem: ticket.relatedSystem,
+        requestedPriority: ticket.requestedPriority,
+        itPriority: ticket.itPriority,
+        status: ticket.status,
+        summary: ticket.summary,
+        description: ticket.description,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        attachments: ticket.attachments,
+        owner: ticket.owner,
+        requesterResolvedAt: ticket.requesterResolvedAt,
+      });
+    } catch (error) {
+      console.error('Error updating ticket status:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/:id/notes (api-spec.md §5.4)
+// ---------------------------------------------------------------------------
+
+interface InternalNoteRow {
+  id: number;
+  body: string;
+  createdAt: Date;
+  author: { id: number; name: string; role: string };
+}
+
+/**
+ * Same entry shape as `commentToJson` above (id/body/createdAt/author) — a
+ * separate function rather than reusing `commentToJson` directly because the
+ * two are drawn from different Prisma models (`PublicComment` vs.
+ * `InternalNote`) with distinct row types; the codebase's existing pattern
+ * (see `COMMENT_AUTHOR_SELECT`, reused verbatim below) is a small parallel
+ * helper over renaming a two-call-site identifier.
+ */
+function noteToJson(note: InternalNoteRow) {
+  return {
+    id: note.id,
+    body: note.body,
+    createdAt: note.createdAt,
+    author: note.author,
+  };
+}
+
+ticketsRouter.get(
+  '/:id/notes',
+  authenticate,
+  passwordChangeGate,
+  // requireRole lets every role through (same "decide precisely inside the
+  // handler" pattern as PATCH /:id/owner, /:id/it-priority and /:id/status
+  // above) so a Requester and an unknown ticket id both fall through to the
+  // same resolveTicketAccess-driven 404 below, instead of requireRole
+  // intercepting the Requester case with a 403 first.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.4/BR-04: unlike GET /:id/comments (where the owning
+      // Requester's own 'owner' branch is a valid read path), Internal Notes
+      // have no Requester read path at all — the §1.4 case-2 rule applies
+      // even to the ticket's own Requester, so both the 'not-found' and
+      // 'owner' classifications resolveTicketAccess can produce for a
+      // REQUESTER caller collapse to the same 404 here (AC-04): neither the
+      // notes nor the ticket's existence is confirmed to them.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: both IT Staff and Administrator may
+      // read (BR-04) — no further role check, unlike the POST route below.
+      const notes = await prisma.internalNote.findMany({
+        where: { ticketId },
+        orderBy: { createdAt: 'asc' },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(200).json(notes.map(noteToJson));
+    } catch (error) {
+      console.error('Error listing internal notes:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/tickets/:id/notes (api-spec.md §5.5)
+// ---------------------------------------------------------------------------
+
+ticketsRouter.post(
+  '/:id/notes',
+  requireJsonContentType,
+  authenticate,
+  passwordChangeGate,
+  // Same "decide precisely inside the handler" pattern as the routes above.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    if (!isPlainRequestBody(req.body)) {
+      malformedBody(res);
+      return;
+    }
+
+    try {
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+
+      // api-spec.md §5.5: same collapse as GET /:id/notes above — a
+      // Requester has no path to notes at all, owning the ticket or not.
+      if (access.kind === 'not-found' || access.kind === 'owner') {
+        ticketNotFound(res);
+        return;
+      }
+
+      // access.kind === 'staff' here: Administrator already has a read path
+      // (GET /:id/notes above) but api-spec.md §5.5 reserves the write for
+      // IT Staff only — same divergence, and same reasoning (a safe 403,
+      // never a 404, since the read path already exists) as POST
+      // /:id/comments' identical ADMINISTRATOR check above.
+      if (req.authUser!.role === 'ADMINISTRATOR') {
+        forbidden(res);
+        return;
+      }
+
+      const bodyResult = validateCommentBody(req.body.body);
+      if (!bodyResult.ok) {
+        validationFailed(res, [bodyResult.error]);
+        return;
+      }
+
+      // BR-16: author and createdAt are always server-set — any
+      // client-supplied `author`/`createdAt` in the body is read nowhere
+      // above and is therefore silently ignored.
+      const note = await prisma.internalNote.create({
+        data: {
+          ticketId,
+          authorId: req.authUser!.id,
+          body: bodyResult.value,
+        },
+        include: { author: { select: COMMENT_AUTHOR_SELECT } },
+      });
+
+      res.status(201).json(noteToJson(note));
+    } catch (error) {
+      console.error('Error creating internal note:', error);
       internalError(res);
     }
   },
