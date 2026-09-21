@@ -10,5 +10,11 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["playwright.config.ts", "lab-02/**/*.ts", "scripts/**/*.ts"]
+  "include": [
+    "playwright.config.ts",
+    "lab-02/**/*.ts",
+    "lab-03/**/*.ts",
+    "scripts/**/*.ts",
+    "support/**/*.ts"
+  ]
 }
