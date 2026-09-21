@@ -1,12 +1,16 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { loginAsSeededUser } from "../support/auth.js";
+import { LOCAL_DEV_PASSWORD, loginAs, loginAsSeededUser } from "../support/auth.js";
 import {
   createPaginationFixtureTickets,
+  createRequesterOwnedFixtureTicket,
   PAGINATION_FIXTURE_TICKET_NUMBERS,
 } from "../support/staffFixtures.js";
 
 // Lab 3 IT Staff ticket-flow E2E journeys (docs/lab-03/tests.md §2.9,
-// E2E-05..06). Like authentication.spec.ts, these drive the REAL IT Staff
+// E2E-05..08). Like authentication.spec.ts, these drive the REAL IT Staff
 // Ticket Queue (`/staff/tickets`, ui-spec.md §9) and IT Staff Ticket Detail
 // (`/staff/tickets/:id`, ui-spec.md §10) screens exactly as a user would,
 // against the real client + real server + the shared `toktickit_e2e`
@@ -298,5 +302,272 @@ test.describe("E2E-06 staff operations (AC-34, AC-37, AC-38)", () => {
       "true",
     );
     await expect(page.locator("#staff-ticket-status")).toHaveValue("IN_PROGRESS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E-07 (AC-21, AC-41, AC-42) — comment and note privacy
+// ---------------------------------------------------------------------------
+//
+// tests.md E2E-07: "Post a Public Comment and an Internal Note; the
+// Requester sees only the comment." specification.md AC-21: a Public
+// Comment posted by IT Staff or the owning Requester is visible to both.
+// AC-41: an Internal Note posted by IT Staff is visible to IT Staff and
+// Administrators, never to the Requester. AC-42: `MessageThread`
+// (ui-spec.md §8) is the single mechanism behind both threads — the same
+// component, driven by a `variant` prop, not two independently-built
+// surfaces that could drift apart.
+//
+// Needs a real, direct (non-forced-change) Requester login that owns the
+// ticket under test, which no *seeded* Requester can give here (see
+// `staffFixtures.ts`'s `createRequesterOwnedFixtureTicket` doc comment, and
+// `auth.ts`'s own comment, for why) — so this uses that fixture rather than
+// any of seed.ts's own tickets. IT Staff and the Requester are driven from
+// two independent browser contexts (separate real sessions), never the
+// same `page`/cookie jar re-logged-in, so this genuinely proves what each
+// role's own session can and cannot see rather than relying on one
+// session's client-side state being torn down cleanly.
+
+test.describe("E2E-07 comment and note privacy (AC-21, AC-41, AC-42)", () => {
+  test("IT Staff post a Public Comment and an Internal Note on a ticket; the owning Requester's own Ticket Detail shows only the Public Comment", async ({
+    page,
+    browser,
+  }) => {
+    const ticket = await createRequesterOwnedFixtureTicket(
+      "comment-privacy",
+      "TKT-2026-991001",
+    );
+
+    const PUBLIC_COMMENT_BODY =
+      "Thanks for the report - I can see this on my end and I'm looking into it now.";
+    const INTERNAL_NOTE_BODY =
+      "Internal only: reproduced against the staging config, escalating to the network team.";
+
+    // --- IT Staff posts a Public Comment AND an Internal Note --------------
+    await loginAsSeededUser(page, IT_STAFF_EMAIL);
+    await page.goto(`/staff/tickets/${ticket.id}`);
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+    // ui-spec.md §8: one shared `MessageThread` component, differentiated
+    // only by its per-variant heading/badge/composer — asserted here on the
+    // IT Staff screen where both variants render side by side.
+    const publicThread = page.locator(".thread--public");
+    const internalThread = page.locator(".thread--internal");
+    await expect(publicThread.getByRole("heading", { name: "Comments" })).toBeVisible();
+    await expect(
+      internalThread.getByRole("heading", { name: "Internal notes" }),
+    ).toBeVisible();
+    await expect(
+      internalThread.getByText("Private — not visible to the Requester"),
+    ).toBeVisible();
+    await expect(
+      page.locator("[aria-label='Internal notes, not visible to the requester']"),
+    ).toHaveCount(1);
+
+    await page.locator("#message-thread-public-body").fill(PUBLIC_COMMENT_BODY);
+    await publicThread.getByRole("button", { name: "Post comment" }).click();
+    await expect(publicThread.getByText(PUBLIC_COMMENT_BODY)).toBeVisible();
+
+    await page.locator("#message-thread-internal-body").fill(INTERNAL_NOTE_BODY);
+    await internalThread.getByRole("button", { name: "Save internal note" }).click();
+    await expect(internalThread.getByText(INTERNAL_NOTE_BODY)).toBeVisible();
+    // ui-spec.md §8 "Per-entry": an Internal Note entry carries a 🔒 glyph
+    // before the author, on top of everything a Public Comment entry has.
+    await expect(
+      internalThread.locator(".zen-message-thread__entry", {
+        hasText: INTERNAL_NOTE_BODY,
+      }),
+    ).toContainText("🔒");
+
+    // --- The owning Requester, in an independent session, views the same
+    // ticket's own Ticket Detail ---------------------------------------------
+    const requesterContext = await browser.newContext();
+    try {
+      const requesterPage = await requesterContext.newPage();
+      await loginAs(requesterPage, ticket.requester.email, LOCAL_DEV_PASSWORD);
+      await requesterPage.goto(`/tickets/${ticket.id}`);
+      await expect(
+        requesterPage.getByRole("heading", { name: "Ticket Details" }),
+      ).toBeVisible();
+
+      // AC-21: the Public Comment is visible to the Requester too.
+      await expect(
+        requesterPage.getByRole("heading", { name: "Comments" }),
+      ).toBeVisible();
+      await expect(requesterPage.getByText(PUBLIC_COMMENT_BODY)).toBeVisible();
+
+      // AC-41/AC-42: the Internal Note is not visible to the Requester —
+      // not merely visually hidden. ui-spec.md §7 gives the Requester
+      // screen no Internal Notes surface at all (only the Public Comments
+      // `MessageThread`), so every one of these must find NOTHING, by
+      // `page.locator(...)` absence, never a CSS-visibility check.
+      await expect(
+        requesterPage.getByRole("heading", { name: "Internal notes" }),
+      ).toHaveCount(0);
+      await expect(requesterPage.locator(".thread--internal")).toHaveCount(0);
+      await expect(
+        requesterPage.locator("#message-thread-internal-body"),
+      ).toHaveCount(0);
+      await expect(requesterPage.getByText(INTERNAL_NOTE_BODY)).toHaveCount(0);
+      await expect(
+        requesterPage.getByText("Private — not visible to the Requester"),
+      ).toHaveCount(0);
+    } finally {
+      await requesterContext.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2E-08 (AC-24, AC-43, AC-44) — requester side
+// ---------------------------------------------------------------------------
+//
+// tests.md E2E-08: "Requester reports 'appears resolved'; staff see it; a
+// Lab 2 attachment still downloads." specification.md AC-24: a Requester
+// marking a ticket "Problem Appears Resolved" records the indication
+// without changing the ticket's status (BR-26). AC-43: an Attachment
+// created through the Lab 2 upload endpoint stays downloadable from IT
+// Staff Ticket Detail once the download role guard is widened (api-spec.md
+// §5: "Attachments created in Lab 2 stay downloadable from IT Staff Ticket
+// Detail", FR-27). AC-44: the underlying persistence round-trips correctly.
+//
+// Attachment fixture note: `server/prisma/seed.ts` truncates and never
+// re-inserts any "Attachment" row for `toktickit_e2e` (confirmed: no
+// `prisma.attachment.create`/raw INSERT into "Attachment" exists anywhere
+// reachable from that database), so there is no already-seeded Attachment
+// row here to point at. The only OTHER seeded Attachment rows in this repo
+// (`server/scripts/test-db-lab2-fixture.lib.ts`, used by
+// `server/tests/lab-03/migration.test.ts`) live in a throwaway,
+// Vitest-only Postgres database with hand-typed `storedFilename` values
+// that were never actually written to disk — pointing this suite at that
+// database, or copying one of those fabricated filenames into
+// `toktickit_e2e`, would produce a download that necessarily 404s (no real
+// bytes exist under that name), i.e. exactly the "fabricated attachment
+// path" this dispatch was told not to build. Instead, this uploads a real
+// attachment through the real UI's Add Attachment control — the same,
+// UNCHANGED Lab 2 endpoint api-spec.md §3 says "remain[s] in force"
+// (`POST /api/tickets/:id/attachments`) — which writes genuine bytes to
+// disk. IT Staff downloading it afterwards through the widened
+// `GET /api/attachments/:id/download` role guard (api-spec.md §5) is
+// therefore a genuine, real-bytes exercise of "a Lab 2-era attachment
+// stays downloadable from IT Staff Ticket Detail" (AC-43) — same
+// mechanism an attachment literally created back in Lab 2 would have gone
+// through, just created fresh so this suite never depends on a
+// nonexistent on-disk file.
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const ATTACHMENT_FIXTURE_DIR = path.resolve(here, "../test-results/lab-03-attachments");
+
+/** A minimal but well-formed PDF envelope, matching e2e/lab-02/submission-evidence.spec.ts's own `writePdfFixture` idiom. */
+function writePdfFixture(name: string): string {
+  fs.mkdirSync(ATTACHMENT_FIXTURE_DIR, { recursive: true });
+  const filePath = path.join(ATTACHMENT_FIXTURE_DIR, name);
+  fs.writeFileSync(
+    filePath,
+    `%PDF-1.4\n${" ".repeat(64 * 1024)}\n%%EOF\n`,
+  );
+  return filePath;
+}
+
+test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
+  test("the Requester marks their own ticket Problem Appears Resolved and IT Staff can see it; a Lab 2-era attachment still downloads end to end", async ({
+    page,
+    browser,
+  }) => {
+    const ticket = await createRequesterOwnedFixtureTicket(
+      "resolved-flow",
+      "TKT-2026-991002",
+    );
+
+    const ATTACHMENT_NAME = "e2e-lab2-continuity.pdf";
+    const attachmentPath = writePdfFixture(ATTACHMENT_NAME);
+    const attachmentBytes = fs.readFileSync(attachmentPath);
+
+    // --- Requester: add a real attachment, then report it appears resolved -
+    await loginAs(page, ticket.requester.email, LOCAL_DEV_PASSWORD);
+    await page.goto(`/tickets/${ticket.id}`);
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+    await page
+      .locator("#ticket-detail-attachments-input")
+      .setInputFiles(attachmentPath);
+    await expect(
+      page.getByRole("heading", { name: "Attachments (1 active / 1 total)" }),
+    ).toBeVisible();
+
+    const statusField = page.locator(".zen-ticket-detail__field", {
+      hasText: "Current Status",
+    });
+    await expect(statusField).toContainText("Open");
+
+    const resolveButton = page.getByRole("button", {
+      name: "Problem appears resolved",
+    });
+    await expect(resolveButton).toBeVisible();
+    await resolveButton.click();
+
+    // ui-spec.md §7: confirm dialog copy.
+    await expect(page.getByRole("dialog")).toContainText(
+      "Let IT Staff know this looks resolved? They'll confirm before the ticket is closed.",
+    );
+    await page
+      .getByRole("button", { name: "Yes, let IT Staff know" })
+      .click();
+
+    // Success: the button is replaced by a read-only note, and (BR-26) the
+    // status badge itself is untouched.
+    await expect(
+      page.getByRole("button", { name: "Problem appears resolved" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(/You reported this looks resolved on/),
+    ).toBeVisible();
+    await expect(statusField).toContainText("Open");
+
+    // --- IT Staff, in an independent session, sees the resolution
+    // indication and downloads the same attachment for real -----------------
+    const staffContext = await browser.newContext();
+    try {
+      const staffPage = await staffContext.newPage();
+      await loginAsSeededUser(staffPage, IT_STAFF_EMAIL);
+      await staffPage.goto(`/staff/tickets/${ticket.id}`);
+      await expect(
+        staffPage.getByRole("heading", { name: "Ticket Details" }),
+      ).toBeVisible();
+
+      // AC-24/AC-43 indication: IT Staff Ticket Detail surfaces the
+      // Requester's resolution report, in its own (staff-facing) wording.
+      await expect(
+        staffPage.getByText(/The requester reported this looks resolved on/),
+      ).toBeVisible();
+      // BR-26 from the staff side too: Status still reads the ticket's real,
+      // unchanged status, not anything resolution-shaped.
+      await expect(staffPage.locator("#staff-ticket-status")).toHaveValue("OPEN");
+
+      // --- AC-43/AC-44: the Lab 2-mechanism attachment downloads for real -
+      const staffRow = staffPage.locator(".zen-attachment-list__item", {
+        hasText: ATTACHMENT_NAME,
+      });
+      await expect(staffRow).toBeVisible();
+
+      const downloadPromise = staffPage.waitForEvent("download");
+      await staffRow.getByRole("button", { name: "Download" }).click();
+      const download = await downloadPromise;
+
+      expect(download.suggestedFilename()).toBe(ATTACHMENT_NAME);
+      const downloadedPath = await download.path();
+      if (!downloadedPath) {
+        throw new Error(
+          "Playwright did not save the downloaded attachment to a local path.",
+        );
+      }
+      const downloadedBytes = fs.readFileSync(downloadedPath);
+      // Byte-for-byte, not just "some file arrived": proves the download is
+      // the real, previously-uploaded attachment content, not an empty or
+      // truncated response.
+      expect(downloadedBytes.equals(attachmentBytes)).toBe(true);
+    } finally {
+      await staffContext.close();
+    }
   });
 });

@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { Client } from "pg";
+import { createPlainLoginFixtureUser, type FixtureUser } from "./auth.js";
 
 // Direct-`pg` fixture data for e2e/lab-03/staff-ticket-flow.spec.ts (E2E-05,
 // AC-26...AC-33), following the same real-database-fixture pattern as
@@ -133,6 +134,109 @@ export async function createPaginationFixtureTickets(): Promise<void> {
         ],
       );
     }
+  } finally {
+    await client.end();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Requester-owned fixture ticket (E2E-07, E2E-08)
+// ---------------------------------------------------------------------------
+//
+// E2E-07 (Comment and note privacy) and E2E-08 (Requester side) each need a
+// real, direct (non-forced-change) Requester login that OWNS the ticket
+// under test — exactly `e2e/support/auth.ts`'s own
+// `createPlainLoginFixtureUser` rationale (every *seeded* active Requester
+// is migrated-forward from Lab 2 and therefore `mustChangePassword: true`,
+// which would force these tests through /change-password before they could
+// ever reach Ticket Detail). Neither existing fixture helper covers "a
+// fixture Requester that also owns a specific fixture Ticket", so this adds
+// that combination, following the same idempotent direct-`pg` pattern as
+// `createPaginationFixtureTickets` above and `auth.ts`'s own
+// `createFixtureUser`.
+
+export interface RequesterOwnedFixtureTicket {
+  id: number;
+  ticketNumber: string;
+  requester: FixtureUser;
+}
+
+// Reuses the same stable, always-present seeded Category/RelatedSystem
+// names `createPaginationFixtureTickets` already relies on.
+const REQUESTER_FIXTURE_TICKET_CATEGORY_NAME = FIXTURE_CATEGORY_NAME;
+const REQUESTER_FIXTURE_TICKET_RELATED_SYSTEM_NAME = FIXTURE_RELATED_SYSTEM_NAME;
+
+/**
+ * Creates (or replaces) one fixture Ticket, in status `OPEN` (never
+ * terminal, so ui-spec.md §7's "Problem Appears Resolved" button is always
+ * visible on it), owned by a fresh fixture Requester with
+ * `mustChangePassword: false` (`auth.ts`'s `createPlainLoginFixtureUser`,
+ * keyed by the same `discriminator`).
+ *
+ * Deletes any stale Ticket row for `ticketNumber` BEFORE (re)creating the
+ * fixture Requester, not after: `Ticket.requesterId` is `onDelete:
+ * Restrict` (schema.prisma), so if a previous, uncleaned run's Ticket still
+ * referenced that Requester's old row, `createPlainLoginFixtureUser`'s own
+ * `DELETE ... WHERE lower(email) = lower($1)` would fail with a foreign-key
+ * violation. Deleting the ticket first removes that reference, so the
+ * Requester row underneath it can always be safely dropped and recreated,
+ * the same idempotent guarantee every other fixture helper in this repo
+ * offers.
+ */
+export async function createRequesterOwnedFixtureTicket(
+  discriminator: string,
+  ticketNumber: string,
+): Promise<RequesterOwnedFixtureTicket> {
+  const deleteClient = new Client({ connectionString: loadE2eDatabaseUrl() });
+  await deleteClient.connect();
+  try {
+    await deleteClient.query('DELETE FROM "Ticket" WHERE "ticketNumber" = $1', [
+      ticketNumber,
+    ]);
+  } finally {
+    await deleteClient.end();
+  }
+
+  const requester = await createPlainLoginFixtureUser(discriminator);
+
+  const client = new Client({ connectionString: loadE2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const category = await client.query<{ id: number }>(
+      'SELECT id FROM "Category" WHERE name = $1',
+      [REQUESTER_FIXTURE_TICKET_CATEGORY_NAME],
+    );
+    const relatedSystem = await client.query<{ id: number }>(
+      'SELECT id FROM "RelatedSystem" WHERE name = $1',
+      [REQUESTER_FIXTURE_TICKET_RELATED_SYSTEM_NAME],
+    );
+    if (category.rowCount === 0 || relatedSystem.rowCount === 0) {
+      throw new Error(
+        "Seed rows this fixture depends on are missing — run " +
+          "`npm --prefix e2e run db:e2e:reset` before this spec.",
+      );
+    }
+
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO "Ticket"
+         ("ticketNumber", "requesterId", "categoryId", "relatedSystemId",
+          summary, description, "requestedPriority", "itPriority", status,
+          "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, 'MEDIUM'::"Priority", 'MEDIUM'::"Priority",
+               'OPEN'::"TicketStatus", NOW())
+       RETURNING id`,
+      [
+        ticketNumber,
+        requester.id,
+        category.rows[0].id,
+        relatedSystem.rows[0].id,
+        `E2E Requester-Flow Fixture (${discriminator})`,
+        "Fixture ticket inserted for an E2E journey that needs a real, " +
+          "non-forced-change Requester login owning a real ticket.",
+      ],
+    );
+
+    return { id: inserted.rows[0].id, ticketNumber, requester };
   } finally {
     await client.end();
   }
