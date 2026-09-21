@@ -63,6 +63,20 @@ export const PAGINATION_FIXTURE_TICKET_NUMBERS = [
   "TKT-2026-990005",
 ] as const;
 
+// `server/prisma/seed.ts`'s own 8 fixture tickets (SEED_TICKETS), hardcoded
+// here rather than queried, since E2E-05's row-count assertions need to know
+// this exact closed set at fill time, not just "however many exist".
+const SEED_TICKET_NUMBERS = [
+  "TKT-2026-900001",
+  "TKT-2026-900002",
+  "TKT-2026-900003",
+  "TKT-2026-900004",
+  "TKT-2026-900005",
+  "TKT-2026-900006",
+  "TKT-2026-900007",
+  "TKT-2026-900008",
+] as const;
+
 // One real seeded Requester/Category/RelatedSystem row (server/prisma/seed.ts)
 // to hang these fixture tickets off of — any would do; these three are
 // simply stable, always-present seeded names.
@@ -107,8 +121,28 @@ export async function createPaginationFixtureTickets(): Promise<void> {
     const categoryId = category.rows[0].id;
     const relatedSystemId = relatedSystem.rows[0].id;
 
-    // Idempotent: drop any leftover fixture rows from a previous, uncleaned
-    // run before inserting fresh ones.
+    // `testDir` covers the whole `e2e/` root (both lab-02 and lab-03), and
+    // every other spec file in the shared `toktickit_e2e` database creates
+    // its own real Tickets through the real create-ticket flow (the real
+    // per-year sequence allocator, ticketNumber.ts) — none of which are
+    // cleaned up afterward, since each of those specs owns and asserts on
+    // its own tickets independently. E2E-05's row-count assertions below
+    // need an exact, closed total (8 seed + 5 pagination fixtures = 13), so
+    // this deletes every OTHER Ticket first. Safe: this file is last
+    // alphabetically among every current spec, so nothing downstream in a
+    // full `npm run test:e2e` run still depends on a ticket this removes —
+    // and within this file, E2E-05 runs before E2E-07/08 create their own
+    // (`createRequesterOwnedFixtureTicket`) fixture tickets, so this can
+    // never delete something a later test in this same file just made.
+    const keep = [...SEED_TICKET_NUMBERS, ...PAGINATION_FIXTURE_TICKET_NUMBERS];
+    await client.query('DELETE FROM "Ticket" WHERE "ticketNumber" != ALL($1::text[])', [
+      keep,
+    ]);
+
+    // Idempotent: also drop any leftover rows from a previous run of THIS
+    // fixture (by its own ticket numbers, preserved by `keep` above) before
+    // inserting fresh ones — same convention as `auth.ts`'s
+    // `createFixtureUser`.
     await client.query(
       'DELETE FROM "Ticket" WHERE "ticketNumber" = ANY($1::text[])',
       [PAGINATION_FIXTURE_TICKET_NUMBERS],
