@@ -48,7 +48,9 @@ if (!DATABASE_URL.endsWith("/toktickit_e2e")) {
 }
 
 export default defineConfig({
-  testDir: path.join(e2eRoot, "lab-02"),
+  // `e2eRoot` itself, not "lab-02" — Lab 3 (#74) adds `lab-03/`
+  // alongside it and both must run under `npm run test:e2e`.
+  testDir: e2eRoot,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
