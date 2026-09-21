@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
+import {
+  LOCAL_DEV_PASSWORD,
+  createPlainLoginFixtureUser,
+  loginAs as loginWithSession,
+  type FixtureUser,
+} from "../support/auth.js";
 
 // Submission-evidence screenshots for the CPE 334 Lab 2 PDF's "Answer Part
 // 6" and "Answer Part 7" headings (labsheet §8.2 Create Ticket, §8.4 My
@@ -26,6 +32,34 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 // (client/src/components/AttachmentUploader.tsx) on the Create Ticket
 // screen, so two files can be selected through its real file input and the
 // valid/invalid split asserted on screen before the capture.
+//
+// This file was originally written against Lab 2's dev-only "Development
+// Requester Selector" (`GET /api/requesters`, `X-Requester-Id`,
+// `/select-requester`), which Lab 3 (#70) deleted entirely in favour of real
+// session-cookie authentication (`POST /api/auth/login`, `/login`). The
+// "Part 6 — Development Requester Selection" describe block screenshotted
+// that dev-only screen itself — a screen that no longer exists at all, with
+// no auth-mechanism migration possible — so it has been deleted outright;
+// its already-committed screenshots under
+// `artifacts/lab-02/screenshots/submission/part-6-create-ticket/` remain
+// frozen, referenced as-is by the already-graded `docs/lab-02/submission.typ`.
+// "Part 6 — Create Ticket (create mode)" tests the real Create Ticket screen,
+// which still exists, and has been migrated onto real login following the
+// same idiom as `e2e/lab-02/requester-ticket-flow.spec.ts`: a dedicated
+// fixture Requester (`createPlainLoginFixtureUser`, `mustChangePassword:
+// false`) logged in through the real Login screen, since every *seeded*
+// Requester (including "Jennifer Anderson", who this block originally used)
+// is a migrated Lab 2 row with `mustChangePassword: true` and would hit a
+// forced `/change-password` redirect before ever reaching Create Ticket —
+// the same reason every other migrated lab-02 spec uses a fixture instead of
+// a named seeded Requester. Nothing here depends on the Requester's name
+// being specifically "Jennifer Anderson": every assertion that used to check
+// for that literal string now checks the fixture's own `name` field instead,
+// so the substance of what's demonstrated (the Requester field reflects
+// whoever is actually signed in) is unchanged. "Part 7 — My Tickets" and
+// "Part 8 — Ticket Detail & Attachments" below are still on the deleted
+// mechanism as of this comment — migrated separately, out of this change's
+// scope.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,146 +142,35 @@ async function changeRequesterTo(page: Page, requesterName: string): Promise<voi
 }
 
 // ---------------------------------------------------------------------------
-// Answer Part 6 — Development Requester Selection screen
-// (ui-spec.md §6, labsheet §8.1)
-// ---------------------------------------------------------------------------
-
-test.describe("Part 6 — Development Requester Selection", () => {
-  test("initial state, dropdown populated, selected display, Change Requester action", async ({
-    page,
-  }) => {
-    await page.setViewportSize(DESKTOP);
-
-    await page.goto("/select-requester");
-    await expect(
-      page.getByRole("heading", { name: "Select Development Requester" }),
-    ).toBeVisible();
-    const select = page.getByLabel("Development Requester");
-    await expect(select).toHaveValue("");
-    await expect(page.getByRole("button", { name: /Continue/ })).toBeDisabled();
-    await page.screenshot({
-      path: shot(PART6_DIR, "01-requester-selection-initial.png"),
-      fullPage: true,
-    });
-
-    // Prove the dropdown is populated from the real GET /api/requesters
-    // response (server/prisma/seed.ts's 4 active Requesters), not a mock —
-    // and that the inactive one is excluded.
-    const optionTexts = await select.locator("option").allTextContents();
-    for (const activeName of [
-      "David Lee",
-      "Jennifer Anderson",
-      "Michael Brown",
-      "Sarah Johnson",
-    ]) {
-      expect(optionTexts).toContain(activeName);
-    }
-    expect(optionTexts).not.toContain("Robert Wilson");
-
-    // Headless Chromium does not paint a native <select>'s OS-level popup
-    // into a page screenshot — clicking it open produces no visible change
-    // in the capture. Temporarily switching the SAME real <select> (with
-    // its real, API-sourced <option>s) into an inline listbox via the
-    // `size` attribute is the standard way to make a native select's open,
-    // populated state screenshot-able; nothing here is mocked markup.
-    await select.evaluate((el: HTMLSelectElement) => {
-      el.setAttribute("size", String(el.options.length));
-      el.style.height = "auto";
-    });
-    await page.screenshot({
-      path: shot(PART6_DIR, "02-requester-dropdown-populated.png"),
-      fullPage: true,
-    });
-    await select.evaluate((el: HTMLSelectElement) => {
-      el.removeAttribute("size");
-      el.style.height = "";
-    });
-
-    await select.selectOption({ label: "Jennifer Anderson" });
-    await page.getByRole("button", { name: /Continue/ }).click();
-    await expect(page).toHaveURL(/\/tickets$/);
-
-    // Selected-user display in the app shell (ui-spec.md §4) after choosing.
-    const badge = page.locator(".zen-requester-badge__trigger");
-    await expect(badge).toContainText("Jennifer Anderson");
-    await page.screenshot({
-      path: shot(PART6_DIR, "03-selected-requester-app-shell.png"),
-      fullPage: true,
-    });
-
-    // The Change Requester action itself.
-    await badge.click();
-    await expect(
-      page.getByRole("menuitem", { name: "Change Requester" }),
-    ).toBeVisible();
-    await page.screenshot({
-      path: shot(PART6_DIR, "04-change-requester-menu-open.png"),
-      fullPage: true,
-    });
-  });
-
-  test("loading state", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-
-    let releaseRequesters: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      releaseRequesters = resolve;
-    });
-    await page.route("**/api/requesters", async (route) => {
-      await gate;
-      await route.continue();
-    });
-
-    const navigation = page.goto("/select-requester");
-    await expect(page.getByRole("status")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Continue/ })).toBeDisabled();
-    await page.screenshot({
-      path: shot(PART6_DIR, "05-requester-selection-loading.png"),
-      fullPage: true,
-    });
-
-    releaseRequesters();
-    await navigation;
-    // Let the now-unblocked request resolve so the page (and route) settle
-    // cleanly before the test ends.
-    await expect(page.getByLabel("Development Requester")).toBeVisible();
-  });
-
-  test("failure state (API stubbed to fail)", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-
-    await page.route("**/api/requesters", (route) =>
-      route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "INTERNAL", message: "Simulated failure" }),
-      }),
-    );
-
-    await page.goto("/select-requester");
-    const alert = page.getByRole("alert");
-    await expect(alert).toContainText(
-      "Could not load development requesters. Please check your connection and try again.",
-    );
-    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-    await page.screenshot({
-      path: shot(PART6_DIR, "06-requester-selection-failure.png"),
-      fullPage: true,
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Answer Part 6 — Create Ticket screen, create mode (ui-spec.md §8,
 // labsheet §8.2)
 // ---------------------------------------------------------------------------
+
+/**
+ * Logs a fixture Requester in through the real Login screen (ui-spec.md §5)
+ * for the tests below. Every `createPlainLoginFixtureUser` fixture has
+ * `mustChangePassword: false`, so there is no forced `/change-password`
+ * detour — same idiom as `requester-ticket-flow.spec.ts`'s `loginAsFixture`.
+ * Deliberately distinct from the `loginAs`/`changeRequesterTo` helpers above
+ * (which still drive the dead `/select-requester` selector for "Part 7 — My
+ * Tickets" and "Part 8 — Ticket Detail & Attachments" below, migrated
+ * separately, out of this change's scope).
+ */
+async function loginAsCreateTicketFixture(
+  page: Page,
+  fixtureUser: FixtureUser,
+): Promise<void> {
+  await loginWithSession(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
+  await expect(page).not.toHaveURL(/\/login$/);
+}
 
 test.describe("Part 6 — Create Ticket (create mode)", () => {
   test("initial state and validation failure with field-level messages", async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-initial");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     // Reference-data dropdowns must have actually loaded real options
@@ -261,9 +184,9 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
       .toBeGreaterThan(1);
 
     // Demonstration 1 (first half): the Requester field is populated from
-    // the Development Requester selected before entering the app.
+    // the signed-in Requester's session (CreateTicketScreen.tsx: `user?.name`).
     await expect(page.locator("#create-ticket-requester")).toHaveValue(
-      "Jennifer Anderson",
+      fixtureUser.name,
     );
     await expect(page.locator("#create-ticket-summary")).toHaveValue("");
     await expect(
@@ -300,18 +223,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
-
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const requesters: Array<{ id: number; name: string }> = await (
-      await api.get("/api/requesters")
-    ).json();
-    const jennifer = requesters.find((r) => r.name === "Jennifer Anderson");
-    if (!jennifer) {
-      throw new Error(
-        'Seeded active requester "Jennifer Anderson" not found via GET /api/requesters.',
-      );
-    }
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-success");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect
@@ -374,7 +287,7 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     // Demonstration 1 (second half): the saved Ticket carries the matching
     // requesterId — real evidence from the actual POST /api/tickets
     // response body, not an assumption.
-    expect(ticket.requester.id).toBe(jennifer.id);
+    expect(ticket.requester.id).toBe(fixtureUser.id);
 
     await expect(
       page.getByRole("heading", {
@@ -392,27 +305,26 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
       page.getByRole("heading", { name: "Ticket Details" }),
     ).toBeVisible();
     await expect(page.getByText(ticket.ticketNumber)).toBeVisible();
-    // The created ticket's detail page shows the same Requester that was
-    // selected before entering the app — visual confirmation to go with
-    // the requesterId check above. Scoped to the ticket info card, not
-    // just `getByText`, since the app shell's own Requester badge in the
-    // header also reads "Jennifer Anderson" on every screen.
+    // The created ticket's detail page shows the same Requester that is
+    // signed in — visual confirmation to go with the requesterId check
+    // above. Scoped to the ticket info card, not just `getByText`, since the
+    // app shell's own Requester badge in the header also reads the same
+    // name on every screen.
     await expect(
-      page.locator(".zen-ticket-detail__card").getByText("Jennifer Anderson"),
+      page.locator(".zen-ticket-detail__card").getByText(fixtureUser.name),
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART6_DIR, "12-demo1-ticket-detail-requester-match.png"),
       fullPage: true,
     });
-
-    await api.dispose();
   });
 
   test("API failure on submit preserves entered form values", async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-api-failure");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect
@@ -489,7 +401,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-demo2");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     const categorySelect = page.locator("#create-ticket-category");
@@ -540,7 +453,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-demo4");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect(
