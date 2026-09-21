@@ -8,6 +8,7 @@ import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { NoResultsState } from "../components/NoResultsState";
 import { RoleBadge } from "../components/RoleBadge";
+import { UserDialog } from "../components/UserDialog";
 import { fetchUsers, type AdminUser } from "../users/api";
 import type { Role } from "../auth/api";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -159,16 +160,17 @@ function UserCards({ users, onEdit }: UserTableProps) {
 
 /**
  * Administrator User Management screen (ui-spec.md §11, `/admin/users`) —
- * LIST MODE ONLY for this dispatch. Search + Role filter, the
- * table/card responsive split, and every list-mode feedback state
- * (loading, empty, no-results, failure). The forbidden state (ui-spec.md
+ * list mode (search + Role filter, the table/card responsive split, and
+ * every list-mode feedback state: loading, empty, no-results, failure) plus
+ * the Create/Edit `UserDialog` (../components/UserDialog.tsx), rendered at
+ * the seam below and driven by `mode`. The forbidden state (ui-spec.md
  * §4.3) is handled entirely by the `RequireRole` wrapper this screen is
  * mounted under (see RequireRole.tsx), not here.
  *
- * Create/Edit dialogs are NOT built here — a later dispatch renders them at
- * the `{/* TODO */}` seam below, driven by `mode`. That dispatch calls
- * `refetch()` after a successful mutation and then resets `mode` back to
- * `{ kind: "none" }`.
+ * `UserDialog` calls `onSaved`/`onCancel` rather than closing itself; both
+ * paths run through `closeDialog` here, which resets `mode` back to
+ * `{ kind: "none" }` and restores focus to whichever button opened it
+ * (`dialogTriggerRef`) — `onSaved` additionally calls `refetch()` first.
  */
 export function UserManagementScreen() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
@@ -179,6 +181,19 @@ export function UserManagementScreen() {
   const [role, setRole] = useState("");
 
   const [mode, setMode] = useState<DialogMode>({ kind: "none" });
+
+  /**
+   * Whichever button opened the dialog ("New user" or a row's Edit), so it
+   * can regain focus when the dialog closes (ui-spec.md §13: "confirm
+   * dialogs trap focus and restore it"). Captured via `document.activeElement`
+   * inside handleNewUser/handleEditUser rather than threading a ref through
+   * UserTable/UserCards' `onEdit` prop: a click synchronously focuses its
+   * button before the click handler runs, so at the top of either handler
+   * `document.activeElement` is already the exact trigger — same
+   * lookup-by-DOM-state idea as StaffTicketDetailScreen.tsx's
+   * `restoreStatusFocus`, just via the active element instead of a stable id.
+   */
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
 
   const isLoading = state.phase === "loading";
 
@@ -235,11 +250,31 @@ export function UserManagementScreen() {
   }
 
   function handleNewUser() {
+    dialogTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setMode({ kind: "create" });
   }
 
   function handleEditUser(user: AdminUser) {
+    dialogTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setMode({ kind: "edit", user });
+  }
+
+  /** Closes the dialog and restores focus to whichever button opened it — used both by Cancel/Esc and by a successful save. */
+  function closeDialog() {
+    setMode({ kind: "none" });
+    dialogTriggerRef.current?.focus();
+    dialogTriggerRef.current = null;
+  }
+
+  function handleDialogCancel() {
+    closeDialog();
+  }
+
+  function handleDialogSaved() {
+    refetch();
+    closeDialog();
   }
 
   const variant: UserListVariant =
@@ -325,16 +360,9 @@ export function UserManagementScreen() {
         />
       )}
 
-      {mode.kind !== "none" &&
-        /* TODO: dialog rendered by a later dispatch. `mode` is already
-           `{ kind: "create" }` (from "New user" above) or
-           `{ kind: "edit", user: mode.user }` (from a row's Edit button) —
-           that dispatch switches on it here to render its Create/Edit
-           dialog per ui-spec.md §11's Create/Edit mode fields. On a
-           successful mutation it calls `refetch()` to reload this list,
-           then `setMode({ kind: "none" })` to close itself. This dispatch
-           is list mode only, so nothing visible renders here yet. */
-        null}
+      {mode.kind !== "none" && (
+        <UserDialog mode={mode} onCancel={handleDialogCancel} onSaved={handleDialogSaved} />
+      )}
     </AppShell>
   );
 }
