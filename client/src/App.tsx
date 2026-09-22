@@ -9,6 +9,7 @@ import { CreateTicketScreen } from "./screens/CreateTicketScreen";
 import { TicketDetailScreen } from "./screens/TicketDetailScreen";
 import { StaffTicketQueueScreen } from "./screens/StaffTicketQueueScreen";
 import { StaffTicketDetailScreen } from "./screens/StaffTicketDetailScreen";
+import { UserManagementScreen } from "./screens/UserManagementScreen";
 
 /**
  * Client routing root (specification.md FR-01..FR-09, FR-14..FR-18).
@@ -95,6 +96,14 @@ function App() {
           element={
             <RequireRole allowedRoles={["IT_STAFF"]}>
               <StaffTicketDetailScreen />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <RequireRole allowedRoles={["ADMINISTRATOR"]}>
+              <UserManagementScreen />
             </RequireRole>
           }
         />
