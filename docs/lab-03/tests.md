@@ -172,7 +172,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | C-05 | C | AC-69 | Voluntary change mode | Current-password field required; Cancel present | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
 | C-06 | C | AC-07, AC-08 | Change validation | Length, confirm mismatch and same-as-current each produce a field message | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
 | C-07 | C | AC-17 | Role navigation | Each role renders only its own destinations; others are **absent**, not disabled | `client/tests/lab-03/AppShell.test.tsx` | Pass |
-| C-08 | C | — | User badge | Shows name and `RoleBadge`; menu offers Change Password and Logout; no "Change Requester" | `client/tests/lab-03/AppShell.test.tsx` | Planned |
+| C-08 | C | — | User badge | Shows name and `RoleBadge`; menu offers Change Password and Logout; no "Change Requester" | `client/tests/lab-03/UserBadge.test.tsx` | Pass |
 | C-09 | C | AC-18 | Forbidden route | Forbidden state renders and, via request interception, no protected request is issued | `client/tests/lab-03/RequireRole.test.tsx` | Pass |
 | C-10 | C | AC-32 | Unassigned token | Unassigned row carries `data-owner="unassigned"` and the text "Unassigned"; assigned rows carry the name | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
 | C-11 | C | AC-33 | Queue states | Loading, empty, no-results, forbidden and failure each render distinctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
@@ -188,12 +188,12 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| S-01 | S | V-01 | Token discipline | No hard-coded hex outside `theme.css`; the seven new tokens are defined | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| S-02 | S | V-04 | Badge consistency | Status, Requested Priority, IT Priority and Role badges use their specified classes everywhere they appear | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| S-03 | S | V-05 | Priority vs status distinctness | No status badge shares both background and text colour with a priority badge | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| S-04 | S | V-06 | Editable vs read-only | IT Staff Ticket Detail read-only fields carry the read-only class; operational fields do not | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| S-05 | S | V-08 | Validation placement | Messages render inside their field wrapper, as in Lab 2 | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| S-06 | S | V-07 | Private surface | `.thread--internal` uses `--zen-private-bg` and its border token | `client/tests/lab-03/ui-style.test.tsx` | Planned |
+| S-01 | S | V-01 | Token discipline | No hard-coded hex outside `theme.css`; the seven new tokens are defined | `client/tests/lab-03/ui-style.test.tsx` | Pass |
+| S-02 | S | V-04 | Badge consistency | Status, Requested Priority, IT Priority and Role badges use their specified classes everywhere they appear | `client/tests/lab-03/ui-style.test.tsx` | Pass |
+| S-03 | S | V-05 | Priority vs status distinctness | No status badge shares both background and text colour with a priority badge | `client/tests/lab-03/ui-style.test.tsx` | Pass |
+| S-04 | S | V-06 | Editable vs read-only | IT Staff Ticket Detail read-only fields carry the read-only class; operational fields do not | `client/tests/lab-03/ui-style.test.tsx` | Pass |
+| S-05 | S | V-08 | Validation placement | Messages render inside their field wrapper, as in Lab 2 | `client/tests/lab-03/ui-style.test.tsx` | Pass |
+| S-06 | S | V-07 | Private surface | `.thread--internal` uses `--zen-private-bg` and its border token | `client/tests/lab-03/ui-style.test.tsx` | Pass |
 | R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below | `e2e/lab-03/responsive.spec.ts` | Pass |
