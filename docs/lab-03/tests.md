@@ -165,24 +165,24 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| C-01 | C | AC-06 | Login busy state | Submit disabled and busy-labelled; inputs read-only; `role="status"` present | `client/tests/lab-03/Login.test.tsx` | Planned |
-| C-02 | C | AC-05 | Login failure message | One generic callout, `role="alert"`; never names the reason | `client/tests/lab-03/Login.test.tsx` | Planned |
-| C-03 | C | — | Login validation | Empty and malformed email, empty password → field-level messages | `client/tests/lab-03/Login.test.tsx` | Planned |
-| C-04 | C | AC-02 | Forced change mode | Banner shown, no current-password field, no dismiss affordance | `client/tests/lab-03/ChangePassword.test.tsx` | Planned |
-| C-05 | C | AC-69 | Voluntary change mode | Current-password field required; Cancel present | `client/tests/lab-03/ChangePassword.test.tsx` | Planned |
-| C-06 | C | AC-07, AC-08 | Change validation | Length, confirm mismatch and same-as-current each produce a field message | `client/tests/lab-03/ChangePassword.test.tsx` | Planned |
-| C-07 | C | AC-17 | Role navigation | Each role renders only its own destinations; others are **absent**, not disabled | `client/tests/lab-03/AppShell.test.tsx` | Planned |
+| C-01 | C | AC-06 | Login busy state | Submit disabled and busy-labelled; inputs read-only; `role="status"` present | `client/tests/lab-03/Login.test.tsx` | Pass |
+| C-02 | C | AC-05 | Login failure message | One generic callout, `role="alert"`; never names the reason | `client/tests/lab-03/Login.test.tsx` | Pass |
+| C-03 | C | — | Login validation | Empty and malformed email, empty password → field-level messages | `client/tests/lab-03/Login.test.tsx` | Pass |
+| C-04 | C | AC-02 | Forced change mode | Banner shown, no current-password field, no dismiss affordance | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
+| C-05 | C | AC-69 | Voluntary change mode | Current-password field required; Cancel present | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
+| C-06 | C | AC-07, AC-08 | Change validation | Length, confirm mismatch and same-as-current each produce a field message | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
+| C-07 | C | AC-17 | Role navigation | Each role renders only its own destinations; others are **absent**, not disabled | `client/tests/lab-03/AppShell.test.tsx` | Pass |
 | C-08 | C | — | User badge | Shows name and `RoleBadge`; menu offers Change Password and Logout; no "Change Requester" | `client/tests/lab-03/AppShell.test.tsx` | Planned |
-| C-09 | C | AC-18 | Forbidden route | Forbidden state renders and, via request interception, no protected request is issued | `client/tests/lab-03/RequireRole.test.tsx` | Planned |
-| C-10 | C | AC-32 | Unassigned token | Unassigned row carries `data-owner="unassigned"` and the text "Unassigned"; assigned rows carry the name | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |
-| C-11 | C | AC-33 | Queue states | Loading, empty, no-results, forbidden and failure each render distinctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |
-| C-12 | C | — | Queue controls | Search, each filter and sort call the API with the documented query parameters | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Planned |
-| C-13 | C | AC-42 | Notes vs comments | `.thread--internal` carries the private badge and its own composer; `.thread--public` carries neither | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Planned |
-| C-14 | C | AC-39 | Status control | Only transitions permitted from the current status are offered; Close, Reopen and Cancel confirm first | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Planned |
-| C-15 | C | — | Conflict feedback | A `409` from a status change renders the conflict state with a Refresh action | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Planned |
-| C-16 | C | AC-45 | User list | Name, Email, Role, Status and Edit rendered per row | `client/tests/lab-03/UserManagement.test.tsx` | Planned |
-| C-17 | C | AC-53 | Self-deactivation guard | Own row's Active control disabled with helper text | `client/tests/lab-03/UserManagement.test.tsx` | Planned |
-| C-18 | C | AC-49, AC-54 | Admin error feedback | `EMAIL_IN_USE` shows on the Email field; `LAST_ADMIN` shows its message | `client/tests/lab-03/UserManagement.test.tsx` | Planned |
+| C-09 | C | AC-18 | Forbidden route | Forbidden state renders and, via request interception, no protected request is issued | `client/tests/lab-03/RequireRole.test.tsx` | Pass |
+| C-10 | C | AC-32 | Unassigned token | Unassigned row carries `data-owner="unassigned"` and the text "Unassigned"; assigned rows carry the name | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| C-11 | C | AC-33 | Queue states | Loading, empty, no-results, forbidden and failure each render distinctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| C-12 | C | — | Queue controls | Search, each filter and sort call the API with the documented query parameters | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| C-13 | C | AC-42 | Notes vs comments | `.thread--internal` carries the private badge and its own composer; `.thread--public` carries neither | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
+| C-14 | C | AC-39 | Status control | Only transitions permitted from the current status are offered; Close, Reopen and Cancel confirm first | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
+| C-15 | C | — | Conflict feedback | A `409` from a status change renders the conflict state with a Refresh action | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
+| C-16 | C | AC-45 | User list | Name, Email, Role, Status and Edit rendered per row | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| C-17 | C | AC-53 | Self-deactivation guard | Own row's Active control disabled with helper text | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| C-18 | C | AC-49, AC-54 | Admin error feedback | `EMAIL_IN_USE` shows on the Email field; `LAST_ADMIN` shows its message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 
 ### 2.8 UI style and responsive
 
