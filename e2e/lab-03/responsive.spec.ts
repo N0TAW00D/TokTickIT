@@ -503,6 +503,42 @@ test.describe("R-06 screenshot capture (tests.md:202, Issue #74)", () => {
         await page.setViewportSize(VIEWPORTS[viewportName]);
         await goToScreen(page, screen);
 
+        if (screen === "user-management") {
+          // The full suite runs every lab-02 AND lab-03 spec in one
+          // invocation before this screenshot test executes, and several
+          // of those earlier specs create their own real, persisted Users
+          // through the live UI (login fixtures, admin-created accounts)
+          // that are never individually cleaned up mid-run — see
+          // e2e/scripts/reset-e2e-db.ts's own comment on why "User" is
+          // truncated once per invocation but necessarily stays populated
+          // *within* one. Left unfiltered, this screenshot would show a
+          // long tail of "E2E ... Fixture" rows alongside the real seed
+          // accounts, which is accurate but not a readable admin-screen
+          // deliverable. Every seeded account uses an "@example.edu"
+          // address (server/prisma/seed.ts) while every E2E-created
+          // fixture uses "@toktickit.local" — a real, structural
+          // distinction, not a cosmetic one — so filtering through the
+          // screen's own AC-46 search feature to "example.edu" shows
+          // exactly the seeded roster this screenshot is meant to
+          // demonstrate, using the real search the way an Administrator
+          // would to find those accounts, not a special screenshot-only
+          // code path.
+          const search = page.locator("#user-mgmt-search");
+          await search.fill("example.edu");
+          // The search is debounced (SEARCH_DEBOUNCE_MS = 300ms) before it
+          // re-fetches, so the unfiltered rows are still on screen
+          // immediately after `fill`. Assert on the debounced OUTCOME
+          // (every toktickit.local fixture row gone) rather than a fixed
+          // wait — Playwright's auto-retrying `toHaveCount` polls through
+          // the debounce and the re-fetch for us.
+          await expect(
+            page.locator("tbody tr, .zen-user-mgmt__card").filter({ hasText: "toktickit.local" }),
+          ).toHaveCount(0);
+          await expect(
+            page.locator("tbody tr, .zen-user-mgmt__card").filter({ hasText: "example.edu" }).first(),
+          ).toBeVisible();
+        }
+
         const dir = path.join(SCREENSHOT_ROOT, screen);
         fs.mkdirSync(dir, { recursive: true });
         await page.screenshot({
