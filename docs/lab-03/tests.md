@@ -213,7 +213,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | E2E-06 | E | AC-34, AC-37, AC-38 | Staff operations | Claim, set IT Priority, perform a permitted status change | `e2e/lab-03/staff-ticket-flow.spec.ts` | Planned |
 | E2E-07 | E | AC-21, AC-41, AC-42 | Comment and note | Post a Public Comment and an Internal Note; the Requester sees only the comment | `e2e/lab-03/staff-ticket-flow.spec.ts` | Planned |
 | E2E-08 | E | AC-24, AC-43, AC-44 | Requester side | Requester reports "appears resolved"; staff see it; a Lab 2 attachment still downloads | `e2e/lab-03/staff-ticket-flow.spec.ts` | Planned |
-| E2E-09 | E | AC-48, AC-49, AC-51 | User admin | Create a user with one role, hit the duplicate-email rejection, edit all four fields | `e2e/lab-03/user-administration.spec.ts` | Planned |
+| E2E-09 | E | AC-48, AC-49, AC-51 | User admin | Create a user with one role, hit the duplicate-email rejection, edit all four fields | `e2e/lab-03/user-administration.spec.ts` | Pass |
 | E2E-10 | E | AC-52 | Initial password round trip | Admin sets a new initial password; that user logs in and is forced to change it | `e2e/lab-03/user-administration.spec.ts` | Planned |
 | E2E-11 | E | AC-53, AC-54 | Admin safety rails | Self-deactivation and last-active-Administrator are both refused in the UI | `e2e/lab-03/user-administration.spec.ts` | Planned |
 | E2E-12 | E | AC-55 | Forbidden admin access | A Requester navigating to `/admin/users` sees the forbidden state | `e2e/lab-03/user-administration.spec.ts` | Planned |
