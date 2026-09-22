@@ -65,7 +65,27 @@
   min-width: 0;
 }
 
-@media (min-width: 768px) {
+/*
+ * "Keep the filters on one line" (same technique and rationale as
+ * MyTicketsScreen.css's identical rule), but gated to `>= 992px` here
+ * rather than MyTicketsScreen.css's `>= 768px`. This screen has five
+ * filters (Status, IT Priority, Category, Owner, Sort) against My Tickets'
+ * four, and Owner's option labels (real IT Staff names) run longer than
+ * Priority/Status's fixed enum labels — their combined `max-content` width
+ * is ~967px, comfortably wider than a 768-991px tablet's own content area.
+ * At `768px` (matching MyTicketsScreen.css verbatim) this forced the whole
+ * `.zen-staff-queue__filters` block to demand its full unwrapped width
+ * even though `flex-wrap: wrap` is set on it — the CSS spec's intrinsic
+ * max-content sizing pass ignores wrapping, so `min-width: max-content`
+ * enforces "as wide as if nothing wrapped" regardless — pushing it past the
+ * viewport and overflowing the whole document by ~188px at 820px (caught
+ * by e2e/lab-03/responsive.spec.ts R-01, tests.md:197, AC-56/V-11). Desktop
+ * (`>= 992px`) has the full 1120px container and genuinely fits five
+ * unwrapped filters; tablet instead falls through to the unguarded rule
+ * above (`flex: 1 1 140px; min-width: 0`), letting the selects wrap onto
+ * more than one line instead of overflowing.
+ */
+@media (min-width: 992px) {
   .zen-staff-queue__filters > * {
     flex: 0 1 auto;
     min-width: max-content;

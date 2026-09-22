@@ -194,12 +194,12 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | S-04 | S | V-06 | Editable vs read-only | IT Staff Ticket Detail read-only fields carry the read-only class; operational fields do not | `client/tests/lab-03/ui-style.test.tsx` | Planned |
 | S-05 | S | V-08 | Validation placement | Messages render inside their field wrapper, as in Lab 2 | `client/tests/lab-03/ui-style.test.tsx` | Planned |
 | S-06 | S | V-07 | Private surface | `.thread--internal` uses `--zen-private-bg` and its border token | `client/tests/lab-03/ui-style.test.tsx` | Planned |
-| R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Planned |
-| R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px | `e2e/lab-03/responsive.spec.ts` | Planned |
-| R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below | `e2e/lab-03/responsive.spec.ts` | Planned |
-| R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Planned |
-| R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Planned |
-| R-06 | R | — | Screenshots | All four required folders populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Planned |
+| R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-06 | R | — | Screenshots | All four required folders populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
 
 ### 2.9 End-to-end
 
