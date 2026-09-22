@@ -57,37 +57,37 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 
 | ID | T | AC / BR | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| UNIT-01 | U | BR-06 | bcrypt hash + verify | Round-trips; cost factor is 12; hash ≠ plaintext | `server/tests/lab-03/password.test.ts` | Planned |
-| UNIT-02 | U | BR-07, AC-07 | Password policy | 7 chars and 129 chars rejected; 8 and 128 accepted | `server/tests/lab-03/password.test.ts` | Planned |
-| UNIT-03 | U | BR-07, AC-08 | Same-as-current check | Identical new password rejected | `server/tests/lab-03/password.test.ts` | Planned |
-| UNIT-04 | U | AC-38 | Transition matrix — permitted | Every pair in §5.1 returns true | `server/tests/lab-03/transitions.test.ts` | Planned |
+| UNIT-01 | U | BR-06 | bcrypt hash + verify | Round-trips; cost factor is 12; hash ≠ plaintext | `server/tests/lab-03/password.test.ts` | Pass |
+| UNIT-02 | U | BR-07, AC-07 | Password policy | 7 chars and 129 chars rejected; 8 and 128 accepted | `server/tests/lab-03/password.test.ts` | Pass |
+| UNIT-03 | U | BR-07, AC-08 | Same-as-current check | Identical new password rejected | `server/tests/lab-03/password.test.ts` | Pass |
+| UNIT-04 | U | AC-38 | Transition matrix — permitted | Every pair in §5.1 returns true | `server/tests/lab-03/transitions.test.ts` | Pass |
 | UNIT-05 | U | AC-39 | Transition matrix — forbidden | Every pair absent from §5.1 returns false, including each status → itself | `server/tests/lab-03/transitions.test.ts` | Planned |
 | UNIT-06 | U | BR-24, AC-40 | Owner-required rule | `IN_PROGRESS` rejected with no owner from **all four** source states | `server/tests/lab-03/transitions.test.ts` | Planned |
-| UNIT-07 | U | D-10 | Queue defaults | No params → `itPriority desc, createdAt asc`, page 1, size 20 | `server/tests/lab-03/queue-query.test.ts` | Planned |
-| UNIT-08 | U | BR-35, AC-31 | Queue query validation | Unknown sort, `pageSize` 0/101, `page` 0, bad enum, bad `owner` each rejected with a field entry | `server/tests/lab-03/queue-query.test.ts` | Planned |
-| UNIT-09 | U | D-10 | IT Priority ordering | Comparator ranks `HIGH > MEDIUM > LOW`, not alphabetically | `server/tests/lab-03/queue-query.test.ts` | Planned |
-| UNIT-10 | U | BR-09 | Email normalisation | `A@B.COM` → `a@b.com`; comparison is case-insensitive | `server/tests/lab-03/password.test.ts` | Planned |
-| UNIT-11 | U | BR-17, AC-22, AC-23 | Comment/note body validator | `""`, `"   "`, `"\n\t"` rejected; 2000 accepted; 2001 rejected; trimmed before measuring | `server/tests/lab-03/password.test.ts` | Planned |
+| UNIT-07 | U | D-10 | Queue defaults | No params → `itPriority desc, createdAt asc`, page 1, size 20 | `server/tests/lab-03/queue-query.test.ts` | Pass |
+| UNIT-08 | U | BR-35, AC-31 | Queue query validation | Unknown sort, `pageSize` 0/101, `page` 0, bad enum, bad `owner` each rejected with a field entry | `server/tests/lab-03/queue-query.test.ts` | Pass |
+| UNIT-09 | U | D-10 | IT Priority ordering | Comparator ranks `HIGH > MEDIUM > LOW`, not alphabetically | `server/tests/lab-03/queue-query.test.ts` | Pass |
+| UNIT-10 | U | BR-09 | Email normalisation | `A@B.COM` → `a@b.com`; comparison is case-insensitive | `server/tests/lab-03/password.test.ts` | Pass |
+| UNIT-11 | U | BR-17, AC-22, AC-23 | Comment/note body validator | `""`, `"   "`, `"\n\t"` rejected; 2000 accepted; 2001 rejected; trimmed before measuring | `server/tests/lab-03/password.test.ts` | Pass |
 
 ### 2.2 API — authentication
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| API-01 | A | AC-01 | Valid login | `200`; authenticated session established; safe user data with role | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-02 | A | AC-05 | Wrong password vs unknown email vs inactive account | All three `401 INVALID_CREDENTIALS` with **byte-identical** bodies | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-03 | A | AC-13 | Login response shape | No `passwordHash`, no password, anywhere in the body | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-04 | A | AC-61 | Login carries the flag | `mustChangePassword` present and correct for both kinds of account | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-05 | A | AC-62 | Rate limit per email | 11th failure in 15 min → `429`; body matches `INVALID_CREDENTIALS` apart from the code; clears after the window | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-06 | A | AC-62 | Rate limit per source IP | 11 failures across **different** emails from one IP → `429` | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-07 | A | AC-10 | Logout | `204`; the same cookie is then `401`; the session row is deleted | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-08 | A | AC-11 | Session expiry | A session older than 8 h is `401`, identical to no session | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-09 | A | AC-59 | Current user | `200` with id, name, email, role, flag; `401` without a session | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-10 | A | AC-60 | Role change takes effect | Admin changes a role → that user's next request uses the new role without re-login | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-11 | A | AC-12 | Deactivation kills sessions | Admin deactivates a user with a live session → next request `401` | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-12 | A | AC-02, AC-09 | Forced password change | Valid new password → `204`, flag cleared, application reachable | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-13 | A | AC-07, AC-08 | Password change validation | Too short, too long, mismatch, same-as-current each `400`; flag stays set | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-14 | A | AC-69 | Voluntary change needs current password | Wrong `currentPassword` → `403`, password unchanged; forced path succeeds without it | `server/tests/lab-03/auth.api.test.ts` | Planned |
-| API-15 | A | AC-64 | Other sessions dropped | Two live sessions; change password on one → the other is `401`, the caller's survives | `server/tests/lab-03/auth.api.test.ts` | Planned |
+| API-01 | A | AC-01 | Valid login | `200`; authenticated session established; safe user data with role | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-02 | A | AC-05 | Wrong password vs unknown email vs inactive account | All three `401 INVALID_CREDENTIALS` with **byte-identical** bodies | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-03 | A | AC-13 | Login response shape | No `passwordHash`, no password, anywhere in the body | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-04 | A | AC-61 | Login carries the flag | `mustChangePassword` present and correct for both kinds of account | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-05 | A | AC-62 | Rate limit per email | 11th failure in 15 min → `429`; body matches `INVALID_CREDENTIALS` apart from the code; clears after the window | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-06 | A | AC-62 | Rate limit per source IP | 11 failures across **different** emails from one IP → `429` | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-07 | A | AC-10 | Logout | `204`; the same cookie is then `401`; the session row is deleted | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-08 | A | AC-11 | Session expiry | A session older than 8 h is `401`, identical to no session | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-09 | A | AC-59 | Current user | `200` with id, name, email, role, flag; `401` without a session | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-10 | A | AC-60 | Role change takes effect | Admin changes a role → that user's next request uses the new role without re-login | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-11 | A | AC-12 | Deactivation kills sessions | Admin deactivates a user with a live session → next request `401` | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-12 | A | AC-02, AC-09 | Forced password change | Valid new password → `204`, flag cleared, application reachable | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-13 | A | AC-07, AC-08 | Password change validation | Too short, too long, mismatch, same-as-current each `400`; flag stays set | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-14 | A | AC-69 | Voluntary change needs current password | Wrong `currentPassword` → `403`, password unchanged; forced path succeeds without it | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-15 | A | AC-64 | Other sessions dropped | Two live sessions; change password on one → the other is `401`, the caller's survives | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-16 | A | AC-70 | Password-change gate | A flagged session is `403 PASSWORD_CHANGE_REQUIRED` on every route except me/change/logout, for all three roles | `server/tests/lab-03/auth.api.test.ts` | Planned |
 
 ### 2.3 Security / authorization
@@ -95,70 +95,70 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
 | SEC-01 | Z | AC-14 | Unauthenticated access | Every protected route returns `401` and performs no write | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-02 | Z | AC-15 | Wrong-role collections | Requester → staff queue, Requester/IT Staff → admin routes: all `403` before any lookup | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-03 | Z | AC-03 | Client-supplied identity ignored | `requesterId` in body and a foreign id in the path do not change whose data returns | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-04 | Z | AC-16 | No existence leak | Another Requester's ticket and a nonexistent id return **byte-identical** `404` | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-05 | Z | AC-04 | Internal Notes hidden | Requester → `404` on notes, identical to a nonexistent ticket; no note content in the body | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| SEC-06 | Z | AC-68 | Administrator write limits | Admin: IT Priority `200`; status, owner and note-create all `403` (not `404` — they can read it) | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-07 | Z | AC-63 | Content-type enforcement | Every state-changing route with `text/plain` → `415`; nothing written | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-08 | Z | AC-57 | Safe failure | A forced internal error returns the generic `INTERNAL` body — no stack, SQL or path | `server/tests/lab-03/authorization.api.test.ts` | Planned |
-| SEC-09 | Z | AC-55 | Admin routes closed | Requester and IT Staff both `403` on all four user routes | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
+| SEC-02 | Z | AC-15 | Wrong-role collections | Requester → staff queue, Requester/IT Staff → admin routes: all `403` before any lookup | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-03 | Z | AC-03 | Client-supplied identity ignored | `requesterId` in body and a foreign id in the path do not change whose data returns | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-04 | Z | AC-16 | No existence leak | Another Requester's ticket and a nonexistent id return **byte-identical** `404` | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-05 | Z | AC-04 | Internal Notes hidden | Requester → `404` on notes, identical to a nonexistent ticket; no note content in the body | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| SEC-06 | Z | AC-68 | Administrator write limits | Admin: IT Priority `200`; status, owner and note-create all `403` (not `404` — they can read it) | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-07 | Z | AC-63 | Content-type enforcement | Every state-changing route with `text/plain` → `415`; nothing written | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-08 | Z | AC-57 | Safe failure | A forced internal error returns the generic `INTERNAL` body — no stack, SQL or path | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| SEC-09 | Z | AC-55 | Admin routes closed | Requester and IT Staff both `403` on all four user routes | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 
 ### 2.4 API — queue, ticket operations, comments and notes
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| API-17 | A | AC-26 | Queue default ordering | Spans all Requesters; IT Priority desc then created asc | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-18 | A | AC-27 | Queue search | Matches ticket number and summary, case-insensitively; nothing else | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-19 | A | AC-28 | Queue filters | status, itPriority, categoryId, owner=id, owner=unassigned, owner=me each return exactly the matching set | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-20 | A | AC-29 | Queue sorting | Each sort field, both directions, changes order as documented | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-21 | A | AC-30 | Pagination | page/pageSize/totalItems/totalPages correct; page holds ≤ pageSize | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-22 | A | AC-31 | Invalid queue query | Each malformed parameter → `400 INVALID_QUERY` with a `fields` entry, never `500`, never ignored | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-23 | A | AC-33 | Empty vs no-results | Empty queue and a non-matching filter both `200` with `items: []` and correct totals | `server/tests/lab-03/staff-queue.api.test.ts` | Planned |
-| API-24 | A | AC-67 | Staff open any ticket | IT Staff retrieve a ticket belonging to any Requester | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-25 | A | AC-34 | Claim | Unassigned → caller becomes owner | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-26 | A | AC-35 | Reassign / unassign | Owner changes to another active IT Staff; `null` unassigns | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-27 | A | AC-36 | Invalid owner | Inactive user, Requester, and nonexistent id all `409 INVALID_OWNER`, same message | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-28 | A | AC-37 | IT Priority independence | IT Priority changes; Requested Priority unchanged by any endpoint | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-29 | A | AC-38 | Permitted transitions | Every §5.1 pair succeeds, each given its stated precondition | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
+| API-17 | A | AC-26 | Queue default ordering | Spans all Requesters; IT Priority desc then created asc | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-18 | A | AC-27 | Queue search | Matches ticket number and summary, case-insensitively; nothing else | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-19 | A | AC-28 | Queue filters | status, itPriority, categoryId, owner=id, owner=unassigned, owner=me each return exactly the matching set | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-20 | A | AC-29 | Queue sorting | Each sort field, both directions, changes order as documented | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-21 | A | AC-30 | Pagination | page/pageSize/totalItems/totalPages correct; page holds ≤ pageSize | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-22 | A | AC-31 | Invalid queue query | Each malformed parameter → `400 INVALID_QUERY` with a `fields` entry, never `500`, never ignored | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-23 | A | AC-33 | Empty vs no-results | Empty queue and a non-matching filter both `200` with `items: []` and correct totals | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-24 | A | AC-67 | Staff open any ticket | IT Staff retrieve a ticket belonging to any Requester | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-25 | A | AC-34 | Claim | Unassigned → caller becomes owner | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-26 | A | AC-35 | Reassign / unassign | Owner changes to another active IT Staff; `null` unassigns | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-27 | A | AC-36 | Invalid owner | Inactive user, Requester, and nonexistent id all `409 INVALID_OWNER`, same message | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-28 | A | AC-37 | IT Priority independence | IT Priority changes; Requested Priority unchanged by any endpoint | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-29 | A | AC-38 | Permitted transitions | Every §5.1 pair succeeds, each given its stated precondition | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | API-30 | A | AC-39 | Forbidden transitions | Every non-matrix pair and every no-op → `409 INVALID_TRANSITION` | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
 | API-31 | A | AC-40 | Owner required | `IN_PROGRESS` with no owner → `409 OWNER_REQUIRED`, from each source state | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
 | API-32 | A | AC-43 | Attachment continuity | A Lab 2 ticket's attachments list and download for IT Staff | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
 | API-33 | A | AC-44 | Resolution indication visible | `requesterResolvedAt` present for IT Staff after the Requester reports it | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Planned |
-| API-34 | A | AC-21 | Requester comment | `201`; author and timestamp from the server; appears in the thread | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-35 | A | AC-22, AC-23 | Comment validation | Empty, whitespace-only and 2001-char bodies rejected; 2000 accepted | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-36 | A | AC-65 | Staff comment on unowned ticket | `201`; visible to the owning Requester | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-37 | A | AC-41 | Internal note created | `201`; server-set author and time; client-supplied author ignored | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-38 | A | AC-66 | Staff read notes | IT Staff and Administrator both retrieve notes; Administrator cannot create | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-39 | A | AC-24 | Problem appears resolved | `204`; timestamp set; **status unchanged**; repeat is idempotent | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
-| API-40 | A | AC-25 | Requester cannot resolve | Requester attempting Resolved or Closed by any route is refused | `server/tests/lab-03/comments-notes.api.test.ts` | Planned |
+| API-34 | A | AC-21 | Requester comment | `201`; author and timestamp from the server; appears in the thread | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-35 | A | AC-22, AC-23 | Comment validation | Empty, whitespace-only and 2001-char bodies rejected; 2000 accepted | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-36 | A | AC-65 | Staff comment on unowned ticket | `201`; visible to the owning Requester | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-37 | A | AC-41 | Internal note created | `201`; server-set author and time; client-supplied author ignored | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-38 | A | AC-66 | Staff read notes | IT Staff and Administrator both retrieve notes; Administrator cannot create | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-39 | A | AC-24 | Problem appears resolved | `204`; timestamp set; **status unchanged**; repeat is idempotent | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| API-40 | A | AC-25 | Requester cannot resolve | Requester attempting Resolved or Closed by any route is refused | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 
 ### 2.5 API — Administrator user management
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| API-41 | A | AC-45 | User list | Name, email, role, isActive for each; never a hash | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-42 | A | AC-46 | User search | Matches name and email, case-insensitively | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-43 | A | AC-47 | Role filter | Each role returns exactly its users | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-44 | A | AC-48 | Create user | `201`; `mustChangePassword` true and not client-settable; the account can log in | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-45 | A | AC-49 | Duplicate email | Rejected on create **and** update; case-insensitive | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-46 | A | AC-50 | Invalid role | A role outside the three → `400`; no user created | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-47 | A | AC-51 | Update user | Name, email, role and activation all change; unknown fields rejected | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-48 | A | AC-52 | Set initial password | `204`; flag set; that user's sessions dropped; next login forces a change | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-49 | A | AC-53 | Self-deactivation | Admin deactivating themselves → `409`; editing own name still allowed | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
-| API-50 | A | AC-54 | Last active Administrator | Deactivating **and** demoting the last one both `409`; with two admins the first still succeeds | `server/tests/lab-03/users-admin.api.test.ts` | Planned |
+| API-41 | A | AC-45 | User list | Name, email, role, isActive for each; never a hash | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-42 | A | AC-46 | User search | Matches name and email, case-insensitively | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-43 | A | AC-47 | Role filter | Each role returns exactly its users | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-44 | A | AC-48 | Create user | `201`; `mustChangePassword` true and not client-settable; the account can log in | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-45 | A | AC-49 | Duplicate email | Rejected on create **and** update; case-insensitive | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-46 | A | AC-50 | Invalid role | A role outside the three → `400`; no user created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-47 | A | AC-51 | Update user | Name, email, role and activation all change; unknown fields rejected | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-48 | A | AC-52 | Set initial password | `204`; flag set; that user's sessions dropped; next login forces a change | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-49 | A | AC-53 | Self-deactivation | Admin deactivating themselves → `409`; editing own name still allowed | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-50 | A | AC-54 | Last active Administrator | Deactivating **and** demoting the last one both `409`; with two admins the first still succeeds | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 
 ### 2.6 Migration and regression
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| MIG-01 | M | AC-19 | Rename preserves data | Against a Lab 2 database: every Ticket and Attachment survives with ids and ownership intact | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-02 | M | — | Requester → User | Every `RequesterUser` row becomes a `REQUESTER` User with the same id | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-03 | M | — | Column backfills | No null `passwordHash`; every `itPriority` equals its `requestedPriority` | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-04 | M | BR-09 | Email lower-casing | All emails lower-cased; the `lower(email)` unique index rejects a case-variant duplicate | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-05 | M | — | Seed idempotence | Running the seed twice leaves identical row counts and no duplicate emails | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-06 | M | AC-58 | No plaintext passwords | No column in any table holds a seeded password in clear text | `server/tests/lab-03/migration.test.ts` | Planned |
-| MIG-07 | M | AC-19 | Lab 2 regression | The Lab 2 ticket and attachment suites pass unchanged against authenticated identity | `server/tests/lab-03/requester-regression.api.test.ts` | Planned |
+| MIG-01 | M | AC-19 | Rename preserves data | Against a Lab 2 database: every Ticket and Attachment survives with ids and ownership intact | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-02 | M | — | Requester → User | Every `RequesterUser` row becomes a `REQUESTER` User with the same id | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-03 | M | — | Column backfills | No null `passwordHash`; every `itPriority` equals its `requestedPriority` | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-04 | M | BR-09 | Email lower-casing | All emails lower-cased; the `lower(email)` unique index rejects a case-variant duplicate | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-05 | M | — | Seed idempotence | Running the seed twice leaves identical row counts and no duplicate emails | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-06 | M | AC-58 | No plaintext passwords | No column in any table holds a seeded password in clear text | `server/tests/lab-03/migration.test.ts` | Pass |
+| MIG-07 | M | AC-19 | Lab 2 regression | The Lab 2 ticket and attachment suites pass unchanged against authenticated identity | `server/tests/lab-03/requester-regression.api.test.ts` | Pass |
 | MIG-08 | M | AC-20 | Selector removed | No `X-Requester-Id` handling, no `GET /api/requesters`, no stored selection anywhere in `server/src` or `client/src` | `server/tests/lab-03/requester-regression.api.test.ts` | Planned |
 
 ### 2.7 UI component
