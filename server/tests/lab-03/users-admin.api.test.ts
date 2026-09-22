@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { Client } from 'pg';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
@@ -155,6 +156,46 @@ async function withSoleActiveAdministrator<T>(
 
   try {
     return await run(soleAdmin);
+  } finally {
+    if (othersToDeactivate.length > 0) {
+      await prisma.user.updateMany({
+        where: { id: { in: othersToDeactivate.map((u) => u.id) } },
+        data: { isActive: true },
+      });
+    }
+  }
+}
+
+/**
+ * Sibling to `withSoleActiveAdministrator`, for proving BR-32's concurrency
+ * fix (PR #82 review): seeds a scenario with exactly TWO active
+ * Administrators — `adminA` and `adminB` — so a test can have each demote
+ * the other concurrently and assert exactly one of the two requests is
+ * rejected LAST_ADMIN. Deactivates every other currently-active
+ * Administrator (same defensive rationale as `withSoleActiveAdministrator`),
+ * creates two fresh test-local Administrators as the only active ones, runs
+ * `run` with both, then restores every deactivated row's `isActive` in a
+ * `finally` regardless of how `run` exits.
+ */
+async function withTwoActiveAdministrators<T>(
+  run: (adminA: { id: number; email: string }, adminB: { id: number; email: string }) => Promise<T>,
+): Promise<T> {
+  const othersToDeactivate = await prisma.user.findMany({
+    where: { role: 'ADMINISTRATOR', isActive: true },
+    select: { id: true },
+  });
+  const adminA = await createUser('Zqx_Two_Admin_A', uniqueEmail('two-admin-a'), 'ADMINISTRATOR', true);
+  const adminB = await createUser('Zqx_Two_Admin_B', uniqueEmail('two-admin-b'), 'ADMINISTRATOR', true);
+
+  if (othersToDeactivate.length > 0) {
+    await prisma.user.updateMany({
+      where: { id: { in: othersToDeactivate.map((u) => u.id) } },
+      data: { isActive: false },
+    });
+  }
+
+  try {
+    return await run(adminA, adminB);
   } finally {
     if (othersToDeactivate.length > 0) {
       await prisma.user.updateMany({
@@ -824,6 +865,76 @@ describe('PATCH /api/users/:id (api-spec.md §6.3)', () => {
     expect(res.body.isActive).toBe(true);
 
     expect(await prisma.session.findUnique({ where: { tokenHash: priorTokenHash } })).not.toBeNull();
+  });
+
+  it('at least one of two concurrent demotions of the last two active Administrators is rejected LAST_ADMIN, never both (BR-32 concurrency)', async () => {
+    await withTwoActiveAdministrators(async (adminA, adminB) => {
+      const cookieA = await loginAndGetCookie(adminA.email, DEFAULT_PASSWORD);
+      const cookieB = await loginAndGetCookie(adminB.email, DEFAULT_PASSWORD);
+
+      // A real race between these two requests is won or lost within
+      // single-digit milliseconds (both requests' own auth checks are plain,
+      // fast SELECTs, while the whole PATCH — including the BR-32 row lock,
+      // the update, and BR-12's session cleanup — commits just about as
+      // fast), so simply firing both via Promise.all and hoping they land
+      // inside that window is flaky: on this machine roughly 4 in 5 runs saw
+      // the slower request's own `authenticate` check run AFTER the faster
+      // one had already committed and deactivated it, producing 401
+      // UNAUTHENTICATED instead of the 409 LAST_ADMIN this test exists to
+      // prove.
+      //
+      // To make the overlap deterministic instead of timing-dependent, hold
+      // the exact row lock the route's BR-32 fix takes — every currently
+      // active Administrator row — on a separate raw connection *before*
+      // either PATCH is sent. Neither request's transaction can get past its
+      // own `SELECT ... FOR UPDATE` (and therefore neither can commit) while
+      // this lock is held, but `authenticate`'s session/user lookups are
+      // plain reads that are never blocked by someone else's row lock, so
+      // both requests reliably authenticate and reach the lock — and queue
+      // there — while both Administrators are still untouched. Only then do
+      // we release the lock, letting Postgres decide, for real, which
+      // transaction proceeds first and which re-reads the other's committed
+      // change.
+      const barrier = new Client({ connectionString: process.env.DATABASE_URL });
+      await barrier.connect();
+      try {
+        await barrier.query('BEGIN');
+        await barrier.query(
+          `SELECT id FROM "User" WHERE role = 'ADMINISTRATOR' AND "isActive" = true FOR UPDATE`,
+        );
+
+        // Each admin deactivates the OTHER concurrently (not themselves —
+        // that would trip SELF_DEACTIVATION, a different guard, checked
+        // first). Both requests are in flight now, but blocked behind the
+        // barrier above.
+        const racing = Promise.all([
+          patchUser(adminB.id, cookieA, { isActive: false }),
+          patchUser(adminA.id, cookieB, { isActive: false }),
+        ]);
+
+        // Generous margin for both requests to authenticate and queue on
+        // the barrier's lock — comfortably above the sub-10ms this took
+        // when observed directly, well short of Prisma's transaction
+        // timeout.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        await barrier.query('ROLLBACK');
+
+        const [resDeactivateB, resDeactivateA] = await racing;
+
+        const statuses = [resDeactivateB.status, resDeactivateA.status].sort();
+        expect(statuses).toEqual([200, 409]);
+        const rejected = resDeactivateB.status === 409 ? resDeactivateB : resDeactivateA;
+        expect(rejected.body.error).toBe('LAST_ADMIN');
+
+        const remainingActive = await prisma.user.count({
+          where: { role: 'ADMINISTRATOR', isActive: true, id: { in: [adminA.id, adminB.id] } },
+        });
+        expect(remainingActive).toBe(1);
+      } finally {
+        await barrier.end();
+      }
+    });
   });
 });
 

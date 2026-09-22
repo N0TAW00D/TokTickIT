@@ -503,9 +503,20 @@ usersRouter.patch(
         const wasActiveAdministrator = current.role === 'ADMINISTRATOR' && current.isActive;
         const staysActiveAdministrator = resultingRole === 'ADMINISTRATOR' && resultingIsActive;
         if (wasActiveAdministrator && !staysActiveAdministrator) {
-          const otherActiveAdmins = await tx.user.count({
-            where: { role: 'ADMINISTRATOR', isActive: true, id: { not: userId } },
-          });
+          // BR-32 concurrency (PR #82 review): row-lock every currently active
+          // Administrator (this row included) before counting, so a second
+          // concurrent PATCH racing to demote/deactivate a DIFFERENT active
+          // Administrator blocks here until this transaction commits, then
+          // re-reads its locked rows at their now-current value — Postgres drops
+          // a locked row from the result if it no longer matches the WHERE clause
+          // after the wait, so the second transaction's count reflects this one's
+          // change instead of racing past it. A plain `tx.user.count(...)` here
+          // does not provide this: Read Committed lets two disjoint reads both
+          // see a stale "safe" count and both commit, zeroing active Administrators.
+          const lockedActiveAdmins = await tx.$queryRaw<{ id: number }[]>`
+            SELECT id FROM "User" WHERE role = 'ADMINISTRATOR' AND "isActive" = true FOR UPDATE
+          `;
+          const otherActiveAdmins = lockedActiveAdmins.filter((row) => row.id !== userId).length;
           if (otherActiveAdmins === 0) {
             return { kind: 'last-admin' };
           }
