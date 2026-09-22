@@ -522,6 +522,13 @@ usersRouter.patch(
           select: ADMIN_USER_SELECT,
         });
 
+        // BR-12: deactivating a user invalidates that user's existing
+        // sessions, so any row already stored for them must not remain
+        // usable if the account is reactivated later.
+        if (resultingIsActive === false) {
+          await tx.session.deleteMany({ where: { userId } });
+        }
+
         return { kind: 'ok', user: updated };
       });
 

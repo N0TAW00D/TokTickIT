@@ -786,6 +786,45 @@ describe('PATCH /api/users/:id (api-spec.md §6.3)', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('NOT_FOUND');
   });
+
+  it('200 deactivating a user deletes every existing session for that user (BR-12)', async () => {
+    const cookie = await getAdminCookie();
+    const target = await createUser('Zqx Patch Deactivate Target', uniqueEmail('patch-deactivate'), 'REQUESTER', true);
+
+    // Seed an existing session for the target user directly — same pattern
+    // as the POST /:id/initial-password AC-52 test — so we can assert it's
+    // gone after.
+    const priorToken = 'test-patch-deactivate-prior-session-token';
+    const priorTokenHash = hashSessionToken(priorToken);
+    await prisma.session.create({
+      data: { tokenHash: priorTokenHash, userId: target.id, expiresAt: new Date(Date.now() + 60_000) },
+    });
+
+    const res = await patchUser(target.id, cookie, { isActive: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.isActive).toBe(false);
+
+    expect(await prisma.session.findUnique({ where: { tokenHash: priorTokenHash } })).toBeNull();
+  });
+
+  it('200 a PATCH that does not deactivate the user leaves their existing sessions alone (BR-12)', async () => {
+    const cookie = await getAdminCookie();
+    const target = await createUser('Zqx Patch NoDeactivate Target', uniqueEmail('patch-no-deactivate'), 'REQUESTER', true);
+
+    const priorToken = 'test-patch-no-deactivate-prior-session-token';
+    const priorTokenHash = hashSessionToken(priorToken);
+    await prisma.session.create({
+      data: { tokenHash: priorTokenHash, userId: target.id, expiresAt: new Date(Date.now() + 60_000) },
+    });
+
+    const res = await patchUser(target.id, cookie, { name: 'Zqx Patch NoDeactivate Target Renamed' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.isActive).toBe(true);
+
+    expect(await prisma.session.findUnique({ where: { tokenHash: priorTokenHash } })).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
