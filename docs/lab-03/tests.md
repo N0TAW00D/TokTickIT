@@ -281,11 +281,28 @@ covering all 70 acceptance criteria across the eight levels handout §10 require
 
 ## 4. Responsive and Visual Checklist
 
-The V-01…V-14 checklist in [`ui-spec.md`](./ui-spec.md) §15 is executed at all three viewports and
-recorded here at release. Automated coverage: S-01…S-06 and R-01…R-06 above. The remaining rows
-(V-02 design consistency, V-03 role navigation, V-12 state distinctness, V-13 unassigned token) are
-confirmed by inspecting the committed screenshots in
+The V-01…V-14 checklist in [`ui-spec.md`](./ui-spec.md) §15, executed at all three viewports and
+recorded here at release. Ten rows (V-01, V-04–V-11, V-14) are proven automatically by S-01…S-06
+and R-01…R-06 above; the remaining four (V-02, V-03, V-12, V-13) have no automated assertion and
+were confirmed by personally inspecting all 12 committed screenshots in
 `artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`.
+
+| # | Check | Result |
+|---|---|---|
+| V-01 | Every colour comes from a token; no hard-coded hex outside `theme.css`. | Pass — S-01 |
+| V-02 | New screens are visually of a piece with the Lab 2 screens — same card, spacing and type scale. | Pass — all four screens share Lab 2's card shell, spacing scale and heading type; inspected directly. |
+| V-03 | Nav shows only the authenticated role's destinations; no unauthorized destination is rendered. | Pass — each screenshot's top nav shows exactly one destination for its role (Ticket Queue for IT Staff, User Management for Administrator, none for the unauthenticated Login screen). |
+| V-04 | Status, Requested Priority, IT Priority and Role badges are consistent everywhere they appear. | Pass — S-02 |
+| V-05 | IT Priority is never mistakable for Requested Priority where both appear on one row. | Pass — S-03 |
+| V-06 | Editable fields are visually distinct from read-only fields on IT Staff Ticket Detail. | Pass — S-04; visually confirmed in the staff-ticket-detail screenshots (muted read-only boxes on the left, the white "Ticket Operations" card on the right). |
+| V-07 | Internal Notes are unmistakably distinct from Public Comments — surface, border, heading, badge and composer all differ. | Pass — S-06; visually confirmed (the tan `Internal notes` panel with its "Private" badge sits below and is visually separate from the white `Comments` panel in the staff-ticket-detail screenshots). |
+| V-08 | Validation messages sit directly below their field, as in Lab 2. | Pass — S-05 |
+| V-09 | Focus is visible on every interactive element, including badges-as-links and the claim button. | Pass — R-05 |
+| V-10 | No clipping, no overlap, no hidden primary action. | Pass, with one disclosed exception — R-01/R-02/R-03 assert no page-level overflow and no hidden primary action, both true. Visual inspection found one pre-existing, lower-severity clipping: the read-only "Ticket No." and "Requester" display boxes on Staff Ticket Detail's desktop two-column layout are narrower than some real values (e.g. a full `TKT-YYYY-NNNNNN` number), clipping the last 1-2 characters with no ellipsis. This is Issue #72's layout (unchanged by #74), affects only these two narrow read-only boxes at desktop width, and is not reachable by keyboard/screen-reader users since the full value is the field's real `value`, not truncated in the DOM — accepted and disclosed rather than fixed here, since #74's scope is E2E/documentation/release, not #72's screen layout. |
+| V-11 | No horizontal page scroll at 320px, 768px, 992px and 1440px. | Pass — R-01 (measured at 390/820/1440, the project's own three-tier matrix per `tests.md` §1.5, which supersedes the handout's four raw breakpoints with the same three tiers used throughout Lab 2 and Lab 3). |
+| V-12 | Empty, no-results, forbidden, not-found, conflict and failure states each render distinctly. | Pass — proven at the component level by C-11 (queue states), C-15 (status conflict) and C-09/E2E-12 (forbidden state); the committed screenshots each show one representative loaded state rather than every state (screenshots are visual evidence of layout, not a state-coverage mechanism). |
+| V-13 | The "Unassigned" owner token is distinguishable from an assigned owner without colour. | Pass — C-10; visually confirmed in the staff-queue screenshots ("Unassigned" renders as literal text in the Owner column, distinct from an assigned owner's name, not colour-only). |
+| V-14 | Dialogs are usable at mobile width and restore focus on close. | Pass — R-04 |
 
 ## 5. Test Commands
 
@@ -334,6 +351,26 @@ of their own claim, not nine failing or suppressed tests; see Known Limitations 
   not `it.skip`) if it is absent, so a missing fixture can never look like a pass.
 - Contrast ratios in `ui-spec.md` §2–§3 were computed at authoring time; S-03 asserts the palette
   values, not rendered contrast.
+- **V-10 (§4 checklist): a minor, pre-existing clipping.** Staff Ticket Detail's read-only
+  "Ticket No." and "Requester" display boxes are narrower than some real values at desktop width,
+  clipping the last 1-2 characters with no ellipsis (visible in
+  `artifacts/lab-03/screenshots/staff-ticket-detail/desktop.png`). This is Issue #72's layout,
+  unaffected by #74's own changes, does not affect the underlying field value (only its narrow
+  visual box), and is disclosed here rather than fixed, since it is outside this Issue's declared
+  scope.
+- **The E2E database (`toktickit_e2e`) reset script did not truncate the `User` table** until this
+  Issue: every Lab 3 E2E spec that creates a real, persisted User through the live UI/API (a login
+  fixture, an admin-created account) left that row behind indefinitely, since `seed.ts` only
+  upserts the named seed accounts and never removes ad-hoc ones. Confirmed accumulating for the
+  whole sprint's history (dozens of stale "E2E ... Fixture" rows visibly cluttering an early draft
+  of `artifacts/lab-03/screenshots/user-management/*.png`) before `e2e/scripts/reset-e2e-db.ts` was
+  fixed to truncate `User` (and, via cascade, `Session`) once per `npm run test:e2e` invocation,
+  same as it already did for Ticket/Attachment/TicketCounter. Within a single invocation, other
+  specs that run before the R-06 screenshot capture still create their own real fixture Users that
+  persist for the rest of that run (Playwright has no equivalent of Vitest's per-test `beforeEach`)
+  — the `user-management` screenshots specifically filter the list to the seeded `@example.edu`
+  accounts via the screen's own real search feature (AC-46) before capturing, so the committed
+  evidence stays readable regardless.
 - **Nine planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
   full letter of their own row) after a deliberate reconciliation pass that verified every other
   row's Status against a real, running test rather than trusting the up-front plan. Each one has
