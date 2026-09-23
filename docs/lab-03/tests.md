@@ -66,8 +66,8 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | UNIT-02 | U | BR-07, AC-07 | Password policy | 7 chars and 129 chars rejected; 8 and 128 accepted | `server/tests/lab-03/password.test.ts` | Pass |
 | UNIT-03 | U | BR-07, AC-08 | Same-as-current check | Identical new password rejected | `server/tests/lab-03/password.test.ts` | Pass |
 | UNIT-04 | U | AC-38 | Transition matrix — permitted | Every pair in §5.1 returns true | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
-| UNIT-05 | U | AC-39 | Transition matrix — forbidden | Every pair absent from §5.1 returns false, including each status → itself | `server/tests/lab-03/ticket-status.api.test.ts` | Planned |
-| UNIT-06 | U | BR-24, AC-40 | Owner-required rule | `IN_PROGRESS` rejected with no owner from **all four** source states | `server/tests/lab-03/ticket-status.api.test.ts` | Planned |
+| UNIT-05 | U | AC-39 | Transition matrix — forbidden | Every pair absent from §5.1 returns false, including each status → itself | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
+| UNIT-06 | U | BR-24, AC-40 | Owner-required rule | `IN_PROGRESS` rejected with no owner from **all four** source states | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
 | UNIT-07 | U | D-10 | Queue defaults | No params → `itPriority desc, createdAt asc`, page 1, size 20 | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
 | UNIT-08 | U | BR-35, AC-31 | Queue query validation | Unknown sort, `pageSize` 0/101, `page` 0, bad enum, bad `owner` each rejected with a field entry | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
 | UNIT-09 | U | D-10 | IT Priority ordering | Comparator ranks `HIGH > MEDIUM > LOW`, not alphabetically | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
@@ -126,8 +126,8 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | API-27 | A | AC-36 | Invalid owner | Inactive user, Requester, and nonexistent id all `409 INVALID_OWNER`, same message | `server/tests/lab-03/ticket-owner.api.test.ts` | Pass |
 | API-28 | A | AC-37 | IT Priority independence | IT Priority changes; Requested Priority unchanged by any endpoint | `server/tests/lab-03/ticket-it-priority.api.test.ts` | Pass |
 | API-29 | A | AC-38 | Permitted transitions | Every §5.1 pair succeeds, each given its stated precondition | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
-| API-30 | A | AC-39 | Forbidden transitions | Every non-matrix pair and every no-op → `409 INVALID_TRANSITION` | `server/tests/lab-03/ticket-status.api.test.ts` | Planned |
-| API-31 | A | AC-40 | Owner required | `IN_PROGRESS` with no owner → `409 OWNER_REQUIRED`, from each source state | `server/tests/lab-03/ticket-status.api.test.ts` | Planned |
+| API-30 | A | AC-39 | Forbidden transitions | Every non-matrix pair and every no-op → `409 INVALID_TRANSITION` | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
+| API-31 | A | AC-40 | Owner required | `IN_PROGRESS` with no owner → `409 OWNER_REQUIRED`, from each source state | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
 | API-32 | A | AC-43 | Attachment continuity | A Lab 2 ticket's attachments list and download for IT Staff | `server/tests/lab-03/attachment-download-staff.api.test.ts` | Planned |
 | API-33 | A | AC-44 | Resolution indication visible | `requesterResolvedAt` present for IT Staff after the Requester reports it | `server/tests/lab-03/ticket-detail-staff.api.test.ts` | Planned |
 | API-34 | A | AC-21 | Requester comment | `201`; author and timestamp from the server; appears in the thread | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
@@ -327,21 +327,21 @@ reconciliation pass were produced.
 
 | Level | Planned | Passing | Command |
 |---|---|---|---|
-| Unit | 11 | 9 | `npm run test:server` |
-| API / integration | 50 | 45 | `npm run test:server` |
+| Unit | 11 | 11 | `npm run test:server` |
+| API / integration | 50 | 47 | `npm run test:server` |
 | Security / authorization | 9 | 8 | `npm run test:server` |
 | Migration / regression | 8 | 7 | `npm run test:server` |
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
 | Responsive | 6 | 6 | `npm run test:e2e` |
 | E2E | 12 | 12 | `npm run test:e2e` |
-| **Total** | **120** | **111** | `npm run test:all` |
+| **Total** | **120** | **115** | `npm run test:all` |
 
-`npm run test:server`: 507/507 passing (27 files). `npm run test:client`: 349/349 passing (19
+`npm run test:server`: 553/553 passing (27 files). `npm run test:client`: 349/349 passing (19
 files). `npm run test:e2e`: 131/131 passing (lab-02 regression suite + all lab-03 specs). No test
 is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — the
-9-test gap between 120 planned and 111 passing is nine rows that were never written to the letter
-of their own claim, not nine failing or suppressed tests; see Known Limitations below for each one.
+5-test gap between 120 planned and 115 passing is five rows that were never written to the letter
+of their own claim, not five failing or suppressed tests; see Known Limitations below for each one.
 
 ## 7. Known Limitations
 
@@ -371,16 +371,10 @@ of their own claim, not nine failing or suppressed tests; see Known Limitations 
   — the `user-management` screenshots specifically filter the list to the seeded `@example.edu`
   accounts via the screen's own real search feature (AC-46) before capturing, so the committed
   evidence stays readable regardless.
-- **Nine planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
+- **Five planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
   full letter of their own row) after a deliberate reconciliation pass that verified every other
   row's Status against a real, running test rather than trusting the up-front plan. Each one has
   partial coverage elsewhere in the suite; none is a silent gap:
-  - **UNIT-05 / API-30** (AC-39, forbidden transitions): the transition matrix's permitted pairs
-    are fully covered (UNIT-04), but the ~44 non-matrix pairs and the 8 self-transitions are spot-
-    checked (a handful of representative pairs, `CANCELLED`'s four terminal targets), not
-    exhaustively enumerated.
-  - **UNIT-06 / API-31** (AC-40, owner-required rule): only 2 of the 4 states that can reach
-    `IN_PROGRESS` (`OPEN`, `REOPENED`, plus the two tested) are verified to require an owner.
   - **API-16** (AC-70, password-change gate): proven on one representative non-exempt route, not
     "every route… for all three roles" as the row claims.
   - **SEC-01** (AC-14, unauthenticated access): the `401` half is thoroughly proven across many

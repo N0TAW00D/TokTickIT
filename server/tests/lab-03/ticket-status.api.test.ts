@@ -130,6 +130,57 @@ function patchStatus(ticketId: number | string, body: unknown, cookie?: string) 
   return withCookie.send(body as object);
 }
 
+// specification.md §5.1 — the permitted transition matrix, source of truth
+// for both the happy-path test below (UNIT-04/API-29) and the exhaustive
+// forbidden-pair complement (UNIT-05/API-30): every pair NOT listed here is
+// rejected, including a status's transition to itself (BR-23, AC-39).
+const PERMITTED_TRANSITIONS: Array<[TicketStatus, TicketStatus]> = [
+  ['NEW', 'OPEN'],
+  ['NEW', 'IN_PROGRESS'],
+  ['NEW', 'CANCELLED'],
+  ['OPEN', 'IN_PROGRESS'],
+  ['OPEN', 'WAITING_FOR_REQUESTER'],
+  ['OPEN', 'RESOLVED'],
+  ['OPEN', 'CANCELLED'],
+  ['IN_PROGRESS', 'WAITING_FOR_REQUESTER'],
+  ['IN_PROGRESS', 'RESOLVED'],
+  ['IN_PROGRESS', 'CANCELLED'],
+  ['WAITING_FOR_REQUESTER', 'IN_PROGRESS'],
+  ['WAITING_FOR_REQUESTER', 'RESOLVED'],
+  ['WAITING_FOR_REQUESTER', 'CANCELLED'],
+  ['RESOLVED', 'CLOSED'],
+  ['RESOLVED', 'REOPENED'],
+  ['CLOSED', 'REOPENED'],
+  ['REOPENED', 'IN_PROGRESS'],
+  ['REOPENED', 'WAITING_FOR_REQUESTER'],
+  ['REOPENED', 'RESOLVED'],
+  ['REOPENED', 'CANCELLED'],
+];
+
+const ALL_TICKET_STATUSES: TicketStatus[] = [
+  'NEW',
+  'OPEN',
+  'IN_PROGRESS',
+  'WAITING_FOR_REQUESTER',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+  'CANCELLED',
+];
+
+// UNIT-05/API-30 (AC-39): the complement of PERMITTED_TRANSITIONS against
+// every status x status pair — computed, not hand-typed, so it can never
+// drift from the matrix above. 8 statuses x 8 = 64 ordered pairs, 20 of
+// them permitted, leaving exactly 44 forbidden pairs; every self-pair
+// (from === to) is included here since none of the 20 permitted pairs is
+// a self-pair.
+const PERMITTED_SET = new Set(PERMITTED_TRANSITIONS.map(([from, to]) => `${from}->${to}`));
+const FORBIDDEN_TRANSITIONS: Array<[TicketStatus, TicketStatus]> = ALL_TICKET_STATUSES.flatMap((from) =>
+  ALL_TICKET_STATUSES.filter((to) => !PERMITTED_SET.has(`${from}->${to}`)).map(
+    (to): [TicketStatus, TicketStatus] => [from, to],
+  ),
+);
+
 describe('PATCH /api/tickets/:id/status (api-spec.md §5.3)', () => {
   // -------------------------------------------------------------------
   // Happy paths — every row of the transition matrix (specification.md
@@ -137,28 +188,7 @@ describe('PATCH /api/tickets/:id/status (api-spec.md §5.3)', () => {
   // A transition into IN_PROGRESS always seeds an owner here; the
   // OWNER_REQUIRED cases below cover the unowned side separately.
   // -------------------------------------------------------------------
-  it.each<[TicketStatus, TicketStatus]>([
-    ['NEW', 'OPEN'],
-    ['NEW', 'IN_PROGRESS'],
-    ['NEW', 'CANCELLED'],
-    ['OPEN', 'IN_PROGRESS'],
-    ['OPEN', 'WAITING_FOR_REQUESTER'],
-    ['OPEN', 'RESOLVED'],
-    ['OPEN', 'CANCELLED'],
-    ['IN_PROGRESS', 'WAITING_FOR_REQUESTER'],
-    ['IN_PROGRESS', 'RESOLVED'],
-    ['IN_PROGRESS', 'CANCELLED'],
-    ['WAITING_FOR_REQUESTER', 'IN_PROGRESS'],
-    ['WAITING_FOR_REQUESTER', 'RESOLVED'],
-    ['WAITING_FOR_REQUESTER', 'CANCELLED'],
-    ['RESOLVED', 'CLOSED'],
-    ['RESOLVED', 'REOPENED'],
-    ['CLOSED', 'REOPENED'],
-    ['REOPENED', 'IN_PROGRESS'],
-    ['REOPENED', 'WAITING_FOR_REQUESTER'],
-    ['REOPENED', 'RESOLVED'],
-    ['REOPENED', 'CANCELLED'],
-  ])('%s -> %s succeeds with 200 and the new status', async (from, to) => {
+  it.each(PERMITTED_TRANSITIONS)('%s -> %s succeeds with 200 and the new status', async (from, to) => {
     const ticket = await seedTicket({ status: from, ownerId: staffAId });
 
     const res = await patchStatus(ticket.id, { status: to }, staffCookie);
@@ -235,6 +265,28 @@ describe('PATCH /api/tickets/:id/status (api-spec.md §5.3)', () => {
   );
 
   // -------------------------------------------------------------------
+  // UNIT-05/API-30 (AC-39) — exhaustive: every pair NOT in the §5.1 matrix,
+  // computed as the complement of PERMITTED_TRANSITIONS over all 8x8
+  // status pairs (44 cases), including every status's self-transition.
+  // Supersets the spot checks above; kept alongside them as documented
+  // representative examples.
+  // -------------------------------------------------------------------
+  it.each(FORBIDDEN_TRANSITIONS)(
+    '%s -> %s is 409 INVALID_TRANSITION (exhaustive complement of the §5.1 matrix)',
+    async (from, to) => {
+      const ticket = await seedTicket({ status: from });
+
+      const res = await patchStatus(ticket.id, { status: to }, staffCookie);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('INVALID_TRANSITION');
+
+      const stored = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      expect(stored.status).toBe(from);
+    },
+  );
+
+  // -------------------------------------------------------------------
   // 409 OWNER_REQUIRED — target IN_PROGRESS with no owner, from any
   // otherwise-valid source state (BR-24, AC-40); an owned ticket's
   // identical transition is a 200 (covered by the matrix table above).
@@ -253,6 +305,24 @@ describe('PATCH /api/tickets/:id/status (api-spec.md §5.3)', () => {
 
   it('409 OWNER_REQUIRED transitioning an unowned ticket WAITING_FOR_REQUESTER -> IN_PROGRESS', async () => {
     const ticket = await seedTicket({ status: 'WAITING_FOR_REQUESTER', ownerId: null });
+
+    const res = await patchStatus(ticket.id, { status: 'IN_PROGRESS' }, staffCookie);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('OWNER_REQUIRED');
+  });
+
+  it('409 OWNER_REQUIRED transitioning an unowned ticket OPEN -> IN_PROGRESS', async () => {
+    const ticket = await seedTicket({ status: 'OPEN', ownerId: null });
+
+    const res = await patchStatus(ticket.id, { status: 'IN_PROGRESS' }, staffCookie);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('OWNER_REQUIRED');
+  });
+
+  it('409 OWNER_REQUIRED transitioning an unowned ticket REOPENED -> IN_PROGRESS', async () => {
+    const ticket = await seedTicket({ status: 'REOPENED', ownerId: null });
 
     const res = await patchStatus(ticket.id, { status: 'IN_PROGRESS' }, staffCookie);
 
