@@ -42,6 +42,10 @@ afterEach(async () => {
 
 const DEFAULT_PASSWORD = 'CorrectHorseBattery1';
 
+// Shared across every AC-70 describe block below (unit-level and real-HTTP
+// alike) so "all three roles" always means the same three roles.
+const ROLES = ['REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'] as const;
+
 interface CreateUserOptions {
   role?: 'REQUESTER' | 'IT_STAFF' | 'ADMINISTRATOR';
   isActive?: boolean;
@@ -735,8 +739,6 @@ describe('passwordChangeGate (AC-70) — direct unit coverage', () => {
     return { res, fake: fake as unknown as Response };
   }
 
-  const ROLES = ['REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'] as const;
-
   for (const role of ROLES) {
     it(`blocks a non-exempt route for a ${role} caller with mustChangePassword=true`, () => {
       const req = {
@@ -758,25 +760,27 @@ describe('passwordChangeGate (AC-70) — direct unit coverage', () => {
     });
   }
 
-  it('allows all three exempt paths through, regardless of the flag', () => {
+  it('allows all three exempt paths through, regardless of the flag, for all three roles', () => {
     const exempt: Array<[string, string]> = [
       ['/api/auth', '/me'],
       ['/api/auth', '/change-password'],
       ['/api/auth', '/logout'],
     ];
 
-    for (const [baseUrl, path] of exempt) {
-      const req = {
-        authUser: { id: 1, name: 'Someone', email: 'someone@example.edu', role: 'REQUESTER', mustChangePassword: true },
-        baseUrl,
-        path,
-      } as unknown as Request;
-      const { fake } = mockResponse();
-      const next = vi.fn();
+    for (const role of ROLES) {
+      for (const [baseUrl, path] of exempt) {
+        const req = {
+          authUser: { id: 1, name: 'Someone', email: 'someone@example.edu', role, mustChangePassword: true },
+          baseUrl,
+          path,
+        } as unknown as Request;
+        const { fake } = mockResponse();
+        const next = vi.fn();
 
-      passwordChangeGate(req, fake, next);
+        passwordChangeGate(req, fake, next);
 
-      expect(next).toHaveBeenCalledOnce();
+        expect(next, `${role} ${baseUrl}${path}`).toHaveBeenCalledOnce();
+      }
     }
   });
 
@@ -793,4 +797,152 @@ describe('passwordChangeGate (AC-70) — direct unit coverage', () => {
 
     expect(next).toHaveBeenCalledOnce();
   });
+});
+
+// ---------------------------------------------------------------------------
+// Password-change gate (AC-70) — real HTTP, every mounted non-exempt route.
+//
+// The unit-level suite above proves the gate's own exemption/role-agnostic
+// logic against one representative non-exempt path (`/api/staff` +
+// `/tickets`), invoked directly. That can't catch a route that forgot to
+// mount `passwordChangeGate` at all — a routing mistake, not a bug in the
+// function itself — only a real request through the real, fully-mounted
+// Express app can. This is that proof: every route+method
+// `passwordChangeGate` is actually mounted on, per `grep -n
+// passwordChangeGate server/src/routes/*.ts` (the full enumeration, not a
+// guess), other than the three exempt `/api/auth/*` ones covered separately
+// below, gets one real HTTP request from a session with
+// `mustChangePassword: true` and must come back exactly 403
+// PASSWORD_CHANGE_REQUIRED — never the route's own 200/404/etc, and never
+// `requireRole`'s 403 FORBIDDEN (a different error code, since the gate is
+// mounted directly after `authenticate` and before `requireRole` on every
+// one of these routes).
+//
+// Path params use a syntactically-valid placeholder id (`1`) — the gate
+// runs before any param/body validation or DB lookup, so the specific value
+// never matters, only that a real request reaches the gate at all. Role is
+// fixed to ADMINISTRATOR throughout: since the gate outranks `requireRole`,
+// which role makes the request is irrelevant to whether IT blocks it (that
+// "regardless of role" claim is what the unit-level loop above already
+// proves, per route); what's new and real here is route COVERAGE.
+// ---------------------------------------------------------------------------
+
+interface GatedRoute {
+  method: 'get' | 'post' | 'patch' | 'delete';
+  path: string;
+  /** Routes mounted behind `requireJsonContentType` need the header (and a body) to ever reach `authenticate`/the gate. */
+  json?: boolean;
+}
+
+const GATED_ROUTES: GatedRoute[] = [
+  // src/routes/attachments.ts
+  { method: 'get', path: '/api/attachments/1' },
+  { method: 'get', path: '/api/attachments/1/download' },
+  { method: 'delete', path: '/api/attachments/1', json: true },
+  // src/routes/staff.ts
+  { method: 'get', path: '/api/staff/tickets' },
+  { method: 'get', path: '/api/staff/assignable-users' },
+  // src/routes/users.ts
+  { method: 'get', path: '/api/users' },
+  { method: 'post', path: '/api/users', json: true },
+  { method: 'patch', path: '/api/users/1', json: true },
+  { method: 'post', path: '/api/users/1/initial-password', json: true },
+  // src/routes/tickets.ts
+  { method: 'post', path: '/api/tickets', json: true },
+  { method: 'get', path: '/api/tickets' },
+  { method: 'get', path: '/api/tickets/1' },
+  { method: 'post', path: '/api/tickets/1/attachments' },
+  { method: 'get', path: '/api/tickets/1/comments' },
+  { method: 'post', path: '/api/tickets/1/comments', json: true },
+  { method: 'patch', path: '/api/tickets/1/owner', json: true },
+  { method: 'patch', path: '/api/tickets/1/it-priority', json: true },
+  { method: 'patch', path: '/api/tickets/1/status', json: true },
+  { method: 'get', path: '/api/tickets/1/notes' },
+  { method: 'post', path: '/api/tickets/1/notes', json: true },
+  { method: 'post', path: '/api/tickets/1/requester-resolved', json: true },
+];
+
+function sendGatedRequest(route: GatedRoute, cookie: string) {
+  const req =
+    route.method === 'get'
+      ? request(testServer.server).get(route.path)
+      : route.method === 'post'
+        ? request(testServer.server).post(route.path)
+        : route.method === 'patch'
+          ? request(testServer.server).patch(route.path)
+          : request(testServer.server).delete(route.path);
+  const withCookie = req.set('Cookie', cookie);
+  return route.json ? withCookie.set('Content-Type', 'application/json').send({}) : withCookie;
+}
+
+describe('AC-70, real HTTP: passwordChangeGate refuses every one of its mounted non-exempt routes', () => {
+  for (const route of GATED_ROUTES) {
+    it(`${route.method.toUpperCase()} ${route.path} -> 403 PASSWORD_CHANGE_REQUIRED`, async () => {
+      const user = await createUser({ role: 'ADMINISTRATOR', mustChangePassword: true });
+      const cookie = await loginAndGetCookie(user.email, DEFAULT_PASSWORD);
+
+      const res = await sendGatedRequest(route, cookie);
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({
+        error: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Choose a new password before continuing.',
+      });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AC-70, real HTTP: the three exempt paths, for all three roles.
+//
+// auth.api.test.ts's own `POST /api/auth/change-password` describe already
+// has one real-HTTP check that /me is admitted while flagged (see "the gate
+// admits /me, /change-password and /logout" above) — but only for /me, and
+// only for whichever role `createUser()`'s default (REQUESTER) happens to
+// be. This is the row's full claim proven directly: all three exempt paths,
+// each independently reachable while `mustChangePassword` is true, for
+// every one of the three roles (AC-70: "...it is refused regardless of
+// role" implies the exemption itself is equally role-blind).
+// ---------------------------------------------------------------------------
+
+describe('AC-70, real HTTP: exempt paths admit all three roles while mustChangePassword is true', () => {
+  for (const role of ROLES) {
+    it(`${role}: GET /api/auth/me succeeds`, async () => {
+      const user = await createUser({ role, mustChangePassword: true });
+      const cookie = await loginAndGetCookie(user.email, DEFAULT_PASSWORD);
+
+      const res = await request(testServer.server).get('/api/auth/me').set('Cookie', cookie);
+
+      expect(res.status).toBe(200);
+    });
+
+    it(`${role}: POST /api/auth/change-password (forced path) succeeds`, async () => {
+      const user = await createUser({ role, mustChangePassword: true });
+      const cookie = await loginAndGetCookie(user.email, DEFAULT_PASSWORD);
+
+      const res = await request(testServer.server)
+        .post('/api/auth/change-password')
+        .set('Content-Type', 'application/json')
+        .set('Cookie', cookie)
+        .send({ newPassword: 'BrandNewPassword1', confirmPassword: 'BrandNewPassword1' });
+
+      expect(res.status).toBe(204);
+
+      const updated = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+      expect(updated.mustChangePassword).toBe(false);
+    });
+
+    it(`${role}: POST /api/auth/logout succeeds`, async () => {
+      const user = await createUser({ role, mustChangePassword: true });
+      const cookie = await loginAndGetCookie(user.email, DEFAULT_PASSWORD);
+
+      const res = await request(testServer.server)
+        .post('/api/auth/logout')
+        .set('Content-Type', 'application/json')
+        .set('Cookie', cookie)
+        .send();
+
+      expect(res.status).toBe(204);
+    });
+  }
 });

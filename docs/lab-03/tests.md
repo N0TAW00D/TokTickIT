@@ -93,13 +93,13 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | API-13 | A | AC-07, AC-08 | Password change validation | Too short, too long, mismatch, same-as-current each `400`; flag stays set | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-14 | A | AC-69 | Voluntary change needs current password | Wrong `currentPassword` → `403`, password unchanged; forced path succeeds without it | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-15 | A | AC-64 | Other sessions dropped | Two live sessions; change password on one → the other is `401`, the caller's survives | `server/tests/lab-03/auth.api.test.ts` | Pass |
-| API-16 | A | AC-70 | Password-change gate | A flagged session is `403 PASSWORD_CHANGE_REQUIRED` on every route except me/change/logout, for all three roles | `server/tests/lab-03/auth.api.test.ts` | Planned |
+| API-16 | A | AC-70 | Password-change gate | A flagged session is `403 PASSWORD_CHANGE_REQUIRED` on every route except me/change/logout, for all three roles | `server/tests/lab-03/auth.api.test.ts` | Pass |
 
 ### 2.3 Security / authorization
 
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
-| SEC-01 | Z | AC-14 | Unauthenticated access | Every protected route returns `401` and performs no write | `server/tests/lab-03/authorization.api.test.ts` | Planned |
+| SEC-01 | Z | AC-14 | Unauthenticated access | Every protected route returns `401` and performs no write | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | SEC-02 | Z | AC-15 | Wrong-role collections | Requester → staff queue, Requester/IT Staff → admin routes: all `403` before any lookup | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | SEC-03 | Z | AC-03 | Client-supplied identity ignored | `requesterId` in body and a foreign id in the path do not change whose data returns | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | SEC-04 | Z | AC-16 | No existence leak | Another Requester's ticket and a nonexistent id return **byte-identical** `404` | `server/tests/lab-03/authorization.api.test.ts` | Pass |
@@ -328,20 +328,20 @@ reconciliation pass were produced.
 | Level | Planned | Passing | Command |
 |---|---|---|---|
 | Unit | 11 | 11 | `npm run test:server` |
-| API / integration | 50 | 47 | `npm run test:server` |
-| Security / authorization | 9 | 8 | `npm run test:server` |
+| API / integration | 50 | 48 | `npm run test:server` |
+| Security / authorization | 9 | 9 | `npm run test:server` |
 | Migration / regression | 8 | 7 | `npm run test:server` |
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
 | Responsive | 6 | 6 | `npm run test:e2e` |
 | E2E | 12 | 12 | `npm run test:e2e` |
-| **Total** | **120** | **115** | `npm run test:all` |
+| **Total** | **120** | **117** | `npm run test:all` |
 
-`npm run test:server`: 553/553 passing (27 files). `npm run test:client`: 349/349 passing (19
+`npm run test:server`: 587/587 passing (27 files). `npm run test:client`: 349/349 passing (19
 files). `npm run test:e2e`: 131/131 passing (lab-02 regression suite + all lab-03 specs). No test
 is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — the
-5-test gap between 120 planned and 115 passing is five rows that were never written to the letter
-of their own claim, not five failing or suppressed tests; see Known Limitations below for each one.
+3-test gap between 120 planned and 117 passing is three rows that were never written to the letter
+of their own claim, not three failing or suppressed tests; see Known Limitations below for each one.
 
 ## 7. Known Limitations
 
@@ -371,15 +371,10 @@ of their own claim, not five failing or suppressed tests; see Known Limitations 
   — the `user-management` screenshots specifically filter the list to the seeded `@example.edu`
   accounts via the screen's own real search feature (AC-46) before capturing, so the committed
   evidence stays readable regardless.
-- **Five planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
+- **Three planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
   full letter of their own row) after a deliberate reconciliation pass that verified every other
   row's Status against a real, running test rather than trusting the up-front plan. Each one has
   partial coverage elsewhere in the suite; none is a silent gap:
-  - **API-16** (AC-70, password-change gate): proven on one representative non-exempt route, not
-    "every route… for all three roles" as the row claims.
-  - **SEC-01** (AC-14, unauthenticated access): the `401` half is thoroughly proven across many
-    routes; "performs no write" is asserted by the response, never independently confirmed with a
-    database read.
   - **API-32** (AC-43, attachment continuity): download is fully exercised; the attachments list
     response is checked for the property's presence, not its content.
   - **API-33** (AC-44, resolution visible to staff): the Requester-side and staff-side reads are
