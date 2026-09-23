@@ -128,8 +128,8 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | API-29 | A | AC-38 | Permitted transitions | Every §5.1 pair succeeds, each given its stated precondition | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
 | API-30 | A | AC-39 | Forbidden transitions | Every non-matrix pair and every no-op → `409 INVALID_TRANSITION` | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
 | API-31 | A | AC-40 | Owner required | `IN_PROGRESS` with no owner → `409 OWNER_REQUIRED`, from each source state | `server/tests/lab-03/ticket-status.api.test.ts` | Pass |
-| API-32 | A | AC-43 | Attachment continuity | A Lab 2 ticket's attachments list and download for IT Staff | `server/tests/lab-03/attachment-download-staff.api.test.ts` | Planned |
-| API-33 | A | AC-44 | Resolution indication visible | `requesterResolvedAt` present for IT Staff after the Requester reports it | `server/tests/lab-03/ticket-detail-staff.api.test.ts` | Planned |
+| API-32 | A | AC-43 | Attachment continuity | A Lab 2 ticket's attachments list and download for IT Staff | `server/tests/lab-03/attachment-download-staff.api.test.ts` | Pass |
+| API-33 | A | AC-44 | Resolution indication visible | `requesterResolvedAt` present for IT Staff after the Requester reports it | `server/tests/lab-03/ticket-detail-staff.api.test.ts` | Pass |
 | API-34 | A | AC-21 | Requester comment | `201`; author and timestamp from the server; appears in the thread | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-35 | A | AC-22, AC-23 | Comment validation | Empty, whitespace-only and 2001-char bodies rejected; 2000 accepted | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-36 | A | AC-65 | Staff comment on unowned ticket | `201`; visible to the owning Requester | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
@@ -164,7 +164,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | MIG-05 | M | — | Seed idempotence | Running the seed twice leaves identical row counts and no duplicate emails | `server/tests/lab-03/migration.test.ts` | Pass |
 | MIG-06 | M | AC-58 | No plaintext passwords | No column in any table holds a seeded password in clear text | `server/tests/lab-03/migration.test.ts` | Pass |
 | MIG-07 | M | AC-19 | Lab 2 regression | The Lab 2 ticket and attachment suites pass unchanged against authenticated identity | `server/tests/lab-02/*.api.test.ts` (re-pointed onto session auth) | Pass |
-| MIG-08 | M | AC-20 | Selector removed | No `X-Requester-Id` handling, no `GET /api/requesters`, no stored selection anywhere in `server/src` or `client/src` | _(no automated test — see §7 Known Limitations)_ | Planned |
+| MIG-08 | M | AC-20 | Selector removed | No `X-Requester-Id` handling, no `GET /api/requesters`, no stored selection anywhere in `server/src` or `client/src` | `server/tests/lab-03/migration.test.ts` | Pass |
 
 ### 2.7 UI component
 
@@ -328,20 +328,20 @@ reconciliation pass were produced.
 | Level | Planned | Passing | Command |
 |---|---|---|---|
 | Unit | 11 | 11 | `npm run test:server` |
-| API / integration | 50 | 48 | `npm run test:server` |
+| API / integration | 50 | 50 | `npm run test:server` |
 | Security / authorization | 9 | 9 | `npm run test:server` |
-| Migration / regression | 8 | 7 | `npm run test:server` |
+| Migration / regression | 8 | 8 | `npm run test:server` |
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
 | Responsive | 6 | 6 | `npm run test:e2e` |
 | E2E | 12 | 12 | `npm run test:e2e` |
-| **Total** | **120** | **117** | `npm run test:all` |
+| **Total** | **120** | **120** | `npm run test:all` |
 
-`npm run test:server`: 587/587 passing (27 files). `npm run test:client`: 349/349 passing (19
+`npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
 files). `npm run test:e2e`: 131/131 passing (lab-02 regression suite + all lab-03 specs). No test
-is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — the
-3-test gap between 120 planned and 117 passing is three rows that were never written to the letter
-of their own claim, not three failing or suppressed tests; see Known Limitations below for each one.
+is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — every
+row in this document is now backed by a real, passing test written to the letter of its own claim;
+the full 120-test suite passes with no gap, matching Issue #74's own AC.
 
 ## 7. Known Limitations
 
@@ -371,19 +371,6 @@ of their own claim, not three failing or suppressed tests; see Known Limitations
   — the `user-management` screenshots specifically filter the list to the seeded `@example.edu`
   accounts via the screen's own real search feature (AC-46) before capturing, so the committed
   evidence stays readable regardless.
-- **Three planned tests remain genuinely `Planned`** (not skipped or disabled — never written to the
-  full letter of their own row) after a deliberate reconciliation pass that verified every other
-  row's Status against a real, running test rather than trusting the up-front plan. Each one has
-  partial coverage elsewhere in the suite; none is a silent gap:
-  - **API-32** (AC-43, attachment continuity): download is fully exercised; the attachments list
-    response is checked for the property's presence, not its content.
-  - **API-33** (AC-44, resolution visible to staff): the Requester-side and staff-side reads are
-    each tested in isolation; no single test drives the actual cross-role sequence (Requester
-    reports resolved, then IT Staff reloads and sees it).
-  - **MIG-08** (AC-20, selector removed): true and re-confirmed by grep at the time of this
-    reconciliation (zero `X-Requester-Id`/`api/requesters` references in `server/src` or
-    `client/src`), but there is no automated regression test guarding the absence — a manually
-    re-verified fact, not an enforced one.
 - The `File` column throughout §2.1–§2.6 has been corrected against where each row's coverage
   actually landed, not the original up-front plan — several rows consolidated into a different
   file than first planned (the transition-matrix and owner-required rows into

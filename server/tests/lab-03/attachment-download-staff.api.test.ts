@@ -239,4 +239,28 @@ describe('GET /api/attachments/:id/download — IT Staff/Administrator access (a
     expect(invalid.status).toBe(401);
     expect(invalid.body.error).toBe('UNAUTHENTICATED');
   });
+
+  // AC-43: attachment continuity for IT Staff also covers the *list*, not
+  // only the download — GET /api/tickets/:id's `attachments` array must
+  // carry the real, uploaded attachment's content, not merely exist as a
+  // key. `TICKET_DETAIL_ATTACHMENT_SELECT` (src/routes/tickets.ts) is the
+  // exact field list a staff caller gets back.
+  it("IT Staff's GET /api/tickets/:id attachments array carries the real, uploaded attachment's id/originalFilename/fileSize", async () => {
+    const ticketId = await seedTicketOwnedByRequesterA();
+    const { attachmentId, bytes } = await uploadAttachment(ticketId);
+
+    const res = await request(testServer.server).get(`/api/tickets/${ticketId}`).set('Cookie', staffACookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.attachments).toHaveLength(1);
+    expect(res.body.attachments[0]).toMatchObject({
+      id: attachmentId,
+      originalFilename: 'diagnostic-log.pdf',
+      mimeType: 'application/pdf',
+      fileSize: bytes.length,
+      isRemoved: false,
+      removedAt: null,
+      removedReason: null,
+    });
+  });
 });

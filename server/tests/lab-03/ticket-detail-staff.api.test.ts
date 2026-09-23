@@ -178,6 +178,32 @@ describe('GET /api/tickets/:id — IT Staff/Administrator access (api-spec.md §
     expect(res.body.requesterResolvedAt).toBeNull();
   });
 
+  // AC-44 integrated: the siloed checks elsewhere (this file's own "starts
+  // null" test above, and comments-notes.api.test.ts's Requester-side
+  // reload check) each only prove one role's read in isolation. This test
+  // drives the real cross-role sequence in one place — a Requester reports
+  // a ticket appears resolved, then IT Staff fetches that SAME ticket — so
+  // it would fail if the two sides were ever wired to different data.
+  it('AC-44: after a Requester reports a ticket appears resolved, IT Staff fetching the same ticket sees requesterResolvedAt populated', async () => {
+    const ticket = await seedTicket({ requesterId: requesterAId, ownerId: staffAId });
+
+    const beforeRes = await getTicket(ticket.id, staffACookie);
+    expect(beforeRes.status).toBe(200);
+    expect(beforeRes.body.requesterResolvedAt).toBeNull();
+
+    const resolveRes = await request(testServer.server)
+      .post(`/api/tickets/${ticket.id}/requester-resolved`)
+      .set('Cookie', requesterACookie)
+      .set('Content-Type', 'application/json')
+      .send();
+    expect(resolveRes.status).toBe(204);
+
+    const afterRes = await getTicket(ticket.id, staffACookie);
+    expect(afterRes.status).toBe(200);
+    expect(afterRes.body.requesterResolvedAt).toEqual(expect.any(String));
+    expect(new Date(afterRes.body.requesterResolvedAt as string).getTime()).not.toBeNaN();
+  });
+
   it('unknown ticket id -> 404 NOT_FOUND for IT Staff', async () => {
     const ticket = await seedTicket();
     const unknownId = ticket.id + 1_000_000;
