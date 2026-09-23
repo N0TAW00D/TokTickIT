@@ -57,6 +57,18 @@ function navLinksForRole(role: Role | undefined): NavLink[] {
   return ROLE_NAV_LINKS[role] ?? REQUESTER_NAV_LINKS;
 }
 
+/**
+ * A role's own landing route (ui-spec.md §5: "Success: brief success
+ * state, then redirect to the role's landing page") — always that role's
+ * FIRST nav destination, the same single source of truth `navLinksForRole`
+ * already resolves for the nav itself, so the landing route and the nav's
+ * first link can never drift apart. Used by `RoleLandingRedirect`
+ * (`../routes/RoleLandingRedirect.tsx`) for the post-login "/" redirect.
+ */
+export function landingPathForRole(role: Role | undefined): string {
+  return navLinksForRole(role)[0].to;
+}
+
 const MOBILE_MENU_ID = "zen-app-shell-mobile-menu";
 
 /**
