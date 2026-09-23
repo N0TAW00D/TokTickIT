@@ -1,12 +1,11 @@
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { LOCAL_DEV_PASSWORD, loginAs, loginAsSeededUser } from "../support/auth.js";
 import {
   createPaginationFixtureTickets,
   createRequesterOwnedFixtureTicket,
   PAGINATION_FIXTURE_TICKET_NUMBERS,
+  seedPreExistingAttachment,
 } from "../support/staffFixtures.js";
 
 // Lab 3 IT Staff ticket-flow E2E journeys (docs/lab-03/tests.md §2.9,
@@ -431,46 +430,27 @@ test.describe("E2E-07 comment and note privacy (AC-21, AC-41, AC-42)", () => {
 // §5: "Attachments created in Lab 2 stay downloadable from IT Staff Ticket
 // Detail", FR-27). AC-44: the underlying persistence round-trips correctly.
 //
-// Attachment fixture note: `server/prisma/seed.ts` truncates and never
-// re-inserts any "Attachment" row for `toktickit_e2e` (confirmed: no
-// `prisma.attachment.create`/raw INSERT into "Attachment" exists anywhere
-// reachable from that database), so there is no already-seeded Attachment
-// row here to point at. The only OTHER seeded Attachment rows in this repo
-// (`server/scripts/test-db-lab2-fixture.lib.ts`, used by
-// `server/tests/lab-03/migration.test.ts`) live in a throwaway,
-// Vitest-only Postgres database with hand-typed `storedFilename` values
-// that were never actually written to disk — pointing this suite at that
-// database, or copying one of those fabricated filenames into
-// `toktickit_e2e`, would produce a download that necessarily 404s (no real
-// bytes exist under that name), i.e. exactly the "fabricated attachment
-// path" this dispatch was told not to build. Instead, this uploads a real
-// attachment through the real UI's Add Attachment control — the same,
-// UNCHANGED Lab 2 endpoint api-spec.md §3 says "remain[s] in force"
-// (`POST /api/tickets/:id/attachments`) — which writes genuine bytes to
-// disk. IT Staff downloading it afterwards through the widened
-// `GET /api/attachments/:id/download` role guard (api-spec.md §5) is
-// therefore a genuine, real-bytes exercise of "a Lab 2-era attachment
-// stays downloadable from IT Staff Ticket Detail" (AC-43) — same
-// mechanism an attachment literally created back in Lab 2 would have gone
-// through, just created fresh so this suite never depends on a
-// nonexistent on-disk file.
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const ATTACHMENT_FIXTURE_DIR = path.resolve(here, "../test-results/lab-03-attachments");
-
-/** A minimal but well-formed PDF envelope, matching e2e/lab-02/submission-evidence.spec.ts's own `writePdfFixture` idiom. */
-function writePdfFixture(name: string): string {
-  fs.mkdirSync(ATTACHMENT_FIXTURE_DIR, { recursive: true });
-  const filePath = path.join(ATTACHMENT_FIXTURE_DIR, name);
-  fs.writeFileSync(
-    filePath,
-    `%PDF-1.4\n${" ".repeat(64 * 1024)}\n%%EOF\n`,
-  );
-  return filePath;
-}
+// Attachment fixture note (revised per PR #83 review): `server/prisma/
+// seed.ts` truncates and never re-inserts any "Attachment" row for
+// `toktickit_e2e`, and the only OTHER seeded Attachment rows anywhere in
+// the repo (`server/scripts/test-db-lab2-fixture.lib.ts`, used by
+// `server/tests/lab-03/migration.test.ts`) live in a throwaway, Vitest-only
+// Postgres database with hand-typed `storedFilename` values that were
+// never actually written to disk — pointing an E2E download at one would
+// 404 on real bytes that don't exist. A first version of this test worked
+// around that by uploading a fresh attachment through the real UI within
+// the test's own session and downloading that — which only proves the
+// upload+download round trip works today, not that a *pre-existing*
+// attachment (one this test's own session never created) survives the
+// session/auth rewiring #70 did around the download route. Fixed: this now
+// uses `seedPreExistingAttachment` (`../support/staffFixtures.ts`), which
+// writes real bytes to `server/uploads/` and inserts the matching
+// Attachment row with direct SQL BEFORE either login below — genuinely
+// pre-existing from either session's point of view, the same shape a row
+// literally created back in Lab 2 would have.
 
 test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
-  test("the Requester marks their own ticket Problem Appears Resolved and IT Staff can see it; a Lab 2-era attachment still downloads end to end", async ({
+  test("the Requester marks their own ticket Problem Appears Resolved and IT Staff can see it; a pre-existing attachment still downloads end to end", async ({
     page,
     browser,
   }) => {
@@ -478,22 +458,18 @@ test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
       "resolved-flow",
       "TKT-2026-991002",
     );
+    const attachment = await seedPreExistingAttachment(ticket.id, "resolved-flow");
 
-    const ATTACHMENT_NAME = "e2e-lab2-continuity.pdf";
-    const attachmentPath = writePdfFixture(ATTACHMENT_NAME);
-    const attachmentBytes = fs.readFileSync(attachmentPath);
-
-    // --- Requester: add a real attachment, then report it appears resolved -
+    // --- Requester: the pre-existing attachment is already listed (this
+    // session never uploaded it); report the ticket appears resolved ------
     await loginAs(page, ticket.requester.email, LOCAL_DEV_PASSWORD);
     await page.goto(`/tickets/${ticket.id}`);
     await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
 
-    await page
-      .locator("#ticket-detail-attachments-input")
-      .setInputFiles(attachmentPath);
     await expect(
       page.getByRole("heading", { name: "Attachments (1 active / 1 total)" }),
     ).toBeVisible();
+    await expect(page.getByText(attachment.originalFilename)).toBeVisible();
 
     const statusField = page.locator(".zen-ticket-detail__field", {
       hasText: "Current Status",
@@ -544,9 +520,10 @@ test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
       // unchanged status, not anything resolution-shaped.
       await expect(staffPage.locator("#staff-ticket-status")).toHaveValue("OPEN");
 
-      // --- AC-43/AC-44: the Lab 2-mechanism attachment downloads for real -
+      // --- AC-43/AC-44: the PRE-EXISTING attachment downloads for real,
+      // through a session that never created it -----------------------------
       const staffRow = staffPage.locator(".zen-attachment-list__item", {
-        hasText: ATTACHMENT_NAME,
+        hasText: attachment.originalFilename,
       });
       await expect(staffRow).toBeVisible();
 
@@ -554,7 +531,7 @@ test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
       await staffRow.getByRole("button", { name: "Download" }).click();
       const download = await downloadPromise;
 
-      expect(download.suggestedFilename()).toBe(ATTACHMENT_NAME);
+      expect(download.suggestedFilename()).toBe(attachment.originalFilename);
       const downloadedPath = await download.path();
       if (!downloadedPath) {
         throw new Error(
@@ -563,9 +540,10 @@ test.describe("E2E-08 requester side (AC-24, AC-43, AC-44)", () => {
       }
       const downloadedBytes = fs.readFileSync(downloadedPath);
       // Byte-for-byte, not just "some file arrived": proves the download is
-      // the real, previously-uploaded attachment content, not an empty or
+      // the real, pre-existing attachment content written directly to
+      // server/uploads/ by seedPreExistingAttachment, not an empty or
       // truncated response.
-      expect(downloadedBytes.equals(attachmentBytes)).toBe(true);
+      expect(downloadedBytes.equals(attachment.bytes)).toBe(true);
     } finally {
       await staffContext.close();
     }

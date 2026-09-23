@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -271,6 +273,73 @@ export async function createRequesterOwnedFixtureTicket(
     );
 
     return { id: inserted.rows[0].id, ticketNumber, requester };
+  } finally {
+    await client.end();
+  }
+}
+
+export interface PreExistingAttachmentFixture {
+  id: number;
+  originalFilename: string;
+  bytes: Buffer;
+}
+
+/**
+ * Directly inserts a real, already-existing Attachment row (real bytes on
+ * disk, real DB row) for `ticketId`, WITHOUT going through the upload
+ * route or any test session's own request — this is the point. Used by
+ * `staff-ticket-flow.spec.ts`'s E2E-08 to prove AC-43 ("an Attachment
+ * created in Lab 2 stays downloadable from IT Staff Ticket Detail")
+ * against an attachment that genuinely pre-dates the test's own actions,
+ * not one the test itself just uploaded through the current session —
+ * uploading fresh and then downloading only proves the upload+download
+ * round trip works today, not that a *pre-existing* row survives the
+ * session/auth rewiring #70 did around it.
+ *
+ * There is no real Lab-2-era Attachment row reachable from `toktickit_e2e`
+ * to point at instead (`server/prisma/seed.ts` never seeds one, and the
+ * only other seeded Attachment rows anywhere in the repo, in
+ * `server/scripts/test-db-lab2-fixture.lib.ts`, live in a throwaway,
+ * Vitest-only Postgres database with fabricated `storedFilename` values
+ * that were never actually written to disk — pointing an E2E download at
+ * one would 404 on real bytes that don't exist). This function creates
+ * the closest honest equivalent reachable from this database: writes real
+ * bytes to the same `server/uploads/` directory
+ * `services/attachmentStorage.ts`'s `storeAttachmentFile` writes to (same
+ * default, unconfigured by `ATTACHMENTS_DIR` for the E2E webServer — see
+ * `playwright.config.ts`), with the same `<uuid>.<ext>` naming convention,
+ * then inserts the matching Attachment row with direct SQL — never through
+ * `POST /api/tickets/:id/attachments`, so nothing in this test's own
+ * session ever created it.
+ */
+export async function seedPreExistingAttachment(
+  ticketId: number,
+  discriminator: string,
+): Promise<PreExistingAttachmentFixture> {
+  // Mirrors services/attachmentStorage.ts's own uploads-dir resolution
+  // (default: `server/uploads/`, relative to that file's location) —
+  // duplicated here rather than imported, since e2e/ is an independent
+  // package that never imports server/ source.
+  const uploadsDir = path.resolve(e2eRoot, "..", "server", "uploads");
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const storedFilename = `${randomUUID()}.pdf`;
+  const bytes = Buffer.from(`%PDF-1.4\n${" ".repeat(64 * 1024)}\n%%EOF\n`);
+  fs.writeFileSync(path.join(uploadsDir, storedFilename), bytes);
+
+  const originalFilename = `pre-existing-${discriminator}.pdf`;
+
+  const client = new Client({ connectionString: loadE2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO "Attachment"
+         ("ticketId", "originalFilename", "storedFilename", "mimeType", "fileSize")
+       VALUES ($1, $2, $3, 'application/pdf', $4)
+       RETURNING id`,
+      [ticketId, originalFilename, storedFilename, bytes.length],
+    );
+    return { id: inserted.rows[0].id, originalFilename, bytes };
   } finally {
     await client.end();
   }
