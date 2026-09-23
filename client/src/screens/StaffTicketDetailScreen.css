@@ -174,22 +174,42 @@
 }
 
 /* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive", same convention as
-   the Requester screen's own grid. */
+   the Requester screen's own grid. Columns re-weighted (1.6fr 1.4fr 1fr,
+   not an equal 3-way split): column 1 holds Ticket No. (the fixed-length
+   "TKT-YYYY-NNNNNN" value, 15 characters) and Requester; column 2 holds
+   Ticket Date, whose formatted value ("23 Sep 2026, 15:32") is longer than
+   Category/Related System's short words in column 3. An equal split left
+   both column 1 and column 2 too narrow for their real values —
+   `.zen-staff-detail__field-value`'s own ellipsis was firing on ordinary,
+   correct values, not unusually long ones. */
 .zen-staff-detail__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1.6fr 1.4fr 1fr;
   gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
   margin-bottom: var(--zen-space-group-gap);
 }
 
+/* The Ticket Operations card reuses `.zen-staff-detail__grid` for its own,
+   differently-shaped row (IT Priority / Current Status / Ticket Owner)
+   rather than Ticket Information's two-row field grid — column 1 here
+   holds the three-segment IT Priority control (SegmentedControl.tsx),
+   which needs materially more room than any single text field to fit
+   "Medium"/"High" without clipping, so it gets its own, wider ratio
+   instead of inheriting the read-only grid's. */
+.zen-staff-detail__grid--operations {
+  grid-template-columns: 1.7fr 1fr 1.1fr;
+}
+
 @media (max-width: 991px) {
-  .zen-staff-detail__grid {
+  .zen-staff-detail__grid,
+  .zen-staff-detail__grid--operations {
     grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 767px) {
-  .zen-staff-detail__grid {
+  .zen-staff-detail__grid,
+  .zen-staff-detail__grid--operations {
     grid-template-columns: 1fr;
   }
 }

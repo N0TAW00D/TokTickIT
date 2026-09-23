@@ -909,7 +909,7 @@ export function StaffTicketDetailScreen() {
             <section className="zen-staff-detail__card zen-staff-detail__card--operations">
               <h2>Ticket Operations</h2>
 
-              <div className="zen-staff-detail__grid">
+              <div className="zen-staff-detail__grid zen-staff-detail__grid--operations">
                 {/* IT Priority (ui-spec.md §10's editable table): a
                     segmented control of the three priority values, saving on
                     change. Both IT Staff and Administrator may use it
