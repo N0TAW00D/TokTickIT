@@ -1,7 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
+import {
+  expect,
+  request as playwrightRequest,
+  test,
+  type Browser,
+  type Page,
+} from "@playwright/test";
+import {
+  LOCAL_DEV_PASSWORD,
+  createPlainLoginFixtureUser,
+  loginAs,
+  type FixtureUser,
+} from "../support/auth.js";
 
 // Submission-evidence screenshots for the CPE 334 Lab 2 PDF's "Answer Part
 // 6" and "Answer Part 7" headings (labsheet §8.2 Create Ticket, §8.4 My
@@ -26,6 +38,41 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 // (client/src/components/AttachmentUploader.tsx) on the Create Ticket
 // screen, so two files can be selected through its real file input and the
 // valid/invalid split asserted on screen before the capture.
+//
+// This file was originally written against Lab 2's dev-only "Development
+// Requester Selector" (`GET /api/requesters`, `X-Requester-Id`,
+// `/select-requester`), which Lab 3 (#70) deleted entirely in favour of real
+// session-cookie authentication (`POST /api/auth/login`, `/login`). The
+// "Part 6 — Development Requester Selection" describe block screenshotted
+// that dev-only screen itself — a screen that no longer exists at all, with
+// no auth-mechanism migration possible — so it has been deleted outright;
+// its already-committed screenshots under
+// `artifacts/lab-02/screenshots/submission/part-6-create-ticket/` remain
+// frozen, referenced as-is by the already-graded `docs/lab-02/submission.typ`.
+// "Part 6 — Create Ticket (create mode)" tests the real Create Ticket screen,
+// which still exists, and has been migrated onto real login following the
+// same idiom as `e2e/lab-02/requester-ticket-flow.spec.ts`: a dedicated
+// fixture Requester (`createPlainLoginFixtureUser`, `mustChangePassword:
+// false`) logged in through the real Login screen, since every *seeded*
+// Requester (including "Jennifer Anderson", who this block originally used)
+// is a migrated Lab 2 row with `mustChangePassword: true` and would hit a
+// forced `/change-password` redirect before ever reaching Create Ticket —
+// the same reason every other migrated lab-02 spec uses a fixture instead of
+// a named seeded Requester. Nothing here depends on the Requester's name
+// being specifically "Jennifer Anderson": every assertion that used to check
+// for that literal string now checks the fixture's own `name` field instead,
+// so the substance of what's demonstrated (the Requester field reflects
+// whoever is actually signed in) is unchanged. "Part 7 — My Tickets" and
+// "Part 8 — Ticket Detail & Attachments" below follow the same idiom: every
+// named seeded Requester ("David Lee", "Sarah Johnson", "Michael Brown")
+// that block originally used is replaced with a dedicated fixture Requester
+// (`createPlainLoginFixtureUser`), since none of their assertions depend on
+// a specific person's identity — only on "the Requester who is logged in"
+// vs. "a different one", or (Part 8's info-card check) on whichever name is
+// actually signed in. Mid-session "Change Requester" (a screen that no
+// longer exists) becomes a real Logout (ui-spec.md §4.1 UserBadge menu)
+// followed by a fresh login as the next Requester, the same substitution
+// `e2e/lab-02/requester-ticket-flow.spec.ts`'s E2E-03 already made.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -77,177 +124,32 @@ async function clickSubmitTicket(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Submit ticket" }).click();
 }
 
-/**
- * Drives the real Requester Selection screen (ui-spec.md §6) exactly as a
- * user would, for a Requester chosen by name. Lands on `/tickets`.
- */
-async function loginAs(page: Page, requesterName: string): Promise<void> {
-  await page.goto("/select-requester");
-  await page
-    .getByLabel("Development Requester")
-    .selectOption({ label: requesterName });
-  await page.getByRole("button", { name: /Continue/ }).click();
-  await expect(page).toHaveURL(/\/tickets$/);
-}
-
-/**
- * Switches the current Requester through the real "Change Requester" UI
- * flow (ui-spec.md §4) — RequesterBadge menu -> `/select-requester` -> pick
- * `requesterName` -> Continue -> back on `/tickets`. This is the same full
- * reload AC-09 describes, never a direct localStorage/context poke.
- */
-async function changeRequesterTo(page: Page, requesterName: string): Promise<void> {
-  await page.locator(".zen-requester-badge__trigger").click();
-  await page.getByRole("menuitem", { name: "Change Requester" }).click();
-  await expect(page).toHaveURL(/\/select-requester$/);
-  await page
-    .getByLabel("Development Requester")
-    .selectOption({ label: requesterName });
-  await page.getByRole("button", { name: /Continue/ }).click();
-  await expect(page).toHaveURL(/\/tickets$/);
-}
-
-// ---------------------------------------------------------------------------
-// Answer Part 6 — Development Requester Selection screen
-// (ui-spec.md §6, labsheet §8.1)
-// ---------------------------------------------------------------------------
-
-test.describe("Part 6 — Development Requester Selection", () => {
-  test("initial state, dropdown populated, selected display, Change Requester action", async ({
-    page,
-  }) => {
-    await page.setViewportSize(DESKTOP);
-
-    await page.goto("/select-requester");
-    await expect(
-      page.getByRole("heading", { name: "Select Development Requester" }),
-    ).toBeVisible();
-    const select = page.getByLabel("Development Requester");
-    await expect(select).toHaveValue("");
-    await expect(page.getByRole("button", { name: /Continue/ })).toBeDisabled();
-    await page.screenshot({
-      path: shot(PART6_DIR, "01-requester-selection-initial.png"),
-      fullPage: true,
-    });
-
-    // Prove the dropdown is populated from the real GET /api/requesters
-    // response (server/prisma/seed.ts's 4 active Requesters), not a mock —
-    // and that the inactive one is excluded.
-    const optionTexts = await select.locator("option").allTextContents();
-    for (const activeName of [
-      "David Lee",
-      "Jennifer Anderson",
-      "Michael Brown",
-      "Sarah Johnson",
-    ]) {
-      expect(optionTexts).toContain(activeName);
-    }
-    expect(optionTexts).not.toContain("Robert Wilson");
-
-    // Headless Chromium does not paint a native <select>'s OS-level popup
-    // into a page screenshot — clicking it open produces no visible change
-    // in the capture. Temporarily switching the SAME real <select> (with
-    // its real, API-sourced <option>s) into an inline listbox via the
-    // `size` attribute is the standard way to make a native select's open,
-    // populated state screenshot-able; nothing here is mocked markup.
-    await select.evaluate((el: HTMLSelectElement) => {
-      el.setAttribute("size", String(el.options.length));
-      el.style.height = "auto";
-    });
-    await page.screenshot({
-      path: shot(PART6_DIR, "02-requester-dropdown-populated.png"),
-      fullPage: true,
-    });
-    await select.evaluate((el: HTMLSelectElement) => {
-      el.removeAttribute("size");
-      el.style.height = "";
-    });
-
-    await select.selectOption({ label: "Jennifer Anderson" });
-    await page.getByRole("button", { name: /Continue/ }).click();
-    await expect(page).toHaveURL(/\/tickets$/);
-
-    // Selected-user display in the app shell (ui-spec.md §4) after choosing.
-    const badge = page.locator(".zen-requester-badge__trigger");
-    await expect(badge).toContainText("Jennifer Anderson");
-    await page.screenshot({
-      path: shot(PART6_DIR, "03-selected-requester-app-shell.png"),
-      fullPage: true,
-    });
-
-    // The Change Requester action itself.
-    await badge.click();
-    await expect(
-      page.getByRole("menuitem", { name: "Change Requester" }),
-    ).toBeVisible();
-    await page.screenshot({
-      path: shot(PART6_DIR, "04-change-requester-menu-open.png"),
-      fullPage: true,
-    });
-  });
-
-  test("loading state", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-
-    let releaseRequesters: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      releaseRequesters = resolve;
-    });
-    await page.route("**/api/requesters", async (route) => {
-      await gate;
-      await route.continue();
-    });
-
-    const navigation = page.goto("/select-requester");
-    await expect(page.getByRole("status")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Continue/ })).toBeDisabled();
-    await page.screenshot({
-      path: shot(PART6_DIR, "05-requester-selection-loading.png"),
-      fullPage: true,
-    });
-
-    releaseRequesters();
-    await navigation;
-    // Let the now-unblocked request resolve so the page (and route) settle
-    // cleanly before the test ends.
-    await expect(page.getByLabel("Development Requester")).toBeVisible();
-  });
-
-  test("failure state (API stubbed to fail)", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-
-    await page.route("**/api/requesters", (route) =>
-      route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "INTERNAL", message: "Simulated failure" }),
-      }),
-    );
-
-    await page.goto("/select-requester");
-    const alert = page.getByRole("alert");
-    await expect(alert).toContainText(
-      "Could not load development requesters. Please check your connection and try again.",
-    );
-    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-    await page.screenshot({
-      path: shot(PART6_DIR, "06-requester-selection-failure.png"),
-      fullPage: true,
-    });
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Answer Part 6 — Create Ticket screen, create mode (ui-spec.md §8,
 // labsheet §8.2)
 // ---------------------------------------------------------------------------
+
+/**
+ * Logs a fixture Requester in through the real Login screen (ui-spec.md §5)
+ * for the tests below. Every `createPlainLoginFixtureUser` fixture has
+ * `mustChangePassword: false`, so there is no forced `/change-password`
+ * detour — same idiom as `requester-ticket-flow.spec.ts`'s `loginAsFixture`.
+ */
+async function loginAsCreateTicketFixture(
+  page: Page,
+  fixtureUser: FixtureUser,
+): Promise<void> {
+  await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
+  await expect(page).not.toHaveURL(/\/login$/);
+}
 
 test.describe("Part 6 — Create Ticket (create mode)", () => {
   test("initial state and validation failure with field-level messages", async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-initial");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     // Reference-data dropdowns must have actually loaded real options
@@ -261,9 +163,9 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
       .toBeGreaterThan(1);
 
     // Demonstration 1 (first half): the Requester field is populated from
-    // the Development Requester selected before entering the app.
+    // the signed-in Requester's session (CreateTicketScreen.tsx: `user?.name`).
     await expect(page.locator("#create-ticket-requester")).toHaveValue(
-      "Jennifer Anderson",
+      fixtureUser.name,
     );
     await expect(page.locator("#create-ticket-summary")).toHaveValue("");
     await expect(
@@ -300,18 +202,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
-
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const requesters: Array<{ id: number; name: string }> = await (
-      await api.get("/api/requesters")
-    ).json();
-    const jennifer = requesters.find((r) => r.name === "Jennifer Anderson");
-    if (!jennifer) {
-      throw new Error(
-        'Seeded active requester "Jennifer Anderson" not found via GET /api/requesters.',
-      );
-    }
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-success");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect
@@ -374,7 +266,7 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     // Demonstration 1 (second half): the saved Ticket carries the matching
     // requesterId — real evidence from the actual POST /api/tickets
     // response body, not an assumption.
-    expect(ticket.requester.id).toBe(jennifer.id);
+    expect(ticket.requester.id).toBe(fixtureUser.id);
 
     await expect(
       page.getByRole("heading", {
@@ -392,27 +284,26 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
       page.getByRole("heading", { name: "Ticket Details" }),
     ).toBeVisible();
     await expect(page.getByText(ticket.ticketNumber)).toBeVisible();
-    // The created ticket's detail page shows the same Requester that was
-    // selected before entering the app — visual confirmation to go with
-    // the requesterId check above. Scoped to the ticket info card, not
-    // just `getByText`, since the app shell's own Requester badge in the
-    // header also reads "Jennifer Anderson" on every screen.
+    // The created ticket's detail page shows the same Requester that is
+    // signed in — visual confirmation to go with the requesterId check
+    // above. Scoped to the ticket info card, not just `getByText`, since the
+    // app shell's own Requester badge in the header also reads the same
+    // name on every screen.
     await expect(
-      page.locator(".zen-ticket-detail__card").getByText("Jennifer Anderson"),
+      page.locator(".zen-ticket-detail__card").getByText(fixtureUser.name),
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART6_DIR, "12-demo1-ticket-detail-requester-match.png"),
       fullPage: true,
     });
-
-    await api.dispose();
   });
 
   test("API failure on submit preserves entered form values", async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-api-failure");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect
@@ -489,7 +380,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-demo2");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     const categorySelect = page.locator("#create-ticket-category");
@@ -540,7 +432,8 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Jennifer Anderson");
+    const fixtureUser = await createPlainLoginFixtureUser("part6-create-ticket-demo4");
+    await loginAsCreateTicketFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
     await expect(
@@ -628,70 +521,117 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
 // Answer Part 7 — My Tickets screen (ui-spec.md §9, labsheet §8.4)
 // ---------------------------------------------------------------------------
 
+/**
+ * Logs a fixture Requester in through the real Login screen (ui-spec.md §5)
+ * and waits for the landing redirect to My Tickets. Every fixture from
+ * `createPlainLoginFixtureUser` has `mustChangePassword: false`, so there is
+ * no forced `/change-password` detour — same idiom as
+ * `requester-ticket-flow.spec.ts`'s `loginAsFixture`.
+ */
+async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
+  await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
+  await expect(page).toHaveURL(/\/tickets$/);
+}
+
+/**
+ * Establishes one real, cookie-based session for `fixtureUser` via a
+ * throwaway browser context + the real Login screen, then carries that
+ * session's `toktickit.sid` cookie into a raw `APIRequestContext`
+ * (Playwright's own `storageState()`) — for seeding fixtures directly
+ * against the real HTTP API without driving `page`. The server now derives
+ * the acting Requester from the session, not a header, so this is the
+ * real-auth equivalent of the old `X-Requester-Id` header — same idiom
+ * `requester-ticket-flow.spec.ts`'s `loginApiContext` already established.
+ */
+async function loginApiContext(
+  browser: Browser,
+  fixtureUser: FixtureUser,
+): Promise<Awaited<ReturnType<typeof playwrightRequest.newContext>>> {
+  const loginContext = await browser.newContext();
+  const loginPage = await loginContext.newPage();
+  await loginAsFixture(loginPage, fixtureUser);
+  const storageState = await loginContext.storageState();
+  await loginContext.close();
+
+  return playwrightRequest.newContext({ baseURL: SERVER_URL, storageState });
+}
+
+/**
+ * Switches the signed-in Requester through a real Logout (ui-spec.md §4.1
+ * UserBadge menu) followed by a fresh login as `nextUser` — the real
+ * equivalent of the deleted "Change Requester" dev-selector flow, which used
+ * to reuse the same `/select-requester` screen mid-session. Lands back on
+ * `/tickets`, same as a first-time login.
+ */
+async function switchRequesterTo(page: Page, nextUser: FixtureUser): Promise<void> {
+  await page.locator(".zen-user-badge__trigger").click();
+  await page.getByRole("menuitem", { name: "Logout" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await loginAsFixture(page, nextUser);
+}
+
 test.describe("Part 7 — My Tickets", () => {
-  // Requester roles for this Part, kept disjoint from Part 6's Jennifer
-  // Anderson and from each other so no test's fixtures contaminate another
-  // test's evidence. Every ticket these tests screenshot is created here,
-  // in this `beforeAll`, through the real `POST /api/tickets` endpoint —
-  // nothing depends on tickets left behind by another spec or an earlier
-  // run. PR #42's `pretest:e2e` hook TRUNCATEs Ticket/Attachment/
-  // TicketCounter before every `npm run test:e2e`, so each Requester below
-  // starts from zero and this Part builds exactly the fixtures its
-  // assertions and screenshots need.
-  //   - David Lee ("Requester A"): seeded here with a self-contained set of
-  //     12 tickets — more than one page at the default page size of 10 (so
+  // Requester roles for this Part, kept disjoint from Part 6's fixtures and
+  // from each other so no test's fixtures contaminate another test's
+  // evidence. Every ticket these tests screenshot is created here, in this
+  // `beforeAll`, through the real `POST /api/tickets` endpoint — nothing
+  // depends on tickets left behind by another spec or an earlier run.
+  // PR #42's `pretest:e2e` hook TRUNCATEs Ticket/Attachment/TicketCounter
+  // before every `npm run test:e2e`, so each Requester below starts from
+  // zero and this Part builds exactly the fixtures its assertions and
+  // screenshots need.
+  //
+  // Originally three named seeded Requesters ("David Lee", "Sarah Johnson",
+  // "Michael Brown"), replaced here with three dedicated fixture Requesters
+  // (`createPlainLoginFixtureUser`): no assertion below depends on a
+  // specific named person — only on "the Requester who is logged in" vs. "a
+  // different one", and on one of the three reliably owning zero tickets. A
+  // freshly created fixture row is reliably empty by construction, stronger
+  // than depending on a seeded name no other spec happens to leave alone.
+  //   - requesterA: seeded here with a self-contained set of 12 tickets —
+  //     more than one page at the default page size of 10 (so
   //     `06-pagination-page2.png` is a genuine page 2) and spread across
   //     every seeded Category and all three priorities, so the search,
   //     filter and sort screenshots demonstrate real filtering that is
   //     asserted row by row against the rendered table.
-  //   - Sarah Johnson ("Requester B"): seeded here with her OWN small,
-  //     distinct pair of tickets, so the "switch to B" screenshot shows a
-  //     genuinely different non-empty list.
-  //   - Michael Brown ("Requester Empty"): must own zero tickets — used
-  //     ONLY for the empty-state and cross-Requester-rejection tests. No
-  //     test in this file ever creates a ticket for him; the `beforeAll`
-  //     still asserts his live count is zero rather than assuming it.
-  let davidId: number;
-  let sarahId: number;
-  let michaelId: number;
-  // A ticket owned by David Lee that the search / filter screenshots key
+  //   - requesterB: seeded here with their OWN small, distinct pair of
+  //     tickets, so the "switch to B" screenshot shows a genuinely
+  //     different non-empty list.
+  //   - requesterEmpty: must own zero tickets — used ONLY for the
+  //     empty-state and cross-Requester-rejection tests. No test in this
+  //     file ever creates a ticket for them; the `beforeAll` still asserts
+  //     their live count is zero rather than assuming it.
+  let requesterA: FixtureUser;
+  let requesterB: FixtureUser;
+  let requesterEmpty: FixtureUser;
+  // A ticket owned by requesterA that the search / filter screenshots key
   // off. Populated in the `beforeAll` from the real `POST /api/tickets`
   // response, so its id / number / category / priority are known facts,
   // not assumptions. Created LAST so it sits on page 1 of the default
   // newest-first list.
-  let davidReferenceTicket: {
+  let referenceTicket: {
     id: number;
     ticketNumber: string;
     categoryName: string;
     priority: "LOW" | "MEDIUM" | "HIGH";
   };
-  const davidTicketNumbers: string[] = [];
-  const sarahTicketNumbers: string[] = [];
+  const requesterATicketNumbers: string[] = [];
+  const requesterBTicketNumbers: string[] = [];
 
-  test.beforeAll(async () => {
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+  test.beforeAll(async ({ browser }) => {
+    requesterA = await createPlainLoginFixtureUser("part7-a");
+    requesterB = await createPlainLoginFixtureUser("part7-b");
+    requesterEmpty = await createPlainLoginFixtureUser("part7-empty");
 
-    const requesters: Array<{ id: number; name: string }> = await (
-      await api.get("/api/requesters")
-    ).json();
-    function requesterIdByName(name: string): number {
-      const found = requesters.find((r) => r.name === name);
-      if (!found) {
-        throw new Error(
-          `Seeded active requester "${name}" not found via GET /api/requesters — check server/prisma/seed.ts.`,
-        );
-      }
-      return found.id;
-    }
-    davidId = requesterIdByName("David Lee");
-    sarahId = requesterIdByName("Sarah Johnson");
-    michaelId = requesterIdByName("Michael Brown");
+    const apiA = await loginApiContext(browser, requesterA);
+    const apiB = await loginApiContext(browser, requesterB);
+    const apiEmpty = await loginApiContext(browser, requesterEmpty);
 
     const categories: Array<{ id: number; name: string }> = await (
-      await api.get("/api/categories")
+      await apiA.get("/api/categories")
     ).json();
     const relatedSystems: Array<{ id: number; name: string }> = await (
-      await api.get("/api/related-systems")
+      await apiA.get("/api/related-systems")
     ).json();
     function categoryIdByName(name: string): number {
       const found = categories.find((c) => c.name === name);
@@ -713,31 +653,27 @@ test.describe("Part 7 — My Tickets", () => {
     }
 
     // Precondition for the empty-state screenshot (ui-spec.md §9 "Empty —
-    // Requester owns zero tickets"): checked live, not assumed. `pretest:e2e`
-    // truncates the ticket tables before every run and no test here writes
-    // for Michael Brown, so this should always hold — the assertion is a
-    // tripwire for a future spec accidentally seeding him.
-    const michaelTickets: { meta: { totalItems: number } } = await (
-      await api.get("/api/tickets", {
-        headers: { "X-Requester-Id": String(michaelId) },
-      })
+    // Requester owns zero tickets"): checked live, not assumed. A freshly
+    // created fixture row is reliably empty by construction, but this
+    // tripwire still guards against a future edit accidentally seeding a
+    // ticket for `requesterEmpty`.
+    const emptyTickets: { meta: { totalItems: number } } = await (
+      await apiEmpty.get("/api/tickets")
     ).json();
-    if (michaelTickets.meta.totalItems !== 0) {
+    if (emptyTickets.meta.totalItems !== 0) {
       throw new Error(
-        `Expected Michael Brown (id ${michaelId}) to own zero tickets for the ` +
-          `empty-state screenshot, but found ${michaelTickets.meta.totalItems}. ` +
-          "Some other spec created tickets for him — pick a different " +
-          "genuinely-empty active Requester, or stop seeding him.",
+        `Expected requesterEmpty (id ${requesterEmpty.id}) to own zero tickets ` +
+          `for the empty-state screenshot, but found ${emptyTickets.meta.totalItems}.`,
       );
     }
 
-    // --- David Lee (Requester A): 12 self-created tickets -----------------
+    // --- requesterA: 12 self-created tickets -------------------------------
     // Ordered so the last one created (newest, therefore top of the default
     // list and on page 1) is the reference ticket the search / filter shots
     // assert on. Categories and priorities are spread deliberately: the
     // "filters applied" screenshot narrows to Network + High and every
     // remaining row is checked against that Category in the DOM.
-    const davidFixtures: Array<{
+    const requesterAFixtures: Array<{
       category: string;
       relatedSystem: string;
       priority: "LOW" | "MEDIUM" | "HIGH";
@@ -842,9 +778,8 @@ test.describe("Part 7 — My Tickets", () => {
       },
     ];
 
-    for (const [index, fixture] of davidFixtures.entries()) {
-      const response = await api.post("/api/tickets", {
-        headers: { "X-Requester-Id": String(davidId) },
+    for (const [index, fixture] of requesterAFixtures.entries()) {
+      const response = await apiA.post("/api/tickets", {
         data: {
           categoryId: categoryIdByName(fixture.category),
           relatedSystemId: relatedSystemIdByName(fixture.relatedSystem),
@@ -855,7 +790,7 @@ test.describe("Part 7 — My Tickets", () => {
       });
       if (response.status() !== 201) {
         throw new Error(
-          `Seed POST /api/tickets for David Lee failed: ${response.status()} ${await response.text()}`,
+          `Seed POST /api/tickets for requesterA failed: ${response.status()} ${await response.text()}`,
         );
       }
       const created: {
@@ -864,9 +799,9 @@ test.describe("Part 7 — My Tickets", () => {
         category: { name: string };
         requestedPriority: "LOW" | "MEDIUM" | "HIGH";
       } = await response.json();
-      davidTicketNumbers.push(created.ticketNumber);
-      if (index === davidFixtures.length - 1) {
-        davidReferenceTicket = {
+      requesterATicketNumbers.push(created.ticketNumber);
+      if (index === requesterAFixtures.length - 1) {
+        referenceTicket = {
           id: created.id,
           ticketNumber: created.ticketNumber,
           categoryName: created.category.name,
@@ -876,42 +811,41 @@ test.describe("Part 7 — My Tickets", () => {
     }
 
     // Guard the two facts the rest of this Part relies on, so an edit to
-    // davidFixtures above can't silently invalidate the screenshots.
-    if (davidTicketNumbers.length <= 10) {
+    // requesterAFixtures above can't silently invalidate the screenshots.
+    if (requesterATicketNumbers.length <= 10) {
       throw new Error(
-        "Part 7 needs David Lee to own more than one page of tickets (page " +
-          `size 10); seeded only ${davidTicketNumbers.length}.`,
+        "Part 7 needs requesterA to own more than one page of tickets (page " +
+          `size 10); seeded only ${requesterATicketNumbers.length}.`,
       );
     }
     if (
-      davidReferenceTicket.categoryName !== "Network" ||
-      davidReferenceTicket.priority !== "HIGH"
+      referenceTicket.categoryName !== "Network" ||
+      referenceTicket.priority !== "HIGH"
     ) {
       throw new Error(
-        "Part 7 expects the David Lee reference ticket to be Network / HIGH " +
-          `(got ${davidReferenceTicket.categoryName} / ${davidReferenceTicket.priority}).`,
+        "Part 7 expects the requesterA reference ticket to be Network / HIGH " +
+          `(got ${referenceTicket.categoryName} / ${referenceTicket.priority}).`,
       );
     }
 
-    // Sarah Johnson (Requester B) gets her own real tickets through the
-    // real POST /api/tickets endpoint — never inserted directly.
-    const sarahFixtures = [
+    // requesterB gets their own real tickets through the real
+    // POST /api/tickets endpoint — never inserted directly.
+    const requesterBFixtures = [
       {
-        summary: "Sarah Johnson evidence ticket: mouse stopped working",
+        summary: "Requester B evidence ticket: mouse stopped working",
         description:
           "The wireless mouse disconnects randomly during the workday and needs a battery or driver check.",
         priority: "LOW" as const,
       },
       {
-        summary: "Sarah Johnson evidence ticket: email sync delayed",
+        summary: "Requester B evidence ticket: email sync delayed",
         description:
           "Incoming email is arriving with a delay of twenty to thirty minutes on the desktop client only.",
         priority: "MEDIUM" as const,
       },
     ];
-    for (const [index, fixture] of sarahFixtures.entries()) {
-      const response = await api.post("/api/tickets", {
-        headers: { "X-Requester-Id": String(sarahId) },
+    for (const [index, fixture] of requesterBFixtures.entries()) {
+      const response = await apiB.post("/api/tickets", {
         data: {
           categoryId: categories[index % categories.length].id,
           relatedSystemId: relatedSystems[index % relatedSystems.length].id,
@@ -922,43 +856,46 @@ test.describe("Part 7 — My Tickets", () => {
       });
       if (response.status() !== 201) {
         throw new Error(
-          `Seed POST /api/tickets for Sarah Johnson failed: ${response.status()} ${await response.text()}`,
+          `Seed POST /api/tickets for requesterB failed: ${response.status()} ${await response.text()}`,
         );
       }
       const created: { ticketNumber: string } = await response.json();
-      sarahTicketNumbers.push(created.ticketNumber);
+      requesterBTicketNumbers.push(created.ticketNumber);
     }
 
-    await api.dispose();
+    await apiA.dispose();
+    await apiB.dispose();
+    await apiEmpty.dispose();
   });
 
   test("Requester A's ticket list, then switching to Requester B makes A's ticket disappear", async ({
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
 
     const rows = page.locator(".zen-my-tickets__table tbody tr");
     await expect(rows.first()).toBeVisible();
     await expect(
-      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+      page.getByRole("link", { name: referenceTicket.ticketNumber, exact: true }),
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART7_DIR, "01-requesterA-ticket-list.png"),
       fullPage: true,
     });
 
-    await changeRequesterTo(page, "Sarah Johnson");
+    await switchRequesterTo(page, requesterB);
     await expect(rows.first()).toBeVisible();
-    for (const ticketNumber of sarahTicketNumbers) {
+    for (const ticketNumber of requesterBTicketNumbers) {
       await expect(
         page.getByRole("link", { name: ticketNumber, exact: true }),
       ).toBeVisible();
     }
-    // The core evidence: David's ticket is genuinely gone from Sarah's list.
+    // The core evidence: Requester A's ticket is genuinely gone from
+    // Requester B's list.
     await expect(
       page.getByRole("link", {
-        name: davidReferenceTicket.ticketNumber,
+        name: referenceTicket.ticketNumber,
         exact: true,
       }),
     ).toHaveCount(0);
@@ -970,19 +907,19 @@ test.describe("Part 7 — My Tickets", () => {
 
   test("search in use, with a matching result", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();
 
     await page
       .getByPlaceholder("Search by ticket number or summary")
-      .fill(davidReferenceTicket.ticketNumber);
+      .fill(referenceTicket.ticketNumber);
 
     const rows = page.locator(".zen-my-tickets__table tbody tr");
     await expect.poll(() => rows.count()).toBe(1);
     await expect(
-      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+      page.getByRole("link", { name: referenceTicket.ticketNumber, exact: true }),
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART7_DIR, "03-search-matching-result.png"),
@@ -992,7 +929,7 @@ test.describe("Part 7 — My Tickets", () => {
 
   test("filters applied: category, priority, and status", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();
@@ -1004,10 +941,10 @@ test.describe("Part 7 — My Tickets", () => {
     };
     await page
       .getByLabel("Category")
-      .selectOption({ label: davidReferenceTicket.categoryName });
+      .selectOption({ label: referenceTicket.categoryName });
     await page
       .getByLabel("Priority")
-      .selectOption({ label: priorityLabel[davidReferenceTicket.priority] });
+      .selectOption({ label: priorityLabel[referenceTicket.priority] });
     await page.getByLabel("Status").selectOption({ label: "New" });
 
     const rows = page.locator(".zen-my-tickets__table tbody tr");
@@ -1017,13 +954,13 @@ test.describe("Part 7 — My Tickets", () => {
     const rowCount = await rows.count();
     for (let i = 0; i < rowCount; i++) {
       await expect(rows.nth(i).locator("td").nth(3)).toHaveText(
-        davidReferenceTicket.categoryName,
+        referenceTicket.categoryName,
       );
     }
     // The reference ticket itself — which necessarily matches all three
     // filters — is genuinely among the results.
     await expect(
-      page.getByRole("link", { name: davidReferenceTicket.ticketNumber, exact: true }),
+      page.getByRole("link", { name: referenceTicket.ticketNumber, exact: true }),
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART7_DIR, "04-filters-applied.png"),
@@ -1033,7 +970,7 @@ test.describe("Part 7 — My Tickets", () => {
 
   test("sorting applied: a non-default sort visibly active", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
 
     const firstNumberCell = page
       .locator(".zen-my-tickets__table tbody tr")
@@ -1079,7 +1016,7 @@ test.describe("Part 7 — My Tickets", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
 
     const summary = page.locator(".zen-pagination__summary");
     await expect(summary).toBeVisible();
@@ -1087,11 +1024,11 @@ test.describe("Part 7 — My Tickets", () => {
     const match = initialText.match(/Showing 1–10 of (\d+)/);
     expect(match).not.toBeNull();
     const total = Number(match![1]);
-    // Self-contained: David Lee's ticket count must be at least the number
-    // this spec's beforeAll created for him (which alone already exceeds
+    // Self-contained: requesterA's ticket count must be at least the number
+    // this spec's beforeAll created for them (which alone already exceeds
     // the page size of 10), never a value assumed from accumulated data.
-    expect(total).toBeGreaterThanOrEqual(davidTicketNumbers.length);
-    expect(davidTicketNumbers.length).toBeGreaterThan(10);
+    expect(total).toBeGreaterThanOrEqual(requesterATicketNumbers.length);
+    expect(requesterATicketNumbers.length).toBeGreaterThan(10);
 
     await page.getByRole("button", { name: "Page 2" }).click();
     await expect(summary).toHaveText(
@@ -1109,7 +1046,7 @@ test.describe("Part 7 — My Tickets", () => {
 
   test("empty state: a Requester who owns zero tickets", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Michael Brown");
+    await loginAsFixture(page, requesterEmpty);
 
     await expect(
       page.getByRole("heading", { name: "You haven't created any tickets yet." }),
@@ -1128,7 +1065,7 @@ test.describe("Part 7 — My Tickets", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();
@@ -1156,15 +1093,18 @@ test.describe("Part 7 — My Tickets", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Michael Brown");
+    await loginAsFixture(page, requesterEmpty);
 
-    await page.goto(`/tickets/${davidReferenceTicket.id}`);
+    await page.goto(`/tickets/${referenceTicket.id}`);
     await expect(
       page.getByRole("heading", { name: "Ticket not found" }),
     ).toBeVisible();
+    // client/src/screens/TicketDetailScreen.tsx's not-found copy no longer
+    // mentions the deleted "development requester" concept — it now reads
+    // "your account" for a real, session-authenticated Requester.
     await expect(
       page.getByText(
-        "This ticket doesn't exist or isn't associated with the current development requester.",
+        "This ticket doesn't exist or isn't associated with your account.",
       ),
     ).toBeVisible();
     await page.screenshot({
@@ -1182,14 +1122,19 @@ test.describe("Part 7 — My Tickets", () => {
 test.describe("Part 8 — Ticket Detail & Attachments", () => {
   // Every test here seeds its OWN ticket + attachment through the real
   // POST /api/tickets and POST /api/tickets/:id/attachments endpoints
-  // (api-spec.md §3.1, §4.1) in its own `beforeAll`, so no test depends on
-  // another's side effects or on data left by Part 7. `pretest:e2e`
-  // TRUNCATEs the ticket tables before every run. "Sarah Johnson" owns the
-  // tickets; "Michael Brown" (never given a ticket — Part 7's beforeAll
-  // still asserts he owns zero) is the "different Requester" for the
-  // unauthorized-access shot.
-  let sarahId: number;
-  let michaelId: number;
+  // (api-spec.md §3.1, §4.1), so no test depends on another's side effects
+  // or on data left by Part 7. `pretest:e2e` TRUNCATEs the ticket tables
+  // before every run.
+  //
+  // Originally "Sarah Johnson" (owner) and "Michael Brown" (a different
+  // Requester, for the unauthorized-access shot) — replaced with two
+  // dedicated fixture Requesters (`createPlainLoginFixtureUser`). The
+  // owner's real name still needs to show up in the ticket-information card
+  // (below), so this block, unlike Part 7, keeps an assertion against an
+  // actual identity — it just reads the fixture's own `name` field instead
+  // of a hardcoded literal, the same substitution Part 6 made.
+  let requesterOwner: FixtureUser;
+  let requesterOther: FixtureUser;
   let categoryId: number;
   let relatedSystemId: number;
 
@@ -1210,8 +1155,11 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
   }
 
   /**
-   * Creates one Sarah-owned ticket with a single active PDF attachment,
-   * through the real API. Returns the ids the tests key their assertions to.
+   * Creates one ticket owned by whoever `api`'s session belongs to, with a
+   * single active PDF attachment, through the real API. Returns the ids the
+   * tests key their assertions to. `api` must be a session-authenticated
+   * context (`loginApiContext`) — the server derives the owning Requester
+   * from the session, not a header.
    */
   async function seedTicketWithAttachment(
     api: Awaited<ReturnType<typeof playwrightRequest.newContext>>,
@@ -1219,7 +1167,6 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     sizeKb: number,
   ): Promise<SeededTicket> {
     const createResponse = await api.post("/api/tickets", {
-      headers: { "X-Requester-Id": String(sarahId) },
       data: {
         categoryId,
         relatedSystemId,
@@ -1242,7 +1189,6 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     const uploadResponse = await api.post(
       `/api/tickets/${created.id}/attachments`,
       {
-        headers: { "X-Requester-Id": String(sarahId) },
         multipart: {
           file: {
             name: attachmentName,
@@ -1266,22 +1212,13 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
   }
 
   test.beforeAll(async () => {
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    requesterOwner = await createPlainLoginFixtureUser("part8-owner");
+    requesterOther = await createPlainLoginFixtureUser("part8-other");
 
-    const requesters: Array<{ id: number; name: string }> = await (
-      await api.get("/api/requesters")
-    ).json();
-    function requesterIdByName(name: string): number {
-      const found = requesters.find((r) => r.name === name);
-      if (!found) {
-        throw new Error(
-          `Seeded active requester "${name}" not found via GET /api/requesters — check server/prisma/seed.ts.`,
-        );
-      }
-      return found.id;
-    }
-    sarahId = requesterIdByName("Sarah Johnson");
-    michaelId = requesterIdByName("Michael Brown");
+    // GET /api/categories and /api/related-systems are unauthenticated
+    // reference-data endpoints (server/src/app.ts mounts them with no
+    // auth middleware), so a plain, session-less context is enough here.
+    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
 
     const categories: Array<{ id: number; name: string }> = await (
       await api.get("/api/categories")
@@ -1304,13 +1241,14 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
 
   test("owned ticket detail (read-only header), adding an attachment via the Add control, and downloading an active one", async ({
     page,
+    browser,
   }) => {
     const ATTACHMENT_NAME = "initial-report.pdf";
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const api = await loginApiContext(browser, requesterOwner);
     const ticket = await seedTicketWithAttachment(api, ATTACHMENT_NAME, 180);
 
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Sarah Johnson");
+    await loginAsFixture(page, requesterOwner);
     await page.goto(`/tickets/${ticket.id}`);
 
     // --- Shot 1: a Requester viewing their own ticket's detail page ------
@@ -1322,7 +1260,7 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     // The owning Requester shows in the ticket-information card — scoped
     // there, not the app-shell badge (which reads the same name on every
     // screen).
-    await expect(infoCard.getByText("Sarah Johnson")).toBeVisible();
+    await expect(infoCard.getByText(requesterOwner.name)).toBeVisible();
     // ui-spec.md §10 / BR-39 / tests.md C-29: every header field is static
     // text — the information card has no inputs at all.
     await expect(infoCard.locator("input, textarea, select")).toHaveCount(0);
@@ -1402,15 +1340,16 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
 
   test("soft removal with a reason: the confirmation dialog, the removed-row presentation, retained metadata, and the blocked download", async ({
     page,
+    browser,
   }) => {
     const ATTACHMENT_NAME = "report-to-remove.pdf";
     const REMOVAL_REASON =
       "Uploaded the wrong report for this Part 8 evidence ticket";
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const api = await loginApiContext(browser, requesterOwner);
     const ticket = await seedTicketWithAttachment(api, ATTACHMENT_NAME, 180);
 
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Sarah Johnson");
+    await loginAsFixture(page, requesterOwner);
     await page.goto(`/tickets/${ticket.id}`);
 
     const seededRow = page.locator(".zen-attachment-list__item", {
@@ -1494,7 +1433,6 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     // (api-spec.md §4.3) — proven by a direct API call, not just the UI.
     const blockedResponse = await api.get(
       `/api/attachments/${ticket.attachmentId}/download`,
-      { headers: { "X-Requester-Id": String(sarahId) } },
     );
     expect(blockedResponse.status()).toBe(410);
     const blockedBody: { error: string } = await blockedResponse.json();
@@ -1509,8 +1447,9 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
 
   test("unauthorized access rejected: a different Requester opening this ticket's /tickets/:id URL", async ({
     page,
+    browser,
   }) => {
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+    const api = await loginApiContext(browser, requesterOwner);
     const ticket = await seedTicketWithAttachment(
       api,
       "owner-only-report.pdf",
@@ -1519,9 +1458,10 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     await api.dispose();
 
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Michael Brown");
-    // Guard the premise of this shot: Michael is not the owner.
-    expect(michaelId).not.toBe(sarahId);
+    // requesterOther is a distinct fixture row from requesterOwner
+    // (createPlainLoginFixtureUser always inserts a fresh row per
+    // discriminator), so it is not the ticket's owner by construction.
+    await loginAsFixture(page, requesterOther);
 
     await page.goto(`/tickets/${ticket.id}`);
     // ui-spec.md §10 / AC-37, AC-38, BR-14: unknown and not-owned are the
@@ -1529,9 +1469,12 @@ test.describe("Part 8 — Ticket Detail & Attachments", () => {
     await expect(
       page.getByRole("heading", { name: "Ticket not found" }),
     ).toBeVisible();
+    // client/src/screens/TicketDetailScreen.tsx's not-found copy no longer
+    // mentions the deleted "development requester" concept — it now reads
+    // "your account" for a real, session-authenticated Requester.
     await expect(
       page.getByText(
-        "This ticket doesn't exist or isn't associated with the current development requester.",
+        "This ticket doesn't exist or isn't associated with your account.",
       ),
     ).toBeVisible();
     await page.screenshot({

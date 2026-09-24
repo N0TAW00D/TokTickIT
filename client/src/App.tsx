@@ -1,7 +1,8 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { RequireAuth } from "./routes/RequireAuth";
 import { RequireRole } from "./routes/RequireRole";
+import { RoleLandingRedirect } from "./routes/RoleLandingRedirect";
 import { LoginScreen } from "./screens/LoginScreen";
 import { ChangePasswordScreen } from "./screens/ChangePasswordScreen";
 import { MyTicketsScreen } from "./screens/MyTicketsScreen";
@@ -58,7 +59,7 @@ function App() {
             </RequireAuth>
           }
         />
-        <Route path="/" element={<Navigate to="/tickets" replace />} />
+        <Route path="/" element={<RoleLandingRedirect />} />
         <Route
           path="/tickets"
           element={

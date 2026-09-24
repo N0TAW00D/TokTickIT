@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import express, { type Request, type Response } from 'express';
 import request from 'supertest';
 import app from '../../src/app.js';
@@ -352,5 +353,149 @@ describe('requireRole + authenticate + passwordChangeGate — composed HTTP cove
     const res = await request(throwawayServer.server).get('/__test/it-staff-only').set('Cookie', cookie);
 
     expect(res.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC-01 (AC-14): "Every protected route returns 401 and performs no
+// write." — the 401 half is already proven, at real HTTP-level, for every
+// state-changing route in this codebase's per-route suites (e.g.
+// ticket-status.api.test.ts's "401 UNAUTHENTICATED with no session cookie"
+// for PATCH /:id/status, users-admin.api.test.ts's equivalent for POST
+// /api/users, PATCH /api/users/:id and POST /api/users/:id/initial-password)
+// — every one of those asserts `res.status === 401` and stops there.
+//
+// "Performs no write" was never independently checked: a 401 body proves
+// the HTTP response looks right, not that the handler underneath never ran
+// (a bug that returned 401 AFTER a write, or a route with `authenticate`
+// accidentally dropped from one path, would look identical from the
+// response alone). This section closes that gap for a representative
+// sample of the state-changing routes named above — one create, one
+// update, one soft-delete — by reading the row back from the database
+// itself straight after the 401, instead of trusting the status code as
+// proof.
+//
+// #70/#71/#73 have since landed the real routes this file's header comment
+// (above) describes as not existing yet for SEC-01/02/09 purposes; this
+// section is the one piece of that debt paid off for SEC-01 specifically —
+// it is intentionally narrow (tests.md's own "representative sample"
+// framing), not a full re-litigation of every route's 401 case, which
+// already lives in each route's own file.
+// ---------------------------------------------------------------------------
+
+describe('SEC-01 (AC-14): unauthenticated write attempts leave the database untouched', () => {
+  let categoryId: number;
+  let relatedSystemId: number;
+  let requesterId: number;
+
+  beforeAll(async () => {
+    const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
+    const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
+    const requester = await prisma.user.findFirstOrThrow({ where: { isActive: true, role: 'REQUESTER' } });
+    categoryId = category.id;
+    relatedSystemId = relatedSystem.id;
+    requesterId = requester.id;
+  });
+
+  let ticketSeq = 0;
+  async function seedTicket() {
+    ticketSeq += 1;
+    return prisma.ticket.create({
+      data: {
+        ticketNumber: `TKT-SEC01-${String(ticketSeq).padStart(6, '0')}`,
+        requesterId,
+        categoryId,
+        relatedSystemId,
+        summary: `SEC-01 fixture ticket ${ticketSeq}`,
+        description: 'x'.repeat(25),
+        requestedPriority: 'MEDIUM',
+        itPriority: 'MEDIUM',
+        status: 'NEW',
+      },
+    });
+  }
+
+  it('POST /api/tickets: no Ticket row is created', async () => {
+    const before = await prisma.ticket.count();
+
+    const res = await request(testServer.server)
+      .post('/api/tickets')
+      .set('Content-Type', 'application/json')
+      .send({
+        categoryId,
+        relatedSystemId,
+        summary: 'A ticket an unauthenticated caller tried to create',
+        description: 'x'.repeat(25),
+        requestedPriority: 'MEDIUM',
+      });
+
+    expect(res.status).toBe(401);
+
+    const after = await prisma.ticket.count();
+    expect(after).toBe(before);
+  });
+
+  it('PATCH /api/tickets/:id/status: the target Ticket keeps its original status and updatedAt', async () => {
+    const ticket = await seedTicket();
+
+    const res = await request(testServer.server)
+      .patch(`/api/tickets/${ticket.id}/status`)
+      .set('Content-Type', 'application/json')
+      .send({ status: 'OPEN' });
+
+    expect(res.status).toBe(401);
+
+    const reloaded = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(reloaded.status).toBe('NEW');
+    expect(reloaded.updatedAt.getTime()).toBe(ticket.updatedAt.getTime());
+  });
+
+  it('POST /api/users: no User row is created for the attempted email', async () => {
+    const before = await prisma.user.count();
+    const email = `sec01-unauth-create-${randomUUID()}@example.edu`;
+
+    const res = await request(testServer.server)
+      .post('/api/users')
+      .set('Content-Type', 'application/json')
+      .send({
+        name: 'Should Never Exist',
+        email,
+        role: 'IT_STAFF',
+        isActive: true,
+        initialPassword: 'InitialPass1234',
+      });
+
+    expect(res.status).toBe(401);
+
+    const after = await prisma.user.count();
+    expect(after).toBe(before);
+    expect(await prisma.user.findFirst({ where: { email } })).toBeNull();
+  });
+
+  it('DELETE /api/attachments/:id: the target Attachment keeps isRemoved=false / removedAt=null', async () => {
+    const ticket = await seedTicket();
+    const attachment = await prisma.attachment.create({
+      data: {
+        ticketId: ticket.id,
+        originalFilename: 'sec-01-fixture.pdf',
+        storedFilename: `${randomUUID()}.pdf`,
+        mimeType: 'application/pdf',
+        fileSize: 1024,
+        isRemoved: false,
+      },
+    });
+
+    const res = await request(testServer.server)
+      .delete(`/api/attachments/${attachment.id}`)
+      .set('Content-Type', 'application/json')
+      .send({ reason: 'Attempted by an unauthenticated caller' });
+
+    expect(res.status).toBe(401);
+
+    const reloaded = await prisma.attachment.findUniqueOrThrow({ where: { id: attachment.id } });
+    expect(reloaded.isRemoved).toBe(false);
+    expect(reloaded.removedAt).toBeNull();
+    expect(reloaded.removedReason).toBeNull();
+    expect(reloaded.removedById).toBeNull();
   });
 });

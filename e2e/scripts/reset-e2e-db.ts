@@ -97,23 +97,42 @@ function runInServer(command: string, args: string[], env: NodeJS.ProcessEnv): v
  * Clears the tables E2E specs write to, restarting their identity
  * sequences, so every `npm run test:e2e` run starts from the same empty
  * state instead of accumulating tickets forever (confirmed: `toktickit_e2e`
- * had reached 129+ rows before this existed). Mirrors
- * server/tests/setup/reset-db.ts's per-test truncate exactly — same three
- * tables, same TRUNCATE ... RESTART IDENTITY CASCADE statement — just run
- * once per E2E run rather than once per test, since Playwright has no
- * equivalent of Vitest's `beforeEach`. Category, RelatedSystem and
- * RequesterUser are deliberately excluded: they are read-only reference
- * fixtures (docs/lab-02/tests.md §1.3) that seed.ts upserts idempotently
- * and specs must not depend on mutating.
+ * had reached 129+ rows before this existed). Runs once per E2E invocation
+ * rather than once per test, since Playwright has no equivalent of
+ * Vitest's `beforeEach`. Category and RelatedSystem are deliberately
+ * excluded: they are read-only reference fixtures (docs/lab-02/tests.md
+ * §1.3) that seed.ts upserts idempotently and specs must not depend on
+ * mutating.
+ *
+ * "User" (and, via its `onDelete: Cascade` FK, "Session") is included here
+ * even though `server/tests/setup/reset-db.ts` deliberately excludes User
+ * for the toktickit_test suite — that exclusion is safe there because each
+ * API test creates and scopes its own dedicated test-local Users rather
+ * than mutating the seed. Lab 3's E2E specs are different: many of them
+ * (authentication.spec.ts, staff-ticket-flow.spec.ts,
+ * user-administration.spec.ts) create real, persisted Users through the
+ * live UI/API — a login fixture, an admin-created account, a password-
+ * reset target — that are never individually cleaned up afterward. Across
+ * every `npm run test:e2e` invocation since Lab 3 added dynamic user
+ * creation, those rows silently accumulated in `toktickit_e2e` (confirmed:
+ * dozens of "E2E ... Fixture" rows had built up, visibly cluttering the
+ * committed `artifacts/lab-03/screenshots/user-management/*.png`
+ * evidence). TRUNCATE ... CASCADE on "User" also clears every Ticket,
+ * Attachment, PublicComment and InternalNote that references one (all via
+ * `onDelete: Cascade` or `Restrict`, and TRUNCATE's own CASCADE follows
+ * the FK graph regardless of each relation's own onDelete rule) — a
+ * superset of, not a conflict with, the explicit Attachment/Ticket
+ * truncation below. `seed.ts` (called right after this function returns)
+ * recreates every named seed account fresh on each run.
  */
 async function resetTransactionalData(e2eUrl: string): Promise<void> {
   const client = new Client({ connectionString: e2eUrl });
   await client.connect();
   try {
     await client.query(
-      'TRUNCATE TABLE "Attachment", "Ticket", "TicketCounter" RESTART IDENTITY CASCADE;'
+      'TRUNCATE TABLE "Attachment", "Ticket", "TicketCounter", "User", "Session" RESTART IDENTITY CASCADE;'
     );
-    console.log("Cleared Ticket, Attachment and TicketCounter.");
+    console.log("Cleared Ticket, Attachment, TicketCounter, User and Session.");
   } finally {
     await client.end();
   }

@@ -2,14 +2,19 @@ import path from 'node:path';
 import { Client, Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcrypt';
+import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '../../src/generated/prisma/client.js';
 import { resetLab2FixtureDatabase } from '../../scripts/test-db-lab2-fixture.lib.js';
 import { runPackageBin, serverRoot } from '../../scripts/test-db.lib.js';
 import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
+import app from '../../src/app.js';
+import { prisma } from '../../src/lib/prisma.js';
+import { useTestServer } from '../setup/http-server.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
 
 // Migration and regression coverage (docs/lab-03/tests.md §2.6, MIG-01
-// ..MIG-06; specification.md §7.4). Runs the real Lab 3 migration against
+// ..MIG-08; specification.md §7.4). Runs the real Lab 3 migration against
 // a database holding only Lab 2-era data (never the shared
 // `toktickit_test` database, which tests/setup/global-setup.ts already
 // migrates to the Lab 3 schema before any test file runs) and asserts the
@@ -21,10 +26,15 @@ import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 // beforeAll achieves exactly that — Vitest reports every test in this file
 // as failed, not skipped.
 //
-// MIG-07/MIG-08 (the Lab 2 regression suite re-pointed to the authenticated
-// identity, and proof the Development Requester selector is gone) belong
-// to `requester-regression.api.test.ts` under issue #70, not this file —
-// this issue only evolves the schema/migration/seed.
+// MIG-07 (the Lab 2 regression suite re-pointed to the authenticated
+// identity) belongs to the original, re-pointed `server/tests/lab-02/*`
+// suites, not this file (see docs/lab-03/tests.md §7). MIG-08 (proof the
+// Development Requester selector is gone) lives below, in its own
+// `describe` block — it runs against the live app + the shared, already
+// Lab-3-migrated `toktickit_test` database (tests/setup/global-setup.ts),
+// not the Lab 2 fixture database the MIG-01..06 tests above use, since
+// there is nothing Lab 2-era about asserting a fact about the currently
+// running server.
 
 let fixtureUrl: string;
 let fixturePrisma: PrismaClient;
@@ -225,5 +235,82 @@ describe('Lab 2 -> Lab 3 migration (specification.md §7.4)', () => {
       expect(u.passwordHash).toMatch(/^\$2[aby]\$/);
       await expect(bcrypt.compare(LOCAL_DEV_PASSWORD, u.passwordHash)).resolves.toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MIG-08 (AC-20, specification.md §7.4 item 8): the Development Requester
+// selector, its `GET /api/requesters` endpoint and the `X-Requester-Id`
+// header are gone (docs/lab-03/api-spec.md §1.2). Grep confirms zero
+// references in `server/src`/`client/src`, but that is a fact re-verified
+// by hand, not a fact an automated test guards — these two tests turn it
+// into a real regression check against the live app: they fail the moment
+// someone re-adds a working `/api/requesters` route or makes
+// `X-Requester-Id` do anything again.
+// ---------------------------------------------------------------------------
+describe('MIG-08: the Development Requester selector is removed (AC-20)', () => {
+  const testServer = useTestServer(app);
+
+  function extractSessionCookiePair(res: request.Response): string {
+    const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
+    const raw = setCookie?.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+    if (!raw) {
+      throw new Error('Response carried no toktickit.sid cookie');
+    }
+    return raw.split(';')[0];
+  }
+
+  async function loginAndGetCookie(email: string): Promise<string> {
+    const res = await request(testServer.server)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send({ email, password: LOCAL_DEV_PASSWORD });
+    expect(res.status, 'test fixture login must succeed').toBe(200);
+    return extractSessionCookiePair(res);
+  }
+
+  it('GET /api/requesters does not exist as a route — a real 404 from the live server, not any success status', async () => {
+    const res = await request(testServer.server).get('/api/requesters');
+
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(200);
+  });
+
+  it('X-Requester-Id on a real authenticated request has no effect — identical response with and without it', async () => {
+    const requester = await prisma.user.findFirstOrThrow({ where: { isActive: true, role: 'REQUESTER' } });
+    const otherRequester = await prisma.user.findFirstOrThrow({
+      where: { isActive: true, role: 'REQUESTER', id: { not: requester.id } },
+    });
+    const category = await prisma.category.findFirstOrThrow({ where: { isActive: true } });
+    const relatedSystem = await prisma.relatedSystem.findFirstOrThrow({ where: { isActive: true } });
+    const cookie = await loginAndGetCookie(requester.email);
+
+    const createRes = await request(testServer.server)
+      .post('/api/tickets')
+      .set('Cookie', cookie)
+      .send({
+        categoryId: category.id,
+        relatedSystemId: relatedSystem.id,
+        requestedPriority: 'MEDIUM',
+        summary: 'MIG-08 regression: X-Requester-Id must be inert on a real request',
+        description: 'Description text long enough to satisfy the 20-character minimum for this field.',
+      });
+    expect(createRes.status).toBe(201);
+    const ticketId = createRes.body.id as number;
+
+    const withoutHeader = await request(testServer.server).get(`/api/tickets/${ticketId}`).set('Cookie', cookie);
+
+    // If the deleted selector still worked, this would either switch the
+    // request onto `otherRequester`'s identity (a different/404 response,
+    // since this ticket isn't theirs) or otherwise change the payload —
+    // neither may happen.
+    const withHeader = await request(testServer.server)
+      .get(`/api/tickets/${ticketId}`)
+      .set('Cookie', cookie)
+      .set('X-Requester-Id', String(otherRequester.id));
+
+    expect(withoutHeader.status).toBe(200);
+    expect(withHeader.status).toBe(200);
+    expect(withHeader.body).toEqual(withoutHeader.body);
   });
 });
