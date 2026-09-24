@@ -247,6 +247,47 @@ test.describe("R-02 queue reflow (tests.md:198, V-10, ui-spec.md §9)", () => {
   });
 });
 
+// Filter-row breakpoint boundaries (PR #83 review): the five queue filters
+// are forced onto one line at >= 1080px (StaffTicketQueueScreen.css) and
+// wrap below it. At every width on either side of each boundary, all five
+// selects must be visible AND lie fully inside the controls panel, and the
+// document must not overflow. 991/992 covers the Category-column breakpoint
+// (the width the reviewer flagged); 1079/1080 covers the filter-row one.
+test.describe("R-02 queue filter row at breakpoint boundaries (tests.md:198, AC-56)", () => {
+  for (const width of [991, 992, 1079, 1080]) {
+    test(`staff-queue filters fit inside the controls panel at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await goToScreen(page, "staff-queue");
+
+      const panel = page.locator(".zen-staff-queue__controls");
+      const panelBox = await panel.boundingBox();
+      expect(panelBox, "controls panel has a box").not.toBeNull();
+
+      const filterSelects = page.locator(".zen-staff-queue__filters select");
+      await expect(filterSelects).toHaveCount(5);
+      for (let i = 0; i < 5; i++) {
+        const select = filterSelects.nth(i);
+        await expect(select).toBeVisible();
+        const box = await select.boundingBox();
+        expect(box, `filter ${i} has a box`).not.toBeNull();
+        expect(
+          box!.x + box!.width,
+          `filter ${i} at ${width}px overflows the panel's right edge`,
+        ).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 0.5);
+        expect(box!.x, `filter ${i} at ${width}px starts left of the panel`).toBeGreaterThanOrEqual(
+          panelBox!.x - 0.5,
+        );
+      }
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // R-03: detail reflow (V-10, ui-spec.md §10 / §12)
 // ---------------------------------------------------------------------------

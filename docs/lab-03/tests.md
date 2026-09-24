@@ -200,7 +200,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | S-05 | S | V-08 | Validation placement | Messages render inside their field wrapper, as in Lab 2 | `client/tests/lab-03/ui-style.test.tsx` | Pass |
 | S-06 | S | V-07 | Private surface | `.thread--internal` uses `--zen-private-bg` and its border token | `client/tests/lab-03/ui-style.test.tsx` | Pass |
 | R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
-| R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px; five filters fit inside the controls panel at 991/992/1079/1080 px (filter row single-line from 1080 px) | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
@@ -338,7 +338,7 @@ reconciliation pass were produced.
 | **Total** | **120** | **120** | `npm run test:all` |
 
 `npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 131/131 passing (lab-02 regression suite + all lab-03 specs). No test
+files). `npm run test:e2e`: 135/135 passing (lab-02 regression suite + all lab-03 specs). No test
 is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — every
 row in this document is now backed by a real, passing test written to the letter of its own claim;
 the full 120-test suite passes with no gap, matching Issue #74's own AC.

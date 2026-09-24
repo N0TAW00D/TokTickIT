@@ -67,7 +67,7 @@
 
 /*
  * "Keep the filters on one line" (same technique and rationale as
- * MyTicketsScreen.css's identical rule), but gated to `>= 992px` here
+ * MyTicketsScreen.css's identical rule), but gated to `>= 1080px` here
  * rather than MyTicketsScreen.css's `>= 768px`. This screen has five
  * filters (Status, IT Priority, Category, Owner, Sort) against My Tickets'
  * four, and Owner's option labels (real IT Staff names) run longer than
@@ -84,8 +84,18 @@
  * unwrapped filters; tablet instead falls through to the unguarded rule
  * above (`flex: 1 1 140px; min-width: 0`), letting the selects wrap onto
  * more than one line instead of overflowing.
+ *
+ * Why 1080px and not 992px (review finding on PR #83): the ~967px
+ * unwrapped row must fit inside the controls panel, not merely inside the
+ * viewport. Available width at viewport W (< the 1120px container cap) is
+ * W - 48px (AppShell content gutters) - 2px (panel border) - 32px (panel
+ * padding) = W - 82px, so the row only fits from W >= 967 + 82 = 1049px.
+ * 1080px leaves ~30px of headroom for font/option-label variance. Below it
+ * the filters wrap (`min-width: 0` rule above) — always within the panel.
+ * The table's Category-column breakpoint (max-width: 991px) is an
+ * independent concern and deliberately unchanged.
  */
-@media (min-width: 992px) {
+@media (min-width: 1080px) {
   .zen-staff-queue__filters > * {
     flex: 0 1 auto;
     min-width: max-content;
