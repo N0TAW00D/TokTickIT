@@ -4,16 +4,16 @@ Part 1 deliverable (`specification.md` §14 Part 1). Every Lab 3 change reaches 
 through a peer-reviewed pull request, and `lab3-staging` reaches `main` through one peer-reviewed
 release PR — there are no direct commits to `main` or `lab3-staging`.
 
-Current through PR #82 (Issue #73). The two PRs still open at the time of writing — Issue #74's own
-PR (`feat/74-integration` → `lab3-staging`) and the release PR (`lab3-staging` → `main`) — are not
-yet reviewed, so their rows and any review findings on them will be appended once that review
-completes, the same way Lab 2's `reviewer.md` (PR #57) was itself revised after its own review.
+Current through PR #83 (Issue #74). The release PR (`lab3-staging` → `main`) is the only PR still
+open at the time of writing — it is not yet reviewed, so its row and any review findings on it will
+be appended once that review completes, the same way Lab 2's `reviewer.md` (PR #57) was itself
+revised after its own review.
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#82, and #74's PR once opened). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#83). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed and merged every Lab 3 pull request. Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Not a reviewer on Lab 3, matching Lab 2 (see `docs/lab-02/reviewer.md`). |
 
@@ -34,7 +34,7 @@ Lab 2's record uses.
 | [#80](https://github.com/N0TAW00D/TokTickIT/pull/80) | IT Staff Ticket Queue — queue API & responsive UI (#71) | **Changes requested** → approved | 2 |
 | [#81](https://github.com/N0TAW00D/TokTickIT/pull/81) | IT Staff Ticket Detail — ownership, priority, status & notes (#72) | **Changes requested** ×3 → approved | 4 |
 | [#82](https://github.com/N0TAW00D/TokTickIT/pull/82) | Administrator User Management (#73) | **Changes requested** → approved | 2 |
-| #74's PR | E2E, responsive/visual inspection & release integration (#74) | _pending — not yet opened_ | — |
+| [#83](https://github.com/N0TAW00D/TokTickIT/pull/83) | E2E, responsive/visual inspection & release integration (#74) | **Changes requested** ×2 → approved | 3 |
 | release PR | `lab3-staging` → `main` | _pending_ | — |
 
 Notes:
@@ -189,15 +189,75 @@ row(s) being changed are now locked and evaluated inside one `prisma.$transactio
 (`SELECT … FOR UPDATE` on the active-Administrator rows before the count), closing the
 check-then-act window a concurrent second request could otherwise race through.
 
+### #83 — Changes requested ×2: nine Planned tests, login redirect bypass, E2E-08 continuity, V-10 clipping, e2e `tsc` gap, then a missed 992px breakpoint
+
+**Round 1** (submitted 2026-09-22, reviewing commit `3ee14a5`) — reviewer verified server 507/507,
+client 349/349 (three consecutive runs), E2E 131/131, and a clean client build / server type-check
+locally, then raised five blocking findings before treating the PR as the completed Lab 3 release:
+
+> 1. docs/lab-03/tests.md still contains 9 Planned rows, so the final matrix is 111/120 rather than
+> 120/120, while Issue #74 requires the full suite to pass. 2. IT Staff and Administrator login
+> flows bypass the real post-login landing with direct page.goto calls. The normal login currently
+> redirects to the Requester-only /tickets route. 3. E2E-08 uploads a new attachment during the
+> test, so it does not prove continuity of an existing Lab 2 attachment after migration. 4. V-10 is
+> marked Pass despite the documented Ticket No./Requester clipping. 5. A clean e2e install cannot
+> pass npx tsc --noEmit because @types/node and @types/pg are not declared.
+
+**Response.** All five accepted and fixed, not just reworded. (1) The nine `Planned` rows were each
+backfilled with real, exhaustive coverage matching their own literal claim (e.g. API-16 now covers
+all 21 real `passwordChangeGate`-mounted routes × exempt paths across all 3 roles; SEC-01 now
+verifies "no write" with a real DB read after the 401, not just the status code), closing
+`tests.md` to 120/120 (server 591/591, client 349/349, e2e 131/131). (2) The root redirect bug was
+real, not just a test workaround: `/` unconditionally `Navigate`d to `/tickets` (Requester-only),
+so any non-Requester login landed on the forbidden state instead of `ui-spec.md` §5's required
+role-landing redirect — fixed with a new `RoleLandingRedirect` reusing `AppShell.tsx`'s existing
+nav-link source of truth. (3) Added `seedPreExistingAttachment`, which writes real bytes to
+`server/uploads/` and inserts the Attachment row via direct SQL before either E2E-08 session logs
+in, so the attachment genuinely pre-dates the test's own actions; sabotage-verified by temporarily
+restricting the download route back to Requester-only. (4) The Ticket No./Requester clipping (and
+an IT Priority "High" label clipping found while fixing it) was a real `.zen-staff-detail__grid`
+column-width bug, corrected by re-weighting the column ratios rather than re-disclosing the same
+Pass. (5) `@types/node` and `@types/pg` were added to `e2e/package.json`, pinned to the versions
+`server/package.json` already uses, and verified clean on a fresh `rm -rf node_modules && npm
+install`. Also disclosed, unprompted: `prisma/seed.ts`'s `upsertUser()` doesn't reset
+`passwordHash`/`mustChangePassword` on an update path, flagged as a possible follow-up issue rather
+than a release blocker.
+
+**Round 2** (submitted 2026-09-24, reviewing commit `dc7f892`) — the five round-1 findings accepted
+as addressed; one new finding, left as an inline comment on `StaffTicketQueueScreen.css`:
+
+> At 992px, this rule enables min-width: max-content for the filter row (about 967px, according to
+> the CSS comment), but .zen-app-shell__content is only 992px wide including its 24px desktop
+> gutters, leaving 944px for content before the controls panel's own padding. The filter row can
+> therefore exceed its available space, while body hides horizontal overflow. The current R-01
+> viewport checks at 390/820/1440px miss this 992px breakpoint. Please keep the filters wrapping
+> until they fit, or use a container-aware rule, and add assertions at 991px and 992px that all
+> five filters remain visible within the panel and the page has no horizontal overflow.
+
+**Response.** Accepted. The controls panel at 992px has 992 − 48 (gutters) − 2 (border) − 32
+(padding) = 910px available, less than the ~967px unwrapped filter row, so the single-line rule's
+old `min-width: 992px` breakpoint was moved up to **1080px** (fits from ~1049px; ~30px headroom);
+below it the filters wrap inside the panel. New R-02 cases at 991, 992, 1079 and 1080px assert all
+five filters stay visible and fully inside the controls panel with no document horizontal overflow;
+sabotage-checked against the old 992px rule (the 992px case fails, right edge 1008px vs. panel
+limit 968.5px; the other three pass). Full e2e re-run: 135/135; `tests.md` updated (R-02 row, e2e
+count 135).
+
+**Round 3** (submitted 2026-09-24, reviewing commit `3d4f32b`) — the 992px finding confirmed fixed;
+approved and merged. Reviewer's own words: "The 992px overflow finding is addressed: the
+single-line filter rule now starts at 1080px, and R-02 adds boundary coverage at 991, 992, 1079,
+and 1080px to keep all five filters inside the panel without document overflow. … I found no
+remaining issue in the requested change and approved it."
+
 ## 4. Corrections issued by the author
 
 No claim made to the reviewer during Lab 3 has needed retraction so far (unlike Lab 2's #32/#33/#44
-— see `docs/lab-02/reviewer.md` §4). This section will be updated if that changes on #74's own PR
-or the release PR.
+— see `docs/lab-02/reviewer.md` §4). This section will be updated if that changes on the release
+PR.
 
 ## 5. Direction of review
 
-Every Lab 3 pull request (#75–#82, and #74's PR and the release PR once opened) is authored by
+Every Lab 3 pull request (#75–#83, and the release PR once opened) is authored by
 `N0TAW00D` and reviewed by `Palapluem`. Review within Lab 3 therefore flows in one direction, the
 same as Lab 2 (see `docs/lab-02/reviewer.md` §5): this record holds the comments the author
 **received** and the author's **responses**, not comments given by the author on a teammate's PR.
