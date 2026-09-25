@@ -207,23 +207,27 @@
   }
 }
 
-/* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive", same convention as
-   the Requester screen's own grid. Columns re-weighted (1.6fr 1.6fr 1fr,
-   not an equal 3-way split): column 1 holds Ticket No. (the fixed-length
-   "TKT-YYYY-NNNNNN" value, 15 characters) and Requester; column 2 holds
-   Ticket Date, whose formatted value ("23 Sep 2026, 15:32") needs about as
-   much room as column 1 — measuring both values' actual rendered width
-   (not just character count) shows they're nearly equal, so column 1 and
-   column 2 get equal weight; column 3 (Category/Related System's short
-   words) stays narrower. An equal 3-way split, and an earlier 1.6fr/1.4fr
-   asymmetric split, both left column 2 a bit too narrow for real Ticket
-   Date values — `.zen-staff-detail__field-value`'s own ellipsis was firing
-   on ordinary, correct values, not unusually long ones. This also relies
-   on `.zen-staff-detail__layout`'s own 5fr/4fr split above giving this
-   column real width to divide up. */
+/* 2-up / 1-up per ui-spec.md §10 "Responsive" (V-10: "no clipping" wins
+   over matching the Requester screen's 3-up convention exactly). A 3-up
+   split (tried as 1.6fr/1.6fr/1fr, and before that an equal 3-way split)
+   always leaves a third column too narrow for this screen's real values:
+   `.zen-staff-detail__layout`'s 5fr/4fr split (above) gives the read-only
+   column at most ~578px even at the 1120px container cap, and a 3rd grid
+   column out of that never has room for the longest real Category
+   ("Account and Access") or Related System ("Grade Submission App") values
+   without truncating — not just in the 992-1024px range a 2-vs-3-column
+   swap at that breakpoint would fix, but all the way out to 1440px+, since
+   the container (and so this card) never grows past 1120px wide. Dropping
+   to 2 columns for the whole >=768px range (merging what used to be a
+   separate 991px tablet override into this base rule, since both now want
+   the same value) gives every field a full half-row instead: measured
+   against the longest real values from server/prisma/seed.ts (Ticket No.
+   "TKT-2026-000123", Ticket Date "25 Sep 2026, 11:56", Requester "Jennifer
+   Anderson", Category "Account and Access", Related System "Grade
+   Submission App"), none clip from 768px up. */
 .zen-staff-detail__grid {
   display: grid;
-  grid-template-columns: 1.6fr 1.6fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
   margin-bottom: var(--zen-space-group-gap);
 }
@@ -241,18 +245,12 @@
    `min-width` per control (above) means IT Priority + Current Status
    share a row while Ticket Owner drops to its own full-width row whenever
    there isn't genuinely enough space, at any viewport — not just at the
-   991px/767px breakpoints below (which now only need to keep governing
-   the read-only grid). */
+   767px breakpoint below (which now only needs to keep governing the
+   read-only grid's own 2-up-to-1-up collapse). */
 .zen-staff-detail__grid--operations {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-}
-
-@media (max-width: 991px) {
-  .zen-staff-detail__grid {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 @media (max-width: 767px) {
