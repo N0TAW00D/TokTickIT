@@ -263,7 +263,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0; /* lets the ellipsis rule below actually apply in a grid/flex item */
+  min-width: 0; /* lets the wrap rule below actually apply in a grid/flex item, instead of the item stretching the grid column to fit an unbroken value */
 }
 
 .zen-staff-detail__field--full {
@@ -277,20 +277,30 @@
 }
 
 /* Read-only presentation (ui-spec.md §5.3): same --zen-readonly-bg /
-   --zen-readonly-text look as a readonly input, but a plain <div>. */
+   --zen-readonly-text look as a readonly input, but a plain <div>.
+   `min-height` (not a fixed `height`) is only a floor for the common
+   short-value case — ui-spec.md V-10 requires no clipping for ANY value
+   length, so this must wrap rather than truncate once a value is longer
+   than the box, regardless of how long. Ellipsis truncation was previously
+   "fixed" by widening columns for the longest REAL seed values (80c310e,
+   bf735da), but that only holds for values up to that measured length —
+   `white-space: normal` + `overflow-wrap: anywhere` grows the box for any
+   value instead, so there is no longest-value ceiling to keep measuring
+   against. */
 .zen-staff-detail__field-value {
   box-sizing: border-box;
   min-height: var(--zen-control-height);
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 6px 12px;
   background: var(--zen-readonly-bg);
   color: var(--zen-readonly-text);
   border: 1px solid var(--zen-border);
   border-radius: var(--zen-radius-control);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .zen-staff-detail__field-value--badge {
