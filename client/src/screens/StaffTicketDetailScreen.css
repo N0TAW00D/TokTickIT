@@ -115,6 +115,33 @@
   min-width: 0;
 }
 
+/* Flex-wrap sizing for `.zen-staff-detail__grid--operations` below: each
+   control gets a `flex-basis`/`min-width` floor high enough that it never
+   renders squeezed thinner than its own content needs, and `flex-grow: 1`
+   so a control that wraps onto a row by itself still fills it instead of
+   sitting in a small box on the left (this is what fixes the Ticket Owner
+   select's own "tiny empty box" — its column previously had no floor of
+   its own at all). IT Priority's 220px covers the segmented control's
+   ~205px measured minimum (three buttons wide enough for "Low"/"Medium"/
+   "High") plus a margin; Ticket Owner's 220px covers the Claim button
+   (~72px) plus a select wide enough to show a real name, not just
+   "Unassigned"; Current Status is a single select with no comparably long
+   value, so it gets a smaller floor. */
+.zen-staff-detail__it-priority-control {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
+.zen-staff-detail__status-control {
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+
+.zen-staff-detail__owner-control {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
 /* Status transition conflict banner (ui-spec.md §10: "A rejected transition
    (409) renders the conflict state") — same look as TicketDetailScreen's
    own `.zen-ticket-detail__conflict-banner`, duplicated under this screen's
@@ -190,26 +217,34 @@
 }
 
 /* The Ticket Operations card reuses `.zen-staff-detail__grid` for its own,
-   differently-shaped row (IT Priority / Current Status / Ticket Owner)
-   rather than Ticket Information's two-row field grid — column 1 here
-   holds the three-segment IT Priority control (SegmentedControl.tsx),
-   which needs materially more room than any single text field to fit
-   "Medium"/"High" without clipping, so it gets its own, wider ratio
-   instead of inheriting the read-only grid's. */
+   differently-shaped row (IT Priority / Current Status / Ticket Owner),
+   but a fixed 3-up grid here can't win: the three-segment IT Priority
+   control (SegmentedControl.tsx) alone needs ~205px to render "Low" /
+   "Medium" / "High" without clipping, and the Ticket Owner column needs
+   room for both a name select and the Claim button — more combined width
+   than the Operations card comfortably offers at 992-1440px for all three
+   side by side. Rather than re-tune the fr ratios again (the previous fix
+   already tried that and just moved the clipping from IT Priority to
+   Ticket Owner), this lets the row wrap: `flex-wrap` plus a sane
+   `min-width` per control (above) means IT Priority + Current Status
+   share a row while Ticket Owner drops to its own full-width row whenever
+   there isn't genuinely enough space, at any viewport — not just at the
+   991px/767px breakpoints below (which now only need to keep governing
+   the read-only grid). */
 .zen-staff-detail__grid--operations {
-  grid-template-columns: 1.7fr 1fr 1.1fr;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 @media (max-width: 991px) {
-  .zen-staff-detail__grid,
-  .zen-staff-detail__grid--operations {
+  .zen-staff-detail__grid {
     grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 767px) {
-  .zen-staff-detail__grid,
-  .zen-staff-detail__grid--operations {
+  .zen-staff-detail__grid {
     grid-template-columns: 1fr;
   }
 }
