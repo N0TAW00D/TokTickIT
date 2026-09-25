@@ -201,7 +201,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | S-06 | S | V-07 | Private surface | `.thread--internal` uses `--zen-private-bg` and its border token | `client/tests/lab-03/ui-style.test.tsx` | Pass |
 | R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px; five filters fit inside the controls panel at 991/992/1079/1080 px (filter row single-line from 1080 px) | `e2e/lab-03/responsive.spec.ts` | Pass |
-| R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below; R-03b: every Ticket Information value fully readable (no truncation) at 991/992/1024/1080/1440 px, including a long Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-06 | R | — | Screenshots | All four required folders populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
@@ -298,7 +298,7 @@ were confirmed by personally inspecting all 12 committed screenshots in
 | V-07 | Internal Notes are unmistakably distinct from Public Comments — surface, border, heading, badge and composer all differ. | Pass — S-06; visually confirmed (the tan `Internal notes` panel with its "Private" badge sits below and is visually separate from the white `Comments` panel in the staff-ticket-detail screenshots). |
 | V-08 | Validation messages sit directly below their field, as in Lab 2. | Pass — S-05 |
 | V-09 | Focus is visible on every interactive element, including badges-as-links and the claim button. | Pass — R-05 |
-| V-10 | No clipping, no overlap, no hidden primary action. | Pass — R-01/R-02/R-03 assert no page-level overflow and no hidden primary action. Visual inspection during PR #83 review found a real clipping bug (Staff Ticket Detail's "Ticket No."/Requester read-only boxes, and IT Priority's "High" segment, too narrow for real values at desktop width) — fixed by re-weighting `.zen-staff-detail__grid`'s column ratios, then completed after PR #83 (Ticket Operations controls wrap; Ticket Date no longer truncated; screenshots re-captured); see §7 Known Limitations for the fix and the one remaining, deliberately-unfixed edge case (an artificially long E2E test-fixture display name still ellipsis-truncates, which is correct behavior for that edge case, not a defect). |
+| V-10 | No clipping, no overlap, no hidden primary action. | Pass — R-01/R-02/R-03 assert no page-level overflow and no hidden primary action. Visual inspection during PR #83 review found a real clipping bug (Staff Ticket Detail's "Ticket No."/Requester read-only boxes, and IT Priority's "High" segment, too narrow for real values at desktop width) — fixed by re-weighting `.zen-staff-detail__grid`'s column ratios, then completed in PR #84 (Ticket Operations controls wrap; Ticket Information fields 2-up; read-only values wrap instead of truncating). R-03b asserts each Ticket Information value is not truncated at 991/992/1024/1080/1440 px, including a 65-character Requester name; see §7 Known Limitations. |
 | V-11 | No horizontal page scroll at 320px, 768px, 992px and 1440px. | Pass — R-01 (measured at 390/820/1440, the project's own three-tier matrix per `tests.md` §1.5, which supersedes the handout's four raw breakpoints with the same three tiers used throughout Lab 2 and Lab 3). |
 | V-12 | Empty, no-results, forbidden, not-found, conflict and failure states each render distinctly. | Pass — proven at the component level by C-11 (queue states), C-15 (status conflict) and C-09/E2E-12 (forbidden state); the committed screenshots each show one representative loaded state rather than every state (screenshots are visual evidence of layout, not a state-coverage mechanism). |
 | V-13 | The "Unassigned" owner token is distinguishable from an assigned owner without colour. | Pass — C-10; visually confirmed in the staff-queue screenshots ("Unassigned" renders as literal text in the Owner column, distinct from an assigned owner's name, not colour-only). |
@@ -338,7 +338,7 @@ reconciliation pass were produced.
 | **Total** | **120** | **120** | `npm run test:all` |
 
 `npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 135/135 passing (lab-02 regression suite + all lab-03 specs). No test
+files). `npm run test:e2e`: 143/143 passing (lab-02 regression suite + all lab-03 specs). No test
 is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — every
 row in this document is now backed by a real, passing test written to the letter of its own claim;
 the full 120-test suite passes with no gap, matching Issue #74's own AC.
@@ -351,23 +351,25 @@ the full 120-test suite passes with no gap, matching Issue #74's own AC.
   not `it.skip`) if it is absent, so a missing fixture can never look like a pass.
 - Contrast ratios in `ui-spec.md` §2–§3 were computed at authoring time; S-03 asserts the palette
   values, not rendered contrast.
-- **V-10 (§4 checklist): fixed, with one remaining edge case.** Staff Ticket Detail's read-only
+- **V-10 (§4 checklist): fixed, no remaining clipping.** Staff Ticket Detail's read-only
   "Ticket No." and "Requester" boxes clipped a real, correctly-formatted `TKT-YYYY-NNNNNN` value at
   desktop width (a genuine layout bug, not test-fixture noise) — found during PR #83 review and
   fixed by re-weighting `.zen-staff-detail__grid`'s column ratios (`StaffTicketDetailScreen.css`).
   That first fix did NOT fully hold: the committed desktop screenshot still showed the IT Priority
   "High" segment clipped, the Ticket Date value truncated, and the Ticket Owner select squeezed to
   an empty box beside Claim. Fixed after PR #83 by letting the Ticket Operations controls wrap
-  (flex-wrap with per-control minimum widths) and widening the Ticket Information column that holds
-  Ticket Date; the three `staff-ticket-detail` screenshots were re-captured and re-inspected at
-  desktop, tablet and mobile width. Between roughly 992 and 1024 px (just above the two-column
-  breakpoint, not one of the three captured widths) two read-only Ticket Information values can
-  still ellipsis-truncate — pre-existing, not worsened, left as a known gap. One edge case remains, deliberately not chased further: the E2E fixture
-  Requester display name used by the `staff-ticket-detail` screenshot (`e2e/lab-03/
-  responsive.spec.ts`'s fixture, "E2E Plain Login Fixture (responsive-detail)") is longer than any
-  real production value would be, and still truncates with its own correct ellipsis — this is
-  `text-overflow: ellipsis` doing exactly what it's for on an artificially verbose test string, not
-  a defect a real user or a realistic seeded name (e.g. "Jennifer Anderson") would ever hit.
+  (flex-wrap with per-control minimum widths). PR #84 review then required the 992–1024 px range to
+  be fixed too; measuring with the longest real seed values ("Account and Access", "Grade Submission
+  App", "Jennifer Anderson") showed Ticket No., Ticket Date, Category and Related System truncating
+  between 992 and 1024 px, and Category/Related System at every desktop width up to 1440 px. Fixed by
+  making the Ticket Information field grid 2-up at all widths from 768 px (the page keeps its
+  two-column Information/Operations layout from 992 px), and by letting read-only values wrap
+  (`white-space: normal; overflow-wrap: anywhere`) instead of ellipsis-truncating, so a value of any
+  length — including the long E2E fixture Requester name in the screenshot — is fully readable.
+  Covered by R-03b (per-field `scrollWidth <= clientWidth`, full text, and value-inside-field
+  checks at 991/992/1024/1080/1440 px with realistic values, plus a 65-character Requester name at
+  992/1024/1440 px), sabotage-verified: reverting either CSS change fails R-03b on the specific
+  field and width. The three `staff-ticket-detail` screenshots were re-captured and re-inspected.
 - **The E2E database (`toktickit_e2e`) reset script did not truncate the `User` table** until this
   Issue: every Lab 3 E2E spec that creates a real, persisted User through the live UI/API (a login
   fixture, an admin-created account) left that row behind indefinitely, since `seed.ts` only
