@@ -52,10 +52,17 @@
    not touch the JSX order (JSX always renders read-only column first,
    which is also the source order screen readers/no-CSS agents get).
    Default (this rule, unguarded) is the desktop, >=992px layout; the
-   max-width overrides below match this file's own cascade convention. */
+   max-width overrides below match this file's own cascade convention.
+   Columns are 5fr/4fr rather than an equal split: the read-only column's
+   own `.zen-staff-detail__grid` needs real room for Ticket No./Ticket Date
+   (both ~164px of intrinsic content at a 3-up split, see that rule's own
+   comment) where the Operations card's controls now wrap onto their own
+   rows instead of needing to fit three fields side by side
+   (`.zen-staff-detail__grid--operations` below), so it can afford to give
+   up some width to the read-only column. */
 .zen-staff-detail__layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 5fr 4fr;
   grid-template-areas: "readonly operations";
   gap: var(--zen-space-section-gap);
   align-items: start;
@@ -201,17 +208,22 @@
 }
 
 /* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive", same convention as
-   the Requester screen's own grid. Columns re-weighted (1.6fr 1.4fr 1fr,
+   the Requester screen's own grid. Columns re-weighted (1.6fr 1.6fr 1fr,
    not an equal 3-way split): column 1 holds Ticket No. (the fixed-length
    "TKT-YYYY-NNNNNN" value, 15 characters) and Requester; column 2 holds
-   Ticket Date, whose formatted value ("23 Sep 2026, 15:32") is longer than
-   Category/Related System's short words in column 3. An equal split left
-   both column 1 and column 2 too narrow for their real values —
-   `.zen-staff-detail__field-value`'s own ellipsis was firing on ordinary,
-   correct values, not unusually long ones. */
+   Ticket Date, whose formatted value ("23 Sep 2026, 15:32") needs about as
+   much room as column 1 — measuring both values' actual rendered width
+   (not just character count) shows they're nearly equal, so column 1 and
+   column 2 get equal weight; column 3 (Category/Related System's short
+   words) stays narrower. An equal 3-way split, and an earlier 1.6fr/1.4fr
+   asymmetric split, both left column 2 a bit too narrow for real Ticket
+   Date values — `.zen-staff-detail__field-value`'s own ellipsis was firing
+   on ordinary, correct values, not unusually long ones. This also relies
+   on `.zen-staff-detail__layout`'s own 5fr/4fr split above giving this
+   column real width to divide up. */
 .zen-staff-detail__grid {
   display: grid;
-  grid-template-columns: 1.6fr 1.4fr 1fr;
+  grid-template-columns: 1.6fr 1.6fr 1fr;
   gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
   margin-bottom: var(--zen-space-group-gap);
 }
