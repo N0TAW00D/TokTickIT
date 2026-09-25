@@ -381,6 +381,33 @@ test.describe("R-03b: Ticket Information values are not truncated at 991-1440px 
     truncationTicketId = fixture.id;
   });
 
+  // Own ticket-number band, distinct from `TRUNCATION_FIXTURE_TICKET_NUMBER`
+  // ("TKT-2026-991010") and every other band in this file/staffFixtures.ts.
+  const LONG_VALUE_TICKET_NUMBER = "TKT-2026-991012";
+
+  // PR #84 review: the fixes above (80c310e, bf735da) only hold up to the
+  // longest REAL seed value they measured against — a value longer than
+  // that still clips. `createRequesterOwnedFixtureTicket` names its
+  // fixture Requester `E2E Plain Login Fixture (${discriminator})`
+  // (e2e/support/auth.ts's `createPlainLoginFixtureUser`), same helper
+  // already used for `DETAIL_TICKET_NUMBER` above — a longer discriminator
+  // here gives a 65-char Requester name, well past 40 and past the
+  // 45-char name that same helper produced for "responsive-detail" (the
+  // one visibly cut off in the committed 1440px screenshot before this
+  // fix), so this can't pass just because the value happens to still be
+  // short enough for the existing column widths.
+  let longRequesterTicketId: number;
+  let longRequesterName: string;
+
+  test.beforeAll(async () => {
+    const fixture = await createRequesterOwnedFixtureTicket(
+      "responsive-detail-long-value-regression",
+      LONG_VALUE_TICKET_NUMBER,
+    );
+    longRequesterTicketId = fixture.id;
+    longRequesterName = fixture.requester.name;
+  });
+
   // The five fields the reviewer named, each with its real, full expected
   // display value. Ticket Date is derived from the fixture's pinned
   // `createdAt` (04:56 UTC == 11:56 Asia/Bangkok) via the same
@@ -475,6 +502,73 @@ test.describe("R-03b: Ticket Information values are not truncated at 991-1440px 
           readonlyBox!.y + 1,
         );
       }
+    });
+  }
+
+  // PR #84 review: the checks above only prove the fix holds for the
+  // longest REAL seed values this file happens to measure against — they
+  // say nothing about a value longer than that. `.zen-staff-detail__field-
+  // value` must wrap ANY value instead of clipping it (StaffTicketDetail
+  // Screen.css), so this asserts the same no-truncation contract against
+  // `longRequesterTicketId`'s 65-char Requester name at the three widths
+  // PR #83's review flagged (992/1024, the 2-up column swap; 1440, the
+  // desktop cap) — not just that the value doesn't overflow internally
+  // (`scrollWidth <= clientWidth`), but that its full text is present (not
+  // silently swapped for something shorter) and that wrapping to extra
+  // lines actually grows the box rather than being clipped by some
+  // ancestor's own fixed height (the value element's bounding box stays
+  // within its `.zen-staff-detail__field` container's box).
+  const LONG_VALUE_WIDTHS = [992, 1024, 1440];
+
+  for (const width of LONG_VALUE_WIDTHS) {
+    test(`Requester value wraps rather than clipping at ${width}px (long value)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await loginAsSeededUser(page, IT_STAFF_EMAIL);
+      await page.goto(`/staff/tickets/${longRequesterTicketId}`);
+      await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+      const fieldValue = fieldValueByLabel(page, "Requester");
+
+      // The full, real value actually rendered — a value silently swapped
+      // for a shorter placeholder would also fail this.
+      await expect(fieldValue).toHaveText(longRequesterName);
+
+      // No internal clipping: an ellipsis/`overflow: hidden` box would
+      // still report `scrollWidth > clientWidth` even though the box
+      // itself never overflows the page.
+      const { scrollWidth, clientWidth } = await fieldValue.evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(
+        scrollWidth,
+        `Requester field is truncated at ${width}px with a long ` +
+          `(${longRequesterName.length}-char) value: scrollWidth ${scrollWidth}px > ` +
+          `clientWidth ${clientWidth}px (value "${longRequesterName}")`,
+      ).toBeLessThanOrEqual(clientWidth);
+
+      // Fully visible: the value's own rendered box (which may now be
+      // taller than one line) stays inside its field container's box,
+      // rather than a wrapped-but-clipped box that scrollWidth/clientWidth
+      // alone wouldn't catch.
+      const fieldValueBox = await fieldValue.boundingBox();
+      const fieldBox = await page
+        .locator(".zen-staff-detail__field")
+        .filter({ has: page.locator(".zen-staff-detail__field-label", { hasText: "Requester" }) })
+        .boundingBox();
+      expect(fieldValueBox, `Requester value has a box at ${width}px`).not.toBeNull();
+      expect(fieldBox, `Requester field has a box at ${width}px`).not.toBeNull();
+      expect(
+        fieldValueBox!.y,
+        `Requester value's top is clipped above its field box at ${width}px`,
+      ).toBeGreaterThanOrEqual(fieldBox!.y - 1);
+      expect(
+        fieldValueBox!.y + fieldValueBox!.height,
+        `Requester value's bottom is clipped below its field box at ${width}px ` +
+          `(the long value's wrapped box grew taller than its ancestor allows)`,
+      ).toBeLessThanOrEqual(fieldBox!.y + fieldBox!.height + 1);
     });
   }
 });
