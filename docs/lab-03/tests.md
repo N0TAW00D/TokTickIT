@@ -298,7 +298,7 @@ were confirmed by personally inspecting all 12 committed screenshots in
 | V-07 | Internal Notes are unmistakably distinct from Public Comments — surface, border, heading, badge and composer all differ. | Pass — S-06; visually confirmed (the tan `Internal notes` panel with its "Private" badge sits below and is visually separate from the white `Comments` panel in the staff-ticket-detail screenshots). |
 | V-08 | Validation messages sit directly below their field, as in Lab 2. | Pass — S-05 |
 | V-09 | Focus is visible on every interactive element, including badges-as-links and the claim button. | Pass — R-05 |
-| V-10 | No clipping, no overlap, no hidden primary action. | Pass — R-01/R-02/R-03 assert no page-level overflow and no hidden primary action. Visual inspection during PR #83 review found a real clipping bug (Staff Ticket Detail's "Ticket No."/Requester read-only boxes, and IT Priority's "High" segment, too narrow for real values at desktop width) — fixed by re-weighting `.zen-staff-detail__grid`'s column ratios; see §7 Known Limitations for the fix and the one remaining, deliberately-unfixed edge case (an artificially long E2E test-fixture display name still ellipsis-truncates, which is correct behavior for that edge case, not a defect). |
+| V-10 | No clipping, no overlap, no hidden primary action. | Pass — R-01/R-02/R-03 assert no page-level overflow and no hidden primary action. Visual inspection during PR #83 review found a real clipping bug (Staff Ticket Detail's "Ticket No."/Requester read-only boxes, and IT Priority's "High" segment, too narrow for real values at desktop width) — fixed by re-weighting `.zen-staff-detail__grid`'s column ratios, then completed after PR #83 (Ticket Operations controls wrap; Ticket Date no longer truncated; screenshots re-captured); see §7 Known Limitations for the fix and the one remaining, deliberately-unfixed edge case (an artificially long E2E test-fixture display name still ellipsis-truncates, which is correct behavior for that edge case, not a defect). |
 | V-11 | No horizontal page scroll at 320px, 768px, 992px and 1440px. | Pass — R-01 (measured at 390/820/1440, the project's own three-tier matrix per `tests.md` §1.5, which supersedes the handout's four raw breakpoints with the same three tiers used throughout Lab 2 and Lab 3). |
 | V-12 | Empty, no-results, forbidden, not-found, conflict and failure states each render distinctly. | Pass — proven at the component level by C-11 (queue states), C-15 (status conflict) and C-09/E2E-12 (forbidden state); the committed screenshots each show one representative loaded state rather than every state (screenshots are visual evidence of layout, not a state-coverage mechanism). |
 | V-13 | The "Unassigned" owner token is distinguishable from an assigned owner without colour. | Pass — C-10; visually confirmed in the staff-queue screenshots ("Unassigned" renders as literal text in the Owner column, distinct from an assigned owner's name, not colour-only). |
@@ -354,9 +354,15 @@ the full 120-test suite passes with no gap, matching Issue #74's own AC.
 - **V-10 (§4 checklist): fixed, with one remaining edge case.** Staff Ticket Detail's read-only
   "Ticket No." and "Requester" boxes clipped a real, correctly-formatted `TKT-YYYY-NNNNNN` value at
   desktop width (a genuine layout bug, not test-fixture noise) — found during PR #83 review and
-  fixed by re-weighting `.zen-staff-detail__grid`'s column ratios (`StaffTicketDetailScreen.css`),
-  which also fixed the IT Priority segmented control's "High" label clipping in the Ticket
-  Operations card. One edge case remains, deliberately not chased further: the E2E fixture
+  fixed by re-weighting `.zen-staff-detail__grid`'s column ratios (`StaffTicketDetailScreen.css`).
+  That first fix did NOT fully hold: the committed desktop screenshot still showed the IT Priority
+  "High" segment clipped, the Ticket Date value truncated, and the Ticket Owner select squeezed to
+  an empty box beside Claim. Fixed after PR #83 by letting the Ticket Operations controls wrap
+  (flex-wrap with per-control minimum widths) and widening the Ticket Information column that holds
+  Ticket Date; the three `staff-ticket-detail` screenshots were re-captured and re-inspected at
+  desktop, tablet and mobile width. Between roughly 992 and 1024 px (just above the two-column
+  breakpoint, not one of the three captured widths) two read-only Ticket Information values can
+  still ellipsis-truncate — pre-existing, not worsened, left as a known gap. One edge case remains, deliberately not chased further: the E2E fixture
   Requester display name used by the `staff-ticket-detail` screenshot (`e2e/lab-03/
   responsive.spec.ts`'s fixture, "E2E Plain Login Fixture (responsive-detail)") is longer than any
   real production value would be, and still truncates with its own correct ellipsis — this is
