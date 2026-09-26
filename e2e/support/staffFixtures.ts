@@ -278,6 +278,110 @@ export async function createRequesterOwnedFixtureTicket(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Truncation-regression fixture ticket (R-03b, PR #83/#84 review)
+// ---------------------------------------------------------------------------
+//
+// StaffTicketDetailScreen.css's `.zen-staff-detail__grid` comment (commit
+// 80c310e) cites the longest REAL field values from this same seed.ts
+// reference data as the ones a 2-up split must not truncate: Category
+// "Account and Access", Related System "Grade Submission App", requester
+// "Jennifer Anderson". No row in SEED_TICKETS actually pairs "Account and
+// Access" with "Grade Submission App" on the same ticket (TKT-2026-900001
+// pairs "Account and Access" with the shorter "Email"; TKT-2026-900003
+// pairs "Grade Submission App" with the shorter "Software"), so this
+// fixture constructs that exact combination directly rather than picking
+// an existing row chosen merely because a test would pass against it.
+
+/**
+ * Own ticket-number band — distinct from `DETAIL_TICKET_NUMBER`
+ * ("TKT-2026-991000") and the "TKT-2026-991001"/"991002" fixtures in
+ * staff-ticket-flow.spec.ts, and from both bands already defined in this
+ * file, so it can never collide with any of them.
+ */
+export const TRUNCATION_FIXTURE_TICKET_NUMBER = "TKT-2026-991010";
+
+export interface TruncationRegressionFixtureTicket {
+  id: number;
+  ticketNumber: string;
+}
+
+/**
+ * Creates (or replaces) one fixture Ticket, owned by the real seeded
+ * Requester "Jennifer Anderson" (jennifer.anderson@example.edu), with
+ * Category "Account and Access" and Related System "Grade Submission App"
+ * — the longest real values `.zen-staff-detail__grid`'s own comment cites.
+ * `createdAt` is pinned to a fixed instant (04:56 UTC = 11:56
+ * Asia/Bangkok, BR-04/A-11) so the Ticket Date field's rendered value is
+ * deterministic ("25 Sep 2026, 11:56" via `formatDateTimeWithYear`,
+ * `client/src/tickets/formatDateTime.ts`) — a raw SQL insert must set it
+ * explicitly since "createdAt" has no DB-level default beyond Prisma's own
+ * `@default(now())` (see `createPaginationFixtureTickets`'s identical note
+ * on "updatedAt" above). Idempotent: deletes any previous run's row (by
+ * ticket number) before inserting, same convention as every other fixture
+ * helper in this file.
+ */
+export async function createTruncationRegressionFixtureTicket(): Promise<TruncationRegressionFixtureTicket> {
+  const client = new Client({ connectionString: loadE2eDatabaseUrl() });
+  await client.connect();
+  try {
+    const requester = await client.query<{ id: number }>(
+      'SELECT id FROM "User" WHERE lower(email) = lower($1)',
+      ["jennifer.anderson@example.edu"],
+    );
+    const category = await client.query<{ id: number }>(
+      'SELECT id FROM "Category" WHERE name = $1',
+      ["Account and Access"],
+    );
+    const relatedSystem = await client.query<{ id: number }>(
+      'SELECT id FROM "RelatedSystem" WHERE name = $1',
+      ["Grade Submission App"],
+    );
+    if (
+      requester.rowCount === 0 ||
+      category.rowCount === 0 ||
+      relatedSystem.rowCount === 0
+    ) {
+      throw new Error(
+        "Seed rows this truncation-regression fixture depends on are " +
+          "missing — run `npm --prefix e2e run db:e2e:reset` before this spec.",
+      );
+    }
+
+    await client.query('DELETE FROM "Ticket" WHERE "ticketNumber" = $1', [
+      TRUNCATION_FIXTURE_TICKET_NUMBER,
+    ]);
+
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO "Ticket"
+         ("ticketNumber", "requesterId", "categoryId", "relatedSystemId",
+          summary, description, "requestedPriority", "itPriority", status,
+          "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, 'MEDIUM'::"Priority", 'MEDIUM'::"Priority",
+               'OPEN'::"TicketStatus", $7, NOW())
+       RETURNING id`,
+      [
+        TRUNCATION_FIXTURE_TICKET_NUMBER,
+        requester.rows[0].id,
+        category.rows[0].id,
+        relatedSystem.rows[0].id,
+        "E2E Ticket Information truncation regression fixture (R-03b)",
+        "Fixture ticket inserted so R-03b can assert the longest real " +
+          "Category/Related System values never truncate in the desktop " +
+          "two-column layout.",
+        "2026-09-25T04:56:00.000Z",
+      ],
+    );
+
+    return {
+      id: inserted.rows[0].id,
+      ticketNumber: TRUNCATION_FIXTURE_TICKET_NUMBER,
+    };
+  } finally {
+    await client.end();
+  }
+}
+
 export interface PreExistingAttachmentFixture {
   id: number;
   originalFilename: string;

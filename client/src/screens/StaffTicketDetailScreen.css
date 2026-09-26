@@ -52,10 +52,17 @@
    not touch the JSX order (JSX always renders read-only column first,
    which is also the source order screen readers/no-CSS agents get).
    Default (this rule, unguarded) is the desktop, >=992px layout; the
-   max-width overrides below match this file's own cascade convention. */
+   max-width overrides below match this file's own cascade convention.
+   Columns are 5fr/4fr rather than an equal split: the read-only column's
+   own `.zen-staff-detail__grid` needs real room for Ticket No./Ticket Date
+   (both ~164px of intrinsic content at a 3-up split, see that rule's own
+   comment) where the Operations card's controls now wrap onto their own
+   rows instead of needing to fit three fields side by side
+   (`.zen-staff-detail__grid--operations` below), so it can afford to give
+   up some width to the read-only column. */
 .zen-staff-detail__layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 5fr 4fr;
   grid-template-areas: "readonly operations";
   gap: var(--zen-space-section-gap);
   align-items: start;
@@ -113,6 +120,33 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+/* Flex-wrap sizing for `.zen-staff-detail__grid--operations` below: each
+   control gets a `flex-basis`/`min-width` floor high enough that it never
+   renders squeezed thinner than its own content needs, and `flex-grow: 1`
+   so a control that wraps onto a row by itself still fills it instead of
+   sitting in a small box on the left (this is what fixes the Ticket Owner
+   select's own "tiny empty box" — its column previously had no floor of
+   its own at all). IT Priority's 220px covers the segmented control's
+   ~205px measured minimum (three buttons wide enough for "Low"/"Medium"/
+   "High") plus a margin; Ticket Owner's 220px covers the Claim button
+   (~72px) plus a select wide enough to show a real name, not just
+   "Unassigned"; Current Status is a single select with no comparably long
+   value, so it gets a smaller floor. */
+.zen-staff-detail__it-priority-control {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
+.zen-staff-detail__status-control {
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+
+.zen-staff-detail__owner-control {
+  flex: 1 1 220px;
+  min-width: 220px;
 }
 
 /* Status transition conflict banner (ui-spec.md §10: "A rejected transition
@@ -173,43 +207,54 @@
   }
 }
 
-/* 3-up / 2-up / 1-up per ui-spec.md §10 "Responsive", same convention as
-   the Requester screen's own grid. Columns re-weighted (1.6fr 1.4fr 1fr,
-   not an equal 3-way split): column 1 holds Ticket No. (the fixed-length
-   "TKT-YYYY-NNNNNN" value, 15 characters) and Requester; column 2 holds
-   Ticket Date, whose formatted value ("23 Sep 2026, 15:32") is longer than
-   Category/Related System's short words in column 3. An equal split left
-   both column 1 and column 2 too narrow for their real values —
-   `.zen-staff-detail__field-value`'s own ellipsis was firing on ordinary,
-   correct values, not unusually long ones. */
+/* 2-up / 1-up per ui-spec.md §10 "Responsive" (V-10: "no clipping" wins
+   over matching the Requester screen's 3-up convention exactly). A 3-up
+   split (tried as 1.6fr/1.6fr/1fr, and before that an equal 3-way split)
+   always leaves a third column too narrow for this screen's real values:
+   `.zen-staff-detail__layout`'s 5fr/4fr split (above) gives the read-only
+   column at most ~578px even at the 1120px container cap, and a 3rd grid
+   column out of that never has room for the longest real Category
+   ("Account and Access") or Related System ("Grade Submission App") values
+   without truncating — not just in the 992-1024px range a 2-vs-3-column
+   swap at that breakpoint would fix, but all the way out to 1440px+, since
+   the container (and so this card) never grows past 1120px wide. Dropping
+   to 2 columns for the whole >=768px range (merging what used to be a
+   separate 991px tablet override into this base rule, since both now want
+   the same value) gives every field a full half-row instead: measured
+   against the longest real values from server/prisma/seed.ts (Ticket No.
+   "TKT-2026-000123", Ticket Date "25 Sep 2026, 11:56", Requester "Jennifer
+   Anderson", Category "Account and Access", Related System "Grade
+   Submission App"), none clip from 768px up. */
 .zen-staff-detail__grid {
   display: grid;
-  grid-template-columns: 1.6fr 1.4fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--zen-space-field-gap) var(--zen-space-group-gap);
   margin-bottom: var(--zen-space-group-gap);
 }
 
 /* The Ticket Operations card reuses `.zen-staff-detail__grid` for its own,
-   differently-shaped row (IT Priority / Current Status / Ticket Owner)
-   rather than Ticket Information's two-row field grid — column 1 here
-   holds the three-segment IT Priority control (SegmentedControl.tsx),
-   which needs materially more room than any single text field to fit
-   "Medium"/"High" without clipping, so it gets its own, wider ratio
-   instead of inheriting the read-only grid's. */
+   differently-shaped row (IT Priority / Current Status / Ticket Owner),
+   but a fixed 3-up grid here can't win: the three-segment IT Priority
+   control (SegmentedControl.tsx) alone needs ~205px to render "Low" /
+   "Medium" / "High" without clipping, and the Ticket Owner column needs
+   room for both a name select and the Claim button — more combined width
+   than the Operations card comfortably offers at 992-1440px for all three
+   side by side. Rather than re-tune the fr ratios again (the previous fix
+   already tried that and just moved the clipping from IT Priority to
+   Ticket Owner), this lets the row wrap: `flex-wrap` plus a sane
+   `min-width` per control (above) means IT Priority + Current Status
+   share a row while Ticket Owner drops to its own full-width row whenever
+   there isn't genuinely enough space, at any viewport — not just at the
+   767px breakpoint below (which now only needs to keep governing the
+   read-only grid's own 2-up-to-1-up collapse). */
 .zen-staff-detail__grid--operations {
-  grid-template-columns: 1.7fr 1fr 1.1fr;
-}
-
-@media (max-width: 991px) {
-  .zen-staff-detail__grid,
-  .zen-staff-detail__grid--operations {
-    grid-template-columns: 1fr 1fr;
-  }
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 @media (max-width: 767px) {
-  .zen-staff-detail__grid,
-  .zen-staff-detail__grid--operations {
+  .zen-staff-detail__grid {
     grid-template-columns: 1fr;
   }
 }
@@ -218,7 +263,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0; /* lets the ellipsis rule below actually apply in a grid/flex item */
+  min-width: 0; /* lets the wrap rule below actually apply in a grid/flex item, instead of the item stretching the grid column to fit an unbroken value */
 }
 
 .zen-staff-detail__field--full {
@@ -232,20 +277,30 @@
 }
 
 /* Read-only presentation (ui-spec.md §5.3): same --zen-readonly-bg /
-   --zen-readonly-text look as a readonly input, but a plain <div>. */
+   --zen-readonly-text look as a readonly input, but a plain <div>.
+   `min-height` (not a fixed `height`) is only a floor for the common
+   short-value case — ui-spec.md V-10 requires no clipping for ANY value
+   length, so this must wrap rather than truncate once a value is longer
+   than the box, regardless of how long. Ellipsis truncation was previously
+   "fixed" by widening columns for the longest REAL seed values (80c310e,
+   bf735da), but that only holds for values up to that measured length —
+   `white-space: normal` + `overflow-wrap: anywhere` grows the box for any
+   value instead, so there is no longest-value ceiling to keep measuring
+   against. */
 .zen-staff-detail__field-value {
   box-sizing: border-box;
   min-height: var(--zen-control-height);
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 6px 12px;
   background: var(--zen-readonly-bg);
   color: var(--zen-readonly-text);
   border: 1px solid var(--zen-border);
   border-radius: var(--zen-radius-control);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .zen-staff-detail__field-value--badge {
