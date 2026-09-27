@@ -204,6 +204,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px; five filters fit inside the controls panel at 991/992/1079/1080 px (filter row single-line from 1080 px) | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below; R-03b: every Ticket Information value fully readable (no truncation) at 991/992/1024/1080/1440 px, including a long Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-03c | R | V-10 | Requester Ticket Detail truncation | Every read-only field (Ticket No., Ticket Date, Category, Requester, Related System, Ticket Owner) fully readable (no truncation) at 390/820/992/1024/1440 px, including a 44-character Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-06 | R | — | Screenshots | All seven required folders (Login, Change Password, Requester Ticket Detail, IT Staff Ticket Queue, IT Staff Ticket Detail, Administrator User Management, forbidden) populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
@@ -373,17 +374,22 @@ reconciliation pass were produced.
 | Migration / regression | 8 | 8 | `npm run test:server` |
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
-| Responsive | 6 | 6 | `npm run test:e2e` |
+| Responsive | 7 | 7 | `npm run test:e2e` |
 | E2E | 12 | 12 | `npm run test:e2e` |
 | Accessibility | 9 | 9 | `npm run test:e2e` |
-| **Total** | **129** | **129** | `npm run test:all` |
+| **Total** | **130** | **130** | `npm run test:all` |
 
 `npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 154/154 passing (lab-02 regression suite + all lab-03 specs, including
+files). `npm run test:e2e`: 186/186 passing (lab-02 regression suite + all lab-03 specs, including
 the 11 individual `test()` cases the 9 planned accessibility IDs above expand into — A-05 and A-07
-each cover a desktop and a 390px-mobile pass). No test is skipped, disabled or marked `.only`
+each cover a desktop and a 390px-mobile pass). The 186 total is well above what the 7 Responsive +
+12 E2E + 9 Accessibility planned IDs alone would suggest because most of those IDs expand into many
+individual `test()` cases (one per screen × viewport, or per width) — Issue #74's own
+screenshot-evidence work added three more screens (Change Password, Requester Ticket Detail,
+forbidden) to R-01/R-05/R-06's existing per-screen loops, and R-03c adds its own five per-width
+cases. No test is skipped, disabled or marked `.only`
 anywhere in the repository (`specification.md` §10.1) — every row in this document is now backed by
-a real, passing test written to the letter of its own claim; the full 129-test suite passes with no
+a real, passing test written to the letter of its own claim; the full 130-test suite passes with no
 gap, matching Issue #74's own AC.
 
 ## 7. Known Limitations
@@ -413,6 +419,18 @@ gap, matching Issue #74's own AC.
   checks at 991/992/1024/1080/1440 px with realistic values, plus a 65-character Requester name at
   992/1024/1440 px), sabotage-verified: reverting either CSS change fails R-03b on the specific
   field and width. The three `staff-ticket-detail` screenshots were re-captured and re-inspected.
+  A second, distinct instance of the same underlying bug was found during Issue #74's own
+  screenshot-evidence dispatch: the Requester Ticket Detail screen's `.zen-ticket-detail__field-value`
+  also used ellipsis truncation, but `text-overflow: ellipsis` never actually applies to a flex
+  container's bare text content — so a long value (e.g. a long Requester name) was silently
+  hard-clipped mid-character with no ellipsis rendered at all, worse than the Staff screen's bug
+  above (which at least showed a too-narrow box). Fixed the same way: `.zen-ticket-detail__field-value`
+  switched from `white-space: nowrap; text-overflow: ellipsis; overflow: hidden` to `white-space:
+  normal; overflow-wrap: anywhere; overflow: visible`, matching `.zen-staff-detail__field-value`'s own
+  fix. Covered by R-03c (the same per-field `scrollWidth <= clientWidth` + full-text technique as
+  R-03b, at 390/820/992/1024/1440 px against the `requester-ticket-detail` fixture's own 44-character
+  Requester name), sabotage-verified: reverting the CSS change fails R-03c on the Requester field at
+  every width. The three `requester-ticket-detail` screenshots were re-captured and re-inspected.
 - **The E2E database (`toktickit_e2e`) reset script did not truncate the `User` table** until this
   Issue: every Lab 3 E2E spec that creates a real, persisted User through the live UI/API (a login
   fixture, an admin-created account) left that row behind indefinitely, since `seed.ts` only
