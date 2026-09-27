@@ -1,5 +1,5 @@
 {
-  "endpoint": "GET /api/tickets/17/notes",
+  "endpoint": "GET /api/tickets/55/notes",
   "unauthenticated": {
     "status": 401,
     "body": {
