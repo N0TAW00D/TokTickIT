@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /api/tickets/17/notes",
+  "unauthenticated": {
+    "status": 401,
+    "body": {
+      "error": "UNAUTHENTICATED",
+      "message": "Sign in to continue."
+    }
+  },
+  "requester": {
+    "status": 404,
+    "body": {
+      "error": "NOT_FOUND",
+      "message": "Ticket not found."
+    }
+  }
+}
