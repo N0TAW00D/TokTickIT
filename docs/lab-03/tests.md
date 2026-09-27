@@ -21,13 +21,15 @@ Issue #74.
 | UI style (S) | Vitest + Testing Library, asserting tokens and classes | `client/tests/lab-03/ui-style.test.tsx` |
 | Responsive (R) | Playwright at three viewports | `e2e/lab-03/responsive.spec.ts` |
 | End-to-end (E) | Playwright, real server + client + DB | `e2e/lab-03/*.spec.ts` |
+| Accessibility (A11Y) | Playwright + `axe-core` (`@axe-core/playwright`), real server + client + DB | `e2e/lab-03/accessibility.spec.ts` |
 
 Files beyond the handout §12 minimum — `password.test.ts`, `ticket-status.api.test.ts`,
 `staff-queue.api.test.ts`, `ticket-owner.api.test.ts`, `ticket-it-priority.api.test.ts`,
 `ticket-notes.api.test.ts`, `ticket-detail-staff.api.test.ts`, `attachment-download-staff.api.test.ts`,
 `staff-assignable-users.api.test.ts`, `comment-validation.test.ts`, `comments-notes.api.test.ts`,
 `migration.test.ts`, `UserBadge.test.tsx`, `ui-style.test.tsx`, `responsive.spec.ts`,
-`adminFixtures.ts`, `staffFixtures.ts` — are additions, not substitutions; every §12 path exists.
+`adminFixtures.ts`, `staffFixtures.ts`, `accessibility.spec.ts` — are additions, not substitutions;
+every §12 path exists.
 (This list reflects the actual final file layout, consolidated differently than the up-front plan
 in a few places — see §7 Known Limitations.)
 
@@ -223,6 +225,43 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | E2E-11 | E | AC-53, AC-54 | Admin safety rails | Self-deactivation and last-active-Administrator are both refused in the UI | `e2e/lab-03/user-administration.spec.ts` | Pass |
 | E2E-12 | E | AC-55 | Forbidden admin access | A Requester navigating to `/admin/users` sees the forbidden state | `e2e/lab-03/user-administration.spec.ts` | Pass |
 
+### 2.10 Accessibility
+
+Added in Issue #74: before this, no test in the repository ran an actual accessibility-rule-engine
+scan against a rendered screen — S-01…S-06 assert token/class discipline in jsdom, and R-05 asserts
+focus-ring *visibility* only, neither of which exercises `axe-core`'s WCAG ruleset. Each row runs an
+`AxeBuilder` scan (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` tags) against the real rendered DOM and
+asserts zero violations of impact `serious` or `critical`; on failure the assertion message lists each
+failing rule's id, impact and target selector(s). This is the automated floor AC-56's "the `ui-spec.md`
+visual checklist passes for ... focus" and `specification.md` §6's "Lab 3 reuses ... the accessibility
+expectations established in Lab 2" (`ui-spec.md` §13, which re-states Lab 2 `ui-spec.md` §12's
+label/landmark/contrast/focus rules) ask for — not a replacement for R-04/R-05's manual-pattern
+keyboard/reflow checks, which axe's automated ruleset cannot express.
+
+| ID | T | AC | What it tests | Expected result | File | Status |
+|---|---|---|---|---|---|---|
+| A-01 | A11Y | AC-56 | Login screen | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-02 | A11Y | AC-56, AC-02 | Change Password, forced | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-03 | A11Y | AC-56 | Requester My Tickets | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-04 | A11Y | AC-56, AC-21, AC-42 | Requester Ticket Detail, with a posted Public Comment | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-05 | A11Y | AC-56 | IT Staff Ticket Queue, desktop and 390px mobile | Zero `serious`/`critical` axe violations at both widths | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-06 | A11Y | AC-56, AC-41, AC-42 | IT Staff Ticket Detail, with a populated Internal Notes panel | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-07 | A11Y | AC-56 | Administrator User Management list, desktop and 390px mobile | Zero `serious`/`critical` axe violations at both widths | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-08 | A11Y | AC-56 | Administrator User Management, Create User dialog open | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-09 | A11Y | AC-18, AC-56 | Forbidden screen (a Requester visiting an Administrator route) | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+
+A-04 and A-06 found one real, reproducible finding during authoring — not a rule exclusion, a genuine
+transient defect this dispatch tracked down and fixed at its root: `MessageThread`'s submit button
+(`Button.css`'s `.zen-btn`, 150ms `background-color`/`color` transition) briefly toggles disabled
+(`--zen-readonly-bg`/`--zen-text-muted`) then re-enabled (`--zen-primary`/white) around its
+`postEntry(...)` call. Both end states independently clear WCAG AA contrast, but a scan landing mid-
+transition samples a blended, low-contrast frame (axe reported `#a1aaa5` on `#89b9a4`, ~1.08:1) that
+neither real state ever produces — reproduced consistently, root-caused via `getComputedStyle`
+inspection of the exact button mid-scan, and fixed by waiting for the button's background-color to
+settle back to `--zen-primary` before scanning (`waitForPrimaryButtonSettled`,
+`e2e/lab-03/accessibility.spec.ts`), not by excluding the `color-contrast` rule or the button. No
+client-side change was needed or made — the defect was in the test's own timing, not the shipped UI.
+
 ---
 
 ## 3. Acceptance-Criterion Traceability
@@ -232,12 +271,12 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC | Tests | AC | Tests |
 |---|---|---|---|
 | AC-01 | API-01, E2E-01 | AC-36 | API-27 |
-| AC-02 | API-12, API-16, C-04, E2E-02 | AC-37 | API-28, E2E-06 |
+| AC-02 | API-12, API-16, C-04, E2E-02, A-02 | AC-37 | API-28, E2E-06 |
 | AC-03 | SEC-03 | AC-38 | UNIT-04, API-29, E2E-06 |
 | AC-04 | SEC-05 | AC-39 | UNIT-05, API-30, C-14 |
 | AC-05 | API-02, C-02, E2E-01, E2E-03 | AC-40 | UNIT-06, API-31 |
-| AC-06 | C-01 | AC-41 | API-37, E2E-07 |
-| AC-07 | UNIT-02, API-13, C-06 | AC-42 | C-13, E2E-07 |
+| AC-06 | C-01 | AC-41 | API-37, E2E-07, A-06 |
+| AC-07 | UNIT-02, API-13, C-06 | AC-42 | C-13, E2E-07, A-04, A-06 |
 | AC-08 | UNIT-03, API-13, C-06 | AC-43 | API-32, E2E-08 |
 | AC-09 | API-12, E2E-02 | AC-44 | API-33, E2E-08 |
 | AC-10 | API-07, E2E-04 | AC-45 | API-41, C-16 |
@@ -248,10 +287,10 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-15 | SEC-02 | AC-50 | API-46 |
 | AC-16 | SEC-04 | AC-51 | API-47, E2E-09 |
 | AC-17 | C-07 | AC-52 | API-48, E2E-10 |
-| AC-18 | C-09 | AC-53 | API-49, C-17, E2E-11 |
+| AC-18 | C-09, A-09 | AC-53 | API-49, C-17, E2E-11 |
 | AC-19 | MIG-01, MIG-07 | AC-54 | API-50, C-18, E2E-11 |
 | AC-20 | MIG-08 | AC-55 | SEC-09, E2E-12 |
-| AC-21 | API-34, E2E-07 | AC-56 | R-01 |
+| AC-21 | API-34, E2E-07, A-04 | AC-56 | R-01, A-01…A-09 |
 | AC-22 | UNIT-11, API-35 | AC-57 | SEC-08 |
 | AC-23 | UNIT-11, API-35 | AC-58 | MIG-06 |
 | AC-24 | API-39, E2E-08 | AC-59 | API-09 |
@@ -274,8 +313,9 @@ C-03/08/12/15, S-01…S-06 (V-01…V-08) and R-02…R-06 (V-09…V-14). They are
 every one of them is cited from the rule or checklist row it serves.
 
 **Totals:** 11 unit, 50 API (16 auth + 24 operations + 10 admin), 9 security/authorization,
-8 migration/regression, 18 UI component, 6 UI style, 6 responsive, 12 E2E — **120 planned tests**
-covering all 70 acceptance criteria across the eight levels handout §10 requires.
+8 migration/regression, 18 UI component, 6 UI style, 6 responsive, 12 E2E, 9 accessibility —
+**129 planned tests** covering all 70 acceptance criteria across the eight levels handout §10
+requires, plus a ninth (accessibility) level added in Issue #74.
 
 ---
 
@@ -335,13 +375,16 @@ reconciliation pass were produced.
 | UI style | 6 | 6 | `npm run test:client` |
 | Responsive | 6 | 6 | `npm run test:e2e` |
 | E2E | 12 | 12 | `npm run test:e2e` |
-| **Total** | **120** | **120** | `npm run test:all` |
+| Accessibility | 9 | 9 | `npm run test:e2e` |
+| **Total** | **129** | **129** | `npm run test:all` |
 
 `npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 143/143 passing (lab-02 regression suite + all lab-03 specs). No test
-is skipped, disabled or marked `.only` anywhere in the repository (`specification.md` §10.1) — every
-row in this document is now backed by a real, passing test written to the letter of its own claim;
-the full 120-test suite passes with no gap, matching Issue #74's own AC.
+files). `npm run test:e2e`: 154/154 passing (lab-02 regression suite + all lab-03 specs, including
+the 11 individual `test()` cases the 9 planned accessibility IDs above expand into — A-05 and A-07
+each cover a desktop and a 390px-mobile pass). No test is skipped, disabled or marked `.only`
+anywhere in the repository (`specification.md` §10.1) — every row in this document is now backed by
+a real, passing test written to the letter of its own claim; the full 129-test suite passes with no
+gap, matching Issue #74's own AC.
 
 ## 7. Known Limitations
 
