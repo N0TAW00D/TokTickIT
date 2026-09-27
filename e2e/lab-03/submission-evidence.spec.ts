@@ -1,15 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import dotenv from "dotenv";
-import { Client } from "pg";
-import {
-  expect,
-  request as playwrightRequest,
-  test,
-  type Browser,
-  type Page,
-} from "@playwright/test";
+import { expect, request as playwrightRequest, test } from "@playwright/test";
 import {
   LOCAL_DEV_PASSWORD,
   SAFE_LOGIN_FAILURE_MESSAGE,
@@ -19,6 +11,7 @@ import {
   loginAsSeededUser,
 } from "../support/auth.js";
 import {
+  PAGINATION_FIXTURE_TICKET_NUMBERS,
   createPaginationFixtureTickets,
   createRequesterOwnedFixtureTicket,
   seedPreExistingAttachment,
@@ -252,6 +245,19 @@ test.describe("Part 5 — Login (EV-01)", () => {
 
 const QUEUE_TABLE_ROWS = "table.zen-staff-queue__table tbody tr";
 
+// Two of this spec's OWN pagination-fixture tickets (freshly re-created by
+// `createPaginationFixtureTickets()` in this describe's `beforeAll` on every
+// run), used for the assigned/unassigned evidence below instead of a
+// seed.ts ticket. A seed.ts ticket's status/owner is mutable global state:
+// staff-ticket-flow.spec.ts's E2E-06 permanently claims and moves
+// TKT-2026-900001 out of NEW, so when the full `npm run test:e2e` suite
+// runs that file before this one (alphabetical order), assertions keyed to
+// that ticket's seed-time state broke. These two ticket numbers are
+// guaranteed NEW/unassigned immediately after this file's own `beforeAll`
+// runs, regardless of what any earlier spec file did to seed.ts's rows.
+const UNASSIGNED_FIXTURE_TICKET_NUMBER = PAGINATION_FIXTURE_TICKET_NUMBERS[0];
+const ASSIGNED_FIXTURE_TICKET_NUMBER = PAGINATION_FIXTURE_TICKET_NUMBERS[1];
+
 test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
   test.beforeAll(async () => {
     // Same fixture staff-ticket-flow.spec.ts's E2E-05 uses: 8 seed.ts
@@ -265,6 +271,36 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
   }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsSeededUser(page, IT_STAFF_EMAIL);
+
+    // Assign ONE of this spec's own fixture tickets via the real API,
+    // reusing the session `page` just authenticated with — real state
+    // change through the real `PATCH /api/tickets/:id/owner` endpoint, not
+    // a direct DB write, so this is still genuine app behaviour, just
+    // scoped to a ticket only this spec owns (see the constants' comment
+    // above for why a seed.ts ticket's ownership can no longer be relied
+    // on here).
+    const staffApi = await playwrightRequest.newContext({
+      baseURL: SERVER_URL,
+      storageState: await page.context().storageState(),
+    });
+    const me: { id: number } = await (await staffApi.get("/api/auth/me")).json();
+    const searchResult: { items: Array<{ id: number }> } = await (
+      await staffApi.get(
+        `/api/staff/tickets?search=${encodeURIComponent(ASSIGNED_FIXTURE_TICKET_NUMBER)}`,
+      )
+    ).json();
+    const assignedTicketId = searchResult.items[0]?.id;
+    if (!assignedTicketId) {
+      throw new Error(
+        `Fixture ticket ${ASSIGNED_FIXTURE_TICKET_NUMBER} was not found via GET /api/staff/tickets.`,
+      );
+    }
+    const patchResponse = await staffApi.patch(`/api/tickets/${assignedTicketId}/owner`, {
+      data: { ownerId: me.id },
+    });
+    expect(patchResponse.status()).toBe(200);
+    await staffApi.dispose();
+
     await page.goto("/staff/tickets");
     await expect(page.getByRole("heading", { name: "Ticket Queue" })).toBeVisible();
 
@@ -272,11 +308,11 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
     await expect(rows).toHaveCount(13);
 
     // AC-32: unassigned vs. assigned owner token, without relying on colour.
-    const unassignedRow = rows.filter({ hasText: "TKT-2026-900001" });
+    const unassignedRow = rows.filter({ hasText: UNASSIGNED_FIXTURE_TICKET_NUMBER });
     await expect(unassignedRow.locator('[data-owner="unassigned"]')).toContainText(
       "Unassigned",
     );
-    const assignedRow = rows.filter({ hasText: "TKT-2026-900003" });
+    const assignedRow = rows.filter({ hasText: ASSIGNED_FIXTURE_TICKET_NUMBER });
     await expect(assignedRow.locator('[data-owner="assigned"]')).toContainText(
       "Priya Natarajan",
     );
@@ -314,16 +350,24 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
     await page.setViewportSize(DESKTOP);
     await loginAsSeededUser(page, IT_STAFF_EMAIL);
     await page.goto("/staff/tickets");
-    await page.locator("#my-tickets-page-size").selectOption("10");
     const rows = page.locator(QUEUE_TABLE_ROWS);
-    await expect(rows).toHaveCount(10);
+    await expect(rows).toHaveCount(13);
 
-    // Status = New: the one seeded NEW ticket (900001) plus the 5 fixture
-    // tickets (also NEW) = 6.
+    // Scoped to this spec's own pagination-fixture tickets via a search
+    // marker unique to them, combined with Status = New, rather than an
+    // absolute NEW-status count across the whole shared queue: a seed.ts
+    // ticket's status is mutable global state (staff-ticket-flow.spec.ts's
+    // E2E-06 permanently moves TKT-2026-900001 out of NEW), which made a
+    // count keyed to it order-dependent in a full `npm run test:e2e` run.
+    // All 5 fixtures are freshly (re)created NEW/unassigned in this
+    // describe's own `beforeAll`, so this narrows to exactly them
+    // regardless of what any other spec file did to seed.ts's rows.
+    await page.locator("#staff-queue-search").fill("E2E Pagination Fixture");
     await page.locator("#staff-queue-status").selectOption("NEW");
-    await expect(rows).toHaveCount(6);
-    await expect(rows.filter({ hasText: "TKT-2026-900001" })).toHaveCount(1);
-    await expect(rows.filter({ hasText: "TKT-2026-900002" })).toHaveCount(0);
+    await expect(rows).toHaveCount(5);
+    for (const ticketNumber of PAGINATION_FIXTURE_TICKET_NUMBERS) {
+      await expect(rows.filter({ hasText: ticketNumber })).toHaveCount(1);
+    }
     await page.screenshot({
       path: shot(PART6_DIR, "03-filters-applied.png"),
       fullPage: true,
@@ -437,6 +481,51 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
     await expect(page.locator(".zen-staff-queue__card").first()).toBeVisible();
     await page.screenshot({
       path: shot(PART6_DIR, "09-mobile-card-layout.png"),
+      fullPage: true,
+    });
+  });
+
+  test("the queue with zero tickets ever shows the true empty state, not no-results", async ({
+    page,
+  }) => {
+    // ui-spec.md §9's "empty (no tickets at all)" state is distinct from
+    // no-results (07 above: an active filter matching nothing while
+    // tickets still exist) and, per StaffTicketQueueScreen.tsx's
+    // `classifyQueue`, is derived PURELY from the real response shape
+    // (`items: []`, `totalItems: 0`) plus no active search/filter — never
+    // from anything else the client can observe. A route stub returning
+    // that exact shape reproduces the real "empty" branch without
+    // deleting any row from the shared `toktickit_e2e` database: an
+    // earlier version of this test TRUNCATEd every Ticket to reach a
+    // genuine zero, which is destructive shared-DB state that a later
+    // spec file in a full `npm run test:e2e` run could depend on — this
+    // is the same "stub the one response that state needs" technique the
+    // API-failure test above already uses, just with a 200 instead of a
+    // 500.
+    await page.route("**/api/staff/tickets*", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [], page: 1, pageSize: 20, totalItems: 0, totalPages: 0 }),
+      });
+    });
+
+    await page.setViewportSize(DESKTOP);
+    await loginAsSeededUser(page, IT_STAFF_EMAIL);
+    await page.goto("/staff/tickets");
+
+    await expect(page.getByRole("heading", { name: "The queue is empty" })).toBeVisible();
+    await expect(page.locator(QUEUE_TABLE_ROWS)).toHaveCount(0);
+    // Distinct from the no-results state: the true-empty state hides the
+    // whole search/filter controls row entirely (StaffTicketQueueScreen.tsx
+    // `hideControls`), same convention as Lab 2 My Tickets.
+    await expect(page.locator("#staff-queue-search")).toHaveCount(0);
+    await page.screenshot({
+      path: shot(PART6_DIR, "10-queue-truly-empty-state.png"),
       fullPage: true,
     });
   });
@@ -1136,72 +1225,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await expect(page.locator(USER_TABLE_ROWS)).toHaveCount(0);
     await page.screenshot({
       path: shot(PART8_DIR, "16-safe-api-failure.png"),
-      fullPage: true,
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Part 6 addendum — the queue's genuine, zero-tickets-ever empty state
-// ---------------------------------------------------------------------------
-//
-// ui-spec.md §9's "empty (no tickets at all — 'The queue is empty')" state is
-// distinct from "no-results" (07-no-results-state.png above, an active
-// filter matching nothing while tickets still exist) and cannot be produced
-// without removing every Ticket row from the shared `toktickit_e2e`
-// database — which would break every OTHER test's fixtures if it ran
-// earlier. This is deliberately the LAST test in the whole file (after both
-// Part 7's and Part 8's own Ticket/User fixtures are done being used) so
-// that destructive step can never affect anything else in this run.
-// Attachment/Comment/Note all cascade-delete with their Ticket
-// (schema.prisma), so this is a clean, FK-safe removal.
-
-async function truncateAllTicketsForEmptyQueueEvidence(): Promise<void> {
-  const e2eRoot = path.resolve(here, "..");
-  const result = dotenv.config({ path: path.join(e2eRoot, ".env.e2e") });
-  const url = result.parsed?.DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error(
-      "e2e/.env.e2e is missing (or has no DATABASE_URL) — cannot demonstrate the " +
-        "genuine empty-queue state.",
-    );
-  }
-  if (!url.endsWith("/toktickit_e2e")) {
-    // Same guard every other Lab 3 fixture helper carries: never run this
-    // against toktickit_test or localdb.
-    throw new Error(
-      `DATABASE_URL must point at "toktickit_e2e" (got "${url}"). Refusing to ` +
-        "truncate Tickets on a database that isn't the dedicated E2E database.",
-    );
-  }
-
-  const client = new Client({ connectionString: url });
-  await client.connect();
-  try {
-    await client.query('DELETE FROM "Ticket"');
-  } finally {
-    await client.end();
-  }
-}
-
-test.describe("Part 6 addendum — Ticket Queue genuinely empty (EV-02)", () => {
-  test("the queue with zero tickets ever shows the true empty state, not no-results", async ({
-    page,
-  }) => {
-    await truncateAllTicketsForEmptyQueueEvidence();
-
-    await page.setViewportSize(DESKTOP);
-    await loginAsSeededUser(page, IT_STAFF_EMAIL);
-    await page.goto("/staff/tickets");
-
-    await expect(page.getByRole("heading", { name: "The queue is empty" })).toBeVisible();
-    await expect(page.locator(QUEUE_TABLE_ROWS)).toHaveCount(0);
-    // Distinct from the no-results state: the true-empty state hides the
-    // whole search/filter controls row entirely (StaffTicketQueueScreen.tsx
-    // `hideControls`), same convention as Lab 2 My Tickets.
-    await expect(page.locator("#staff-queue-search")).toHaveCount(0);
-    await page.screenshot({
-      path: shot(PART6_DIR, "10-queue-truly-empty-state.png"),
       fullPage: true,
     });
   });
