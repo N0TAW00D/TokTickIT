@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
-import { loginAsSeededUser } from "../support/auth.js";
+import {
+  createMustChangePasswordFixtureUser,
+  createPlainLoginFixtureUser,
+  loginAs,
+  loginAsSeededUser,
+  LOCAL_DEV_PASSWORD,
+} from "../support/auth.js";
 import {
   createRequesterOwnedFixtureTicket,
   createTruncationRegressionFixtureTicket,
@@ -37,7 +43,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 // docs/lab-03/ui-spec.md §15 / tests.md §4: screenshots committed under
-// these four folders. `here` is e2e/lab-03, so the repo root is two levels
+// these seven folders. `here` is e2e/lab-03, so the repo root is two levels
 // up.
 const SCREENSHOT_ROOT = path.resolve(here, "../../artifacts/lab-03/screenshots");
 
@@ -56,15 +62,21 @@ const VIEWPORTS = {
 type ViewportName = keyof typeof VIEWPORTS;
 const VIEWPORT_NAMES: ViewportName[] = ["desktop", "tablet", "mobile"];
 
-// The four screens/folders this dispatch covers (Issue #74's screenshot
+// The seven screens/folders this dispatch covers (Issue #74's screenshot
 // requirement + docs/lab-03/tests.md §2.8's R-01..R-06 rows) — one per
-// ui-spec.md section: §5 Login, §9 IT Staff Ticket Queue, §10 IT Staff
-// Ticket Detail, §11 Administrator User Management.
+// ui-spec.md section: §5 Login, §6 Change Password (forced path), §7
+// Requester Ticket Detail (Public Comments + the "Problem appears
+// resolved" action), §9 IT Staff Ticket Queue, §10 IT Staff Ticket Detail,
+// §11 Administrator User Management, and §4.3's forbidden state (a
+// Requester turned away from an IT-Staff-only route).
 const SCREENS = [
   "authentication",
   "staff-queue",
   "staff-ticket-detail",
   "user-management",
+  "change-password",
+  "requester-ticket-detail",
+  "forbidden",
 ] as const;
 type ScreenName = (typeof SCREENS)[number];
 
@@ -80,7 +92,18 @@ const ADMIN_EMAIL = "olivia.grant@example.edu";
 // on why that separation matters).
 const DETAIL_TICKET_NUMBER = "TKT-2026-991000";
 
+// Own band again, distinct from every other "TKT-2026-9910xx" number
+// already claimed in this file, staffFixtures.ts and
+// e2e/lab-03/accessibility.spec.ts ("991020"/"991021") and
+// staff-ticket-flow.spec.ts ("991001"/"991002") — see this file's own
+// R-03b comment for why that separation matters.
+const REQUESTER_DETAIL_TICKET_NUMBER = "TKT-2026-991030";
+
 let detailTicketId: number;
+let requesterDetailTicketId: number;
+let requesterDetailEmail: string;
+let mustChangePasswordEmail: string;
+let forbiddenRequesterEmail: string;
 
 test.beforeAll(async () => {
   // An unassigned, non-terminal (OPEN) ticket: unassigned so the Claim
@@ -92,6 +115,32 @@ test.beforeAll(async () => {
     DETAIL_TICKET_NUMBER,
   );
   detailTicketId = fixture.id;
+
+  // A second, separate OPEN ticket (own Requester, own ticket number) for
+  // the `requester-ticket-detail` screenshot: OPEN (non-terminal) so the
+  // "Problem appears resolved" button (ui-spec.md §7) renders, and its own
+  // fixture Requester (not `detailTicketId`'s) so posting the Public
+  // Comment below can't ever collide with anything R-03/R-03b/R-05 do
+  // against the shared `detailTicketId` fixture.
+  const requesterDetailFixture = await createRequesterOwnedFixtureTicket(
+    "responsive-requester-detail",
+    REQUESTER_DETAIL_TICKET_NUMBER,
+  );
+  requesterDetailTicketId = requesterDetailFixture.id;
+  requesterDetailEmail = requesterDetailFixture.requester.email;
+
+  // A forced-first-login fixture (`mustChangePassword: true`) for the
+  // `change-password` screenshot — `auth.ts`'s own
+  // `createMustChangePasswordFixtureUser` doc comment explains why no
+  // *seeded* account can reliably reach this path.
+  const mustChangeFixture = await createMustChangePasswordFixtureUser();
+  mustChangePasswordEmail = mustChangeFixture.email;
+
+  // A plain (non-forced-change) Requester fixture, used only to be turned
+  // away from an IT-Staff-only route for the `forbidden` screenshot — it
+  // owns no ticket of its own.
+  const forbiddenFixture = await createPlainLoginFixtureUser("responsive-forbidden");
+  forbiddenRequesterEmail = forbiddenFixture.email;
 });
 
 // ---------------------------------------------------------------------------
@@ -108,6 +157,16 @@ function screenPath(screen: ScreenName): string {
       return `/staff/tickets/${detailTicketId}`;
     case "user-management":
       return "/admin/users";
+    case "change-password":
+      return "/change-password";
+    case "requester-ticket-detail":
+      return `/tickets/${requesterDetailTicketId}`;
+    case "forbidden":
+      // A Requester (`forbiddenRequesterEmail`'s role) hitting an
+      // IT-Staff-only route — App.tsx's `RequireRole(['IT_STAFF'])` on
+      // `/staff/tickets` renders the ui-spec.md §4.3 forbidden state
+      // instead of `StaffTicketQueueScreen`.
+      return "/staff/tickets";
   }
 }
 
@@ -123,6 +182,69 @@ async function goToScreen(page: Page, screen: ScreenName): Promise<void> {
   if (screen === "authentication") {
     await page.goto("/login");
     await expect(page.locator("#login-email")).toBeVisible();
+    return;
+  }
+
+  if (screen === "change-password") {
+    // Forced first-login change (ui-spec.md §6): logging in with a
+    // `mustChangePassword` account redirects straight to
+    // `/change-password` (RequireAuth.tsx via RoleLandingRedirect) —
+    // there is no separate `page.goto` step, since every other route
+    // would just bounce back here anyway.
+    await loginAs(page, mustChangePasswordEmail, LOCAL_DEV_PASSWORD);
+    await expect(page).toHaveURL(/\/change-password$/);
+    await expect(page.getByRole("heading", { name: "Change password" })).toBeVisible();
+    return;
+  }
+
+  if (screen === "requester-ticket-detail") {
+    await loginAs(page, requesterDetailEmail, LOCAL_DEV_PASSWORD);
+    await page.goto(screenPath(screen));
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Problem appears resolved" }),
+    ).toBeVisible();
+
+    // ui-spec.md §7/§8: the screenshot must show at least one Public
+    // Comment. No fixture helper seeds Comment rows directly, so this
+    // posts one through the real composer (`MessageThread`) — the same
+    // real create-comment flow a Requester would use, not a mocked
+    // response. Guarded by a prior existence check so re-running this
+    // across R-01/R-05/R-06 (all three iterate every screen) doesn't post
+    // a growing pile of duplicate comments.
+    // `MessageThread` fetches its entries on mount, independently of the
+    // header fetch the "Ticket Details" heading above already waited on —
+    // wait for that fetch to resolve (the list always renders, empty or
+    // not, once loaded) BEFORE checking for an existing comment below,
+    // otherwise a still-loading thread reads as "no comment yet" and this
+    // posts a duplicate.
+    await expect(page.locator(".zen-message-thread__list")).toBeVisible();
+
+    const commentBody =
+      "Thanks for looking into this — I'm still seeing the same issue on my end.";
+    // Scoped to a rendered comment entry, not `getByText` — the composer's
+    // own `<textarea>` still carries this exact string as its value right
+    // after `.fill()`/submit (before `setValue("")` clears it), and
+    // `getByText` matches that too, which would make this ambiguous
+    // (strict-mode violation) rather than a real absence check.
+    const postedComment = page.locator(".zen-message-thread__body", { hasText: commentBody });
+    const alreadyPosted = await postedComment.count();
+    if (alreadyPosted === 0) {
+      await page.locator("#message-thread-public-body").fill(commentBody);
+      await page.getByRole("button", { name: "Post comment" }).click();
+    }
+    await expect(postedComment).toBeVisible();
+    return;
+  }
+
+  if (screen === "forbidden") {
+    await loginAs(page, forbiddenRequesterEmail, LOCAL_DEV_PASSWORD);
+    await page.goto(screenPath(screen));
+    // ui-spec.md §4.3: RequireRole renders this in place of the wrapped
+    // screen, never alongside it.
+    await expect(
+      page.getByRole("heading", { name: "You don't have access to this page" }),
+    ).toBeVisible();
     return;
   }
 
