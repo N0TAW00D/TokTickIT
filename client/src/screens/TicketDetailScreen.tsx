@@ -41,9 +41,12 @@ interface StaticFieldProps {
  * One read-only header field (ui-spec.md §10, FR-32, BR-39): a label paired
  * with plain static text — never an `<input>`/`<textarea>`, since this
  * screen has no editable fields (tests.md C-29: "static text, no inputs").
- * Single-line values truncate with an ellipsis and carry the full value in
- * `title` rather than clipping silently (ui-spec.md §11); Summary and
- * Description wrap in full instead, since this is the one screen meant to
+ * Every value wraps rather than truncating, regardless of length
+ * (TicketDetailScreen.css's own comment on `.zen-ticket-detail__field-value`
+ * has the full rationale — ellipsis truncation there never actually showed
+ * an ellipsis, it silently clipped); `title` is kept as a redundant,
+ * non-visual affordance, not the only way to read the full value. Summary
+ * and Description wrap in full too, since this is the one screen meant to
  * show them completely.
  */
 function StaticField({

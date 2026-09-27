@@ -92,7 +92,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0; /* lets the ellipsis rule below actually apply in a grid/flex item */
+  min-width: 0; /* lets the wrap rule below actually apply in a grid/flex item, instead of the item stretching the grid column to fit an unbroken value */
 }
 
 .zen-ticket-detail__field--full {
@@ -107,20 +107,34 @@
 
 /* Read-only presentation (ui-spec.md §5.3): same --zen-readonly-bg /
    --zen-readonly-text look as a readonly input, but a plain <div> — this
-   screen has no <input>/<textarea> at all (tests.md C-29). */
+   screen has no <input>/<textarea> at all (tests.md C-29). `min-height`
+   (not a fixed `height`) is only a floor for the common short-value case —
+   ui-spec.md V-10 requires no clipping for ANY value length, so this must
+   wrap rather than truncate once a value is longer than the box, regardless
+   of how long. This used to be ellipsis truncation, but that never actually
+   rendered an ellipsis at all: `text-overflow: ellipsis` doesn't apply to a
+   flex container's own bare text content, so `overflow: hidden` just
+   clipped the value mid-character with no visual cue (found via the Issue
+   #74 screenshot dispatch's own requester-ticket-detail screenshot — same
+   class of bug PR #83/#84 already fixed on the sibling
+   `.zen-staff-detail__field-value`, applied here the same way).
+   `white-space: normal` + `overflow-wrap: anywhere` grows the box for any
+   value instead, so there is no longest-value ceiling to keep measuring
+   against. */
 .zen-ticket-detail__field-value {
   box-sizing: border-box;
   min-height: var(--zen-control-height);
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 6px 12px;
   background: var(--zen-readonly-bg);
   color: var(--zen-readonly-text);
   border: 1px solid var(--zen-border);
   border-radius: var(--zen-radius-control);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .zen-ticket-detail__field-value--badge {
