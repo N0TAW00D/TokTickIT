@@ -226,6 +226,28 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | E2E-11 | E | AC-53, AC-54 | Admin safety rails | Self-deactivation and last-active-Administrator are both refused in the UI | `e2e/lab-03/user-administration.spec.ts` | Pass |
 | E2E-12 | E | AC-55 | Forbidden admin access | A Requester navigating to `/admin/users` sees the forbidden state | `e2e/lab-03/user-administration.spec.ts` | Pass |
 
+### 2.9a Submission evidence
+
+Added in Issue #74: the handout's submission PDF (§14, Parts 5–8) asks the Lab report to
+"demonstrate" specific UI behaviours with evidence, not just claim a test covers them. E2E-01..E2E-12
+above already exercise most of that behaviour, but their screenshots (§2.8's R-01/R-05/R-06) are
+default-state shots at three viewports, not the individual named STATES (busy, validation failure,
+confirmation dialog, safe API failure, role-restricted absence, …) each Part's demonstration list
+calls for. `e2e/lab-03/submission-evidence.spec.ts` adds one `test.describe` per Part, each targeting
+one specific, asserted state before capturing it — the same idiom
+`e2e/lab-02/submission-evidence.spec.ts` established for Lab 2 — writing numbered screenshots to
+`artifacts/lab-03/screenshots/submission/part-N-*/NN-*.png`.
+
+| ID | T | AC | What it tests | Expected result | File | Status |
+|---|---|---|---|---|---|---|
+| EV-01 | E | AC-01, AC-02, AC-05, AC-09, AC-10 | Part 5 — Login/Change Password/Logout evidence | Valid landing (name+role), invalid-credentials safe error, inactive-account safe error, busy/submitting state, forced Change Password banner, a password-rule validation error, successful continuation, logout, and a protected URL after logout redirecting to Login | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-02 | E | AC-26…AC-33 | Part 6 — IT Staff Ticket Queue evidence | Realistic queue data with assigned/unassigned owners and status/priority badges, search, filters, sorting, pagination page 2, opening a ticket, the no-results state, the genuinely-empty (zero-ticket) state, an API-failure state, and the mobile card layout | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-03 | E | AC-04, AC-21, AC-24, AC-34, AC-37…AC-42 | Part 7 — IT Staff Ticket Detail evidence | Claim, reassign, IT Priority change, a Public Comment, an Internal Note (visually distinct), attachment-list continuity, a Requester's "Problem appears resolved" indication seen by staff, an empty-comment validation error, a routed-500 safe failure, a permitted status change with its confirmation dialog, a Requester's role-restricted view (no Internal Notes, no staff controls), and direct-API authorization evidence (`GET /api/tickets/:id/notes` as unauthenticated → 401, as the owning Requester → 404, written to `part-7-staff-detail/api-authz-evidence.json`) | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-04 | E | AC-45…AC-55 | Part 8 — Administrator User Management evidence | The Name/Email/Role/Status/Edit list, search by name, search by email, a role filter, the Create User dialog and its success, a duplicate-email rejection, invalid-input validation (name/email/password together), editing name/email/role/active, setting a new initial password and that user's next forced-change login, self-deactivation blocked, last-active-Administrator blocked, a non-admin forbidden state, the mobile layout, and a safe API failure | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+
+Everything each Part's demonstration list asks for was reproducible in the running app and is captured
+above — nothing in Parts 5–8 needed to be reported as unable-to-demonstrate.
+
 ### 2.10 Accessibility
 
 Added in Issue #74: before this, no test in the repository ran an actual accessibility-rule-engine
@@ -378,6 +400,18 @@ reconciliation pass were produced.
 | E2E | 12 | 12 | `npm run test:e2e` |
 | Accessibility | 9 | 9 | `npm run test:e2e` |
 | **Total** | **130** | **130** | `npm run test:all` |
+
+**Delta — Issue #74 submission-evidence dispatch:** `e2e/lab-03/submission-evidence.spec.ts`
+(EV-01..EV-04, §2.9a) was added afterwards and run in isolation —
+`npx playwright test e2e/lab-03/submission-evidence.spec.ts` — rather than re-running the full
+`npm run test:all` above, so the two counts are reported separately instead of silently merged: **24/24
+passing** (one `test.describe` per EV row, expanding into 24 individual `test()` cases — Part 5: 3,
+Part 6: 10 including the dedicated genuinely-empty-queue addendum, Part 7: 4, Part 8: 7). Combined with
+the **130/130** baseline above, the repository's E2E row becomes **12 + 4 = 16 planned IDs**,
+**36/36 passing individual `test()` cases** (12 pre-existing + 24 new), and the whole-suite total
+becomes **154 planned / 154 passing** — not independently re-verified end to end in this dispatch, since
+only the new spec file was run per its own scope, but arithmetically exact from the two verified runs
+above.
 
 `npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
 files). `npm run test:e2e`: 186/186 passing (lab-02 regression suite + all lab-03 specs, including
