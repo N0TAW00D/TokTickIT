@@ -383,10 +383,14 @@ npm run test:all                  # everything, from the repository root
 
 ## 6. Final Results
 
-Filled in Issue #74 from a real run on the final branch (`feat/74-integration`). Every count below
-was independently observed by running the command in that row, not copied from an agent's
-self-report — see [`ai-use.md`](./ai-use.md) for how each level's implementation and this
-reconciliation pass were produced.
+Filled in Issue #74 from a real run on the final branch (`feat/74-integration`), then updated again
+when the submission-evidence dispatch added EV-01..EV-04 (§2.9a). Every count below was independently
+observed by running the command in that row, not copied from an agent's self-report — see
+[`ai-use.md`](./ai-use.md) for how each level's implementation and this reconciliation pass were
+produced. The E2E/full-suite numbers below reflect a real, synchronous run of the FULL
+`npm run test:e2e` (not the submission-evidence file in isolation) made after that dispatch fixed two
+tests that had turned out to be order-dependent on state an earlier spec file in the same run
+mutates — see this section's note below the table.
 
 | Level | Planned | Passing | Command |
 |---|---|---|---|
@@ -397,34 +401,43 @@ reconciliation pass were produced.
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
 | Responsive | 7 | 7 | `npm run test:e2e` |
-| E2E | 12 | 12 | `npm run test:e2e` |
+| E2E | 16 | 16 | `npm run test:e2e` |
 | Accessibility | 9 | 9 | `npm run test:e2e` |
-| **Total** | **130** | **130** | `npm run test:all` |
+| **Total** | **134** | **134** | `npm run test:all` |
 
-**Delta — Issue #74 submission-evidence dispatch:** `e2e/lab-03/submission-evidence.spec.ts`
-(EV-01..EV-04, §2.9a) was added afterwards and run in isolation —
-`npx playwright test e2e/lab-03/submission-evidence.spec.ts` — rather than re-running the full
-`npm run test:all` above, so the two counts are reported separately instead of silently merged: **24/24
-passing** (one `test.describe` per EV row, expanding into 24 individual `test()` cases — Part 5: 3,
-Part 6: 10 including the dedicated genuinely-empty-queue addendum, Part 7: 4, Part 8: 7). Combined with
-the **130/130** baseline above, the repository's E2E row becomes **12 + 4 = 16 planned IDs**,
-**36/36 passing individual `test()` cases** (12 pre-existing + 24 new), and the whole-suite total
-becomes **154 planned / 154 passing** — not independently re-verified end to end in this dispatch, since
-only the new spec file was run per its own scope, but arithmetically exact from the two verified runs
-above.
+The E2E row's 12 -> 16 planned IDs are E2E-01..E2E-12 (pre-existing) plus EV-01..EV-04 (§2.9a, added
+by the submission-evidence dispatch).
 
-`npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 186/186 passing (lab-02 regression suite + all lab-03 specs, including
-the 11 individual `test()` cases the 9 planned accessibility IDs above expand into — A-05 and A-07
-each cover a desktop and a 390px-mobile pass). The 186 total is well above what the 7 Responsive +
-12 E2E + 9 Accessibility planned IDs alone would suggest because most of those IDs expand into many
-individual `test()` cases (one per screen × viewport, or per width) — Issue #74's own
-screenshot-evidence work added three more screens (Change Password, Requester Ticket Detail,
-forbidden) to R-01/R-05/R-06's existing per-screen loops, and R-03c adds its own five per-width
-cases. No test is skipped, disabled or marked `.only`
-anywhere in the repository (`specification.md` §10.1) — every row in this document is now backed by
-a real, passing test written to the letter of its own claim; the full 130-test suite passes with no
-gap, matching Issue #74's own AC.
+`npm run test:server`: 591/591 passing (27 files, unchanged by this dispatch). `npm run test:client`:
+349/349 passing (19 files, unchanged by this dispatch). `npm run test:e2e`: **210/210 passing**
+(lab-02 regression suite + all lab-03 specs, run to completion with zero failures) — up from the prior
+186/186 by exactly the 24 individual `test()` cases `e2e/lab-03/submission-evidence.spec.ts` adds
+(Part 5: 3, Part 6: 10, Part 7: 4, Part 8: 7), on top of the 11 individual `test()` cases the 9 planned
+accessibility IDs above expand into (A-05 and A-07 each cover a desktop and a 390px-mobile pass). The
+210 total is well above what the 7 Responsive + 16 E2E + 9 Accessibility planned IDs alone would
+suggest because most of those IDs expand into many individual `test()` cases (one per screen ×
+viewport, or per width) — Issue #74's own screenshot-evidence work added three more screens (Change
+Password, Requester Ticket Detail, forbidden) to R-01/R-05/R-06's existing per-screen loops, and R-03c
+adds its own five per-width cases. No test is skipped, disabled or marked `.only` anywhere in the
+repository (`specification.md` §10.1) — every row in this document is now backed by a real, passing
+test written to the letter of its own claim; the full 134-test suite (210 raw `npm run test:e2e`
+cases within it) passes with no gap, matching Issue #74's own AC.
+
+**Order-dependence fix (submission-evidence dispatch):** an earlier version of
+`e2e/lab-03/submission-evidence.spec.ts` passed in isolation but failed twice when run as part of the
+FULL `npm run test:e2e` (`staff-ticket-flow.spec.ts` runs first alphabetically and its E2E-06
+permanently claims and moves TKT-2026-900001 out of `NEW`): two Part 6 assertions had keyed off that
+seed.ts ticket's mutable status/ownership instead of this spec's own fixtures. Fixed by scoping both
+assertions to `e2e/support/staffFixtures.ts`'s own pagination-fixture tickets (freshly re-created,
+NEW/unassigned, in this file's own `beforeAll` on every run) — one is assigned an owner through the
+real `PATCH /api/tickets/:id/owner` endpoint from inside the test itself, and the NEW-count filter
+check is scoped with a search marker unique to those fixtures — rather than any seed.ts ticket. The
+genuinely-empty-queue evidence (`10-queue-truly-empty-state.png`) was also changed from a `DELETE FROM
+"Ticket"` (destructive shared-DB state a later spec file could have depended on) to a `page.route`
+stub of `GET /api/staff/tickets` returning `{ items: [], totalItems: 0, ... }` — the same technique
+already used for the API-failure screenshot, and sufficient because
+`StaffTicketQueueScreen.tsx`'s `classifyQueue` derives the "empty" vs. "no-results" variant purely
+from that response shape plus whether a query is active, never from anything else.
 
 ## 7. Known Limitations
 
