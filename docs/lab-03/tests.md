@@ -206,7 +206,7 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below; R-03b: every Ticket Information value fully readable (no truncation) at 991/992/1024/1080/1440 px, including a long Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
-| R-06 | R | — | Screenshots | All four required folders populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-06 | R | — | Screenshots | All seven required folders (Login, Change Password, Requester Ticket Detail, IT Staff Ticket Queue, IT Staff Ticket Detail, Administrator User Management, forbidden) populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
 
 ### 2.9 End-to-end
 
@@ -324,14 +324,14 @@ requires, plus a ninth (accessibility) level added in Issue #74.
 The V-01…V-14 checklist in [`ui-spec.md`](./ui-spec.md) §15, executed at all three viewports and
 recorded here at release. Ten rows (V-01, V-04–V-11, V-14) are proven automatically by S-01…S-06
 and R-01…R-06 above; the remaining four (V-02, V-03, V-12, V-13) have no automated assertion and
-were confirmed by personally inspecting all 12 committed screenshots in
-`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`.
+were confirmed by personally inspecting all 21 committed screenshots in
+`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management,change-password,requester-ticket-detail,forbidden}/`.
 
 | # | Check | Result |
 |---|---|---|
 | V-01 | Every colour comes from a token; no hard-coded hex outside `theme.css`. | Pass — S-01 |
-| V-02 | New screens are visually of a piece with the Lab 2 screens — same card, spacing and type scale. | Pass — all four screens share Lab 2's card shell, spacing scale and heading type; inspected directly. |
-| V-03 | Nav shows only the authenticated role's destinations; no unauthorized destination is rendered. | Pass — each screenshot's top nav shows exactly one destination for its role (Ticket Queue for IT Staff, User Management for Administrator, none for the unauthenticated Login screen). |
+| V-02 | New screens are visually of a piece with the Lab 2 screens — same card, spacing and type scale. | Pass — all seven screens share Lab 2's card shell, spacing scale and heading type; inspected directly. |
+| V-03 | Nav shows only the authenticated role's destinations; no unauthorized destination is rendered. | Pass — each screenshot's top nav shows exactly one destination for its role (My Tickets for Requester, Ticket Queue for IT Staff, User Management for Administrator, none for the unauthenticated Login screen); the forbidden screenshot (a Requester turned away from `/staff/tickets`) renders no nav at all — the wrapped IT Staff screen never mounts. |
 | V-04 | Status, Requested Priority, IT Priority and Role badges are consistent everywhere they appear. | Pass — S-02 |
 | V-05 | IT Priority is never mistakable for Requested Priority where both appear on one row. | Pass — S-03 |
 | V-06 | Editable fields are visually distinct from read-only fields on IT Staff Ticket Detail. | Pass — S-04; visually confirmed in the staff-ticket-detail screenshots (muted read-only boxes on the left, the white "Ticket Operations" card on the right). |
