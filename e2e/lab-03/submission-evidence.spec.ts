@@ -864,8 +864,14 @@ test.describe("Part 8 — User Management (EV-04)", () => {
       expect(headerTexts.map((t) => t.trim())).toContain(expected);
     }
     const rows = page.locator(USER_TABLE_ROWS);
-    await expect(rows.first()).toBeVisible();
-    await expect(rows.first().getByRole("button", { name: /^Edit / })).toBeVisible();
+    // Narrow to the seeded accounts so the capture stays readable once E2E
+    // fixture users have accumulated in the list.
+    await page.locator("#user-mgmt-search").fill("example.edu");
+    const oliviaRow = rows.filter({ hasText: "olivia.grant@example.edu" });
+    await expect(oliviaRow).toBeVisible();
+    await expect(oliviaRow).toContainText("Olivia Grant");
+    await expect(oliviaRow.getByRole("button", { name: /^Edit / })).toBeVisible();
+    await expect(rows.filter({ hasNotText: "@example.edu" })).toHaveCount(0);
     await page.screenshot({
       path: shot(PART8_DIR, "01-list-name-email-role-status-edit.png"),
       fullPage: true,
@@ -908,10 +914,16 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
 
     await expect(page.locator("table")).toHaveCount(0);
-    await expect(page.locator(".zen-user-mgmt__card").first()).toBeVisible();
+    // Filter to the two Administrators and capture only the viewport, so the
+    // cards stay legible instead of a 9000px-tall page of fixture users.
+    await page.locator("#user-mgmt-role").selectOption("ADMINISTRATOR");
+    const cards = page.locator(".zen-user-mgmt__card");
+    await expect(cards).toHaveCount(2);
+    const oliviaCard = cards.filter({ hasText: "olivia.grant@example.edu" });
+    await expect(oliviaCard).toBeInViewport();
+    await expect(oliviaCard.getByRole("button", { name: /^Edit / })).toBeVisible();
     await page.screenshot({
       path: shot(PART8_DIR, "05-mobile-layout.png"),
-      fullPage: true,
     });
   });
 
