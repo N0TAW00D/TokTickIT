@@ -7,14 +7,18 @@ import type { Role } from '../generated/prisma/client.ts';
 // (api-spec.md §1.2, §1.4, §1.5; BR-39, FR-06, FR-10, AC-70). Mounted on
 // every `/api/auth/*` route except login, which is deliberately public.
 //
-// Scope note for future issues (#69-#73): `authenticate`, `passwordChangeGate`
-// and `requireRole` are all written to be reusable by any future router, not
-// just this one — see each function's own doc comment. Issue #68 mounted
+// Scope note (#68-#73): `authenticate`, `passwordChangeGate` and
+// `requireRole` are all written to be reusable by any router, not just one —
+// see each function's own doc comment. Issue #68 mounted
 // `authenticate`/`passwordChangeGate` only on `/api/auth/*`; issue #69 added
 // `requireRole` here without mounting it anywhere new; issue #70 mounts all
 // three, in this order, on `src/routes/tickets.ts` and
 // `src/routes/attachments.ts` (deleting `requesterContext`/`X-Requester-Id`
-// in the process). The staff-queue and admin-user routes still await #71/#73.
+// in the process). Issue #71 mounted the same three on the IT Staff queue
+// (`src/routes/staff.ts`, `requireRole('IT_STAFF')`), and issue #73 on the
+// Administrator user routes (`src/routes/users.ts`,
+// `requireRole('ADMINISTRATOR')`) — every route this middleware protects is
+// wired as of #73.
 
 export interface AuthenticatedUser {
   id: number;

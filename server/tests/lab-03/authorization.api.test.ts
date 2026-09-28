@@ -16,17 +16,16 @@ import type { Role } from '../../src/generated/prisma/client.js';
 // Honest scope of this file — read before adding to or trusting it
 // -----------------------------------------------------------------------
 //
-// tests.md's SEC-01..SEC-09 describe behaviour on routes that do not exist
-// yet under session auth: the IT Staff Ticket Queue (`GET
-// /api/staff/tickets`, #71), Administrator routes (`GET`/`POST
-// /api/users`, etc., #73), and a Requester-owned Ticket lookup whose 404
-// depends on session-based ownership (`GET /api/tickets/:id`, rewired by
-// #70 — today it still runs on the Lab 2 `X-Requester-Id` mechanism, which
-// this issue explicitly does not touch). Writing real assertions against
-// those routes now would mean inventing stub endpoints nobody else owns,
-// which is exactly the scope creep this issue's brief warns against — any
-// such stub would need to be deleted and redone once #70/#71/#73 build the
-// real thing.
+// tests.md's SEC-01..SEC-09 describe behaviour on routes that, when this
+// file was first written for #69, did not exist yet under session auth: the
+// IT Staff Ticket Queue (`GET /api/staff/tickets`, #71), Administrator
+// routes (`GET`/`POST /api/users`, etc., #73), and a Requester-owned Ticket
+// lookup whose 404 depends on session-based ownership (`GET
+// /api/tickets/:id`, rewired by #70). #70/#71/#72/#73 have since landed, so
+// every one of SEC-01..SEC-09 now has real, route-specific coverage — this
+// file was deliberately never turned into the place that duplicates it, to
+// avoid the same assertion living in two files. See "Where the rest of
+// SEC-01..SEC-09 actually live" below for the current mapping.
 //
 // What IS real, and lives below:
 //
@@ -41,74 +40,60 @@ import type { Role } from '../../src/generated/prisma/client.js';
 //     (AC-70), then role (FR-10) — proven end-to-end, which is new: #68's
 //     own suite never composed a role check into the chain because
 //     `requireRole` didn't exist yet.
+//   - SEC-01 (every protected route 401s and performs no write), proven
+//     end-to-end against the real `app` further below.
 //
-// What is NOT real here, and why — mapped to tests.md's row IDs:
+// Where the rest of SEC-01..SEC-09 actually live, now that #70/#71/#72/#73
+// have landed and built the routes this file's own SEC rows describe — none
+// of it is duplicated here, per tests.md's File column:
 //
 //   - SEC-02 (Requester -> staff queue, Requester/IT Staff -> admin routes,
-//     all 403 before lookup): the GENERAL MECHANISM this row needs
-//     (role-gated collection -> 403 before any lookup) is fully proven
-//     below against a throwaway route. The SPECIFIC assertions SEC-02 names
-//     — against the real `/api/staff/tickets` and `/api/users` paths — are
-//     deferred to #71 and #73, each of which need only mount `requireRole`
-//     with the right allowed set; no new authorization logic remains to
-//     write once they do.
+//     all 403 before lookup): the GENERAL MECHANISM (role-gated collection
+//     -> 403 before any lookup) is proven below against a throwaway route;
+//     the real, route-specific assertions are
+//     server/tests/lab-03/staff-queue.api.test.ts ("403 FORBIDDEN for a
+//     Requester, before any lookup" on `GET /api/staff/tickets`) and
+//     server/tests/lab-03/users-admin.api.test.ts (Requester and IT Staff
+//     403 on each of the four `/api/users*` routes).
 //   - SEC-03 (client-supplied `requesterId`/foreign path id ignored) and
 //     SEC-04 (Requester's own Ticket 404 for another Requester's Ticket,
-//     byte-identical to a nonexistent one): both depended on `GET
-//     /api/tickets/:id` running on session identity instead of
-//     `X-Requester-Id` — #70 has now rewired that route, so both rows are
-//     real, but the assertions already live where they were re-pointed
-//     rather than being duplicated here: SEC-03 is
+//     byte-identical to a nonexistent one): SEC-03 is
 //     server/tests/lab-02/create-ticket.api.test.ts's API-08 ("a
 //     requesterId in the body is ignored") plus
 //     server/tests/lab-02/attachments.api.test.ts's ownership-boundary
 //     cases (a foreign path id never changes whose data is returned); SEC-04
 //     is server/tests/lab-02/ticket-detail.api.test.ts's API-20 ("not owned
-//     / unknown — byte-identical 404"). Same non-duplication reasoning as
-//     SEC-07 below.
+//     / unknown — byte-identical 404").
 //   - SEC-05 (Internal Notes -> 404 for a Requester, never 403 or leaked
-//     content) and SEC-06 (Administrator: IT Priority 200, status/owner/note
-//     -write all 403 because they CAN already read the ticket): both need
-//     `GET /api/tickets/:id/notes`, `PATCH /api/tickets/:id/status`, `PATCH
-//     /api/tickets/:id/owner`, `POST /api/tickets/:id/notes` and `PATCH
-//     /api/tickets/:id/it-priority` to exist on session auth. Deferred to
-//     #70 (ticket read path) and #71 (the IT Staff write routes
-//     themselves).
+//     content): server/tests/lab-03/ticket-notes.api.test.ts, "Requester has
+//     no read path at all (§1.4 case 2 — byte-identical 404, SEC-05)".
+//   - SEC-06 (Administrator: IT Priority 200, status/owner/note-write all
+//     403 because they CAN already read the ticket): Admin 200 is
+//     server/tests/lab-03/ticket-it-priority.api.test.ts ("Administrator can
+//     ALSO change itPriority, 200"); Admin 403 is spread across
+//     server/tests/lab-03/ticket-status.api.test.ts, ticket-owner.api.test.ts
+//     and ticket-notes.api.test.ts (each has its own "403 FORBIDDEN for an
+//     Administrator" / "may read but not post" case).
 //   - SEC-07 (every state-changing route rejects a non-JSON Content-Type
-//     with 415): already real, HTTP-level coverage exists today for every
-//     state-changing route that exists under session auth — every
-//     `POST`/`PATCH` under `/api/auth/*` — in
-//     server/tests/lab-03/auth.api.test.ts (its own AC-63 cases: login,
-//     logout, change-password). Not re-tested here to avoid duplicating
-//     real coverage. The remaining routes named implicitly by "every
-//     state-changing route" (tickets, staff, users) don't exist under
-//     session auth yet; each future router must mount its own
-//     `requireJsonContentType`-equivalent per api-spec.md §1.6 (BR-40) —
-//     `src/routes/auth.ts`'s own `requireJsonContentType` doc comment
-//     already flags this as a router-by-router decision, not a global one.
+//     with 415): each route's own test file carries its 415 case —
+//     server/tests/lab-03/auth.api.test.ts, comments-notes.api.test.ts,
+//     ticket-owner.api.test.ts, ticket-status.api.test.ts,
+//     ticket-it-priority.api.test.ts, ticket-notes.api.test.ts and
+//     users-admin.api.test.ts. Not re-tested here to avoid duplicating real
+//     coverage.
 //   - SEC-08 (a forced internal error returns the generic `INTERNAL` body,
 //     no stack/SQL/path): the exact `{ error: 'INTERNAL', message }` shape
-//     is not novel to this issue — `authenticate`'s own catch block in
-//     src/middleware/authContext.ts uses it, and it's already exercised by
-//     several existing suites (server/tests/lab-02/reference-data.api.test.ts,
-//     create-ticket.api.test.ts, attachments.api.test.ts) and by
-//     auth.api.test.ts's own `internalError`. There is no new route this
-//     issue adds to force an error against, so full SEC-08 coverage across
-//     every future protected endpoint is deferred to whichever issue builds
-//     each one.
+//     is exercised by server/tests/lab-02/create-ticket.api.test.ts (its
+//     "unexpected error" case explicitly asserts no `/Users`, no `.ts`, no
+//     `SELECT`, no stack-trace frame in the body), and by the same
+//     `INTERNAL` shape in reference-data.api.test.ts and
+//     attachments.api.test.ts.
 //   - SEC-09 (Requester and IT Staff both 403 on all four Administrator user
-//     routes): needs `GET`/`POST /api/users`, `PATCH /api/users/:id`, `POST
-//     /api/users/:id/initial-password` to exist. Deferred to #73. Same
-//     mechanism note as SEC-02 — once #73 mounts
-//     `requireRole('ADMINISTRATOR')`, SEC-09's own assertions are close to
-//     mechanical.
+//     routes): server/tests/lab-03/users-admin.api.test.ts — same file and
+//     mechanism as SEC-02's admin-routes half above.
 //
-// This codebase has no existing use of `it.todo` anywhere (checked via
-// `grep -rn "it.todo" server/tests client/tests` before writing this file —
-// zero hits), so rather than introduce an unprecedented pattern, deferred
-// rows are recorded here as comments, next to the row they defer, instead
-// of as `it.todo(...)` stubs. Nothing below is skipped, disabled, or
-// asserted as passing when it isn't.
+// This codebase has no existing use of `it.todo` anywhere. Nothing below is
+// skipped, disabled, or asserted as passing when it isn't.
 
 const testServer = useTestServer(app);
 

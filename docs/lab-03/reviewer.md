@@ -4,16 +4,17 @@ Part 1 deliverable (`specification.md` §14 Part 1). Every Lab 3 change reaches 
 through a peer-reviewed pull request, and `lab3-staging` reaches `main` through one peer-reviewed
 release PR — there are no direct commits to `main` or `lab3-staging`.
 
-Current through PR #83 (Issue #74). The release PR (`lab3-staging` → `main`) is the only PR still
-open at the time of writing — it is not yet reviewed, so its row and any review findings on it will
-be appended once that review completes, the same way Lab 2's `reviewer.md` (PR #57) was itself
-revised after its own review.
+Current through PR #84 (Issue #74). Release PR #85 (`lab3-staging` → `main`) was opened and then
+closed unmerged on 2026-09-27, before review; a new release PR is pending and will be opened once
+this and any further fix PRs land on `lab3-staging`. Its row and any review findings on it will be
+appended once that review completes, the same way Lab 2's `reviewer.md` (PR #57) was itself revised
+after its own review.
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#83). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#84). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed and merged every Lab 3 pull request. Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Not a reviewer on Lab 3, matching Lab 2 (see `docs/lab-02/reviewer.md`). |
 
@@ -35,11 +36,15 @@ Lab 2's record uses.
 | [#81](https://github.com/N0TAW00D/TokTickIT/pull/81) | IT Staff Ticket Detail — ownership, priority, status & notes (#72) | **Changes requested** ×3 → approved | 4 |
 | [#82](https://github.com/N0TAW00D/TokTickIT/pull/82) | Administrator User Management (#73) | **Changes requested** → approved | 2 |
 | [#83](https://github.com/N0TAW00D/TokTickIT/pull/83) | E2E, responsive/visual inspection & release integration (#74) | **Changes requested** ×2 → approved | 3 |
+| [#84](https://github.com/N0TAW00D/TokTickIT/pull/84) | Finish Staff Ticket Detail clipping and record PR #83's review (#74) | **Changes requested** → approved | 2 |
+| [#85](https://github.com/N0TAW00D/TokTickIT/pull/85) | `lab3-staging` → `main` release integration (#74) | closed unmerged, before review | — |
 | release PR | `lab3-staging` → `main` | _pending_ | — |
 
 Notes:
-- Every Lab 3 PR to date was approved and merged by `Palapluem`; none were closed unmerged (unlike
-  Lab 2's #45/#55).
+- Every Lab 3 feature PR (#75–#84) was approved and merged by `Palapluem`. #85, the first attempt at
+  the `lab3-staging` → `main` release PR, was closed unmerged on 2026-09-27 before any review — it
+  is listed for the record, not counted as a reviewed-and-merged PR, similar in kind (if not cause)
+  to Lab 2's #45/#55.
 - #75 and #76's first review rounds were formally `COMMENTED`, not `CHANGES_REQUESTED`, but each
   raised a real, substantive finding that was fixed before the approving round — counted as a full
   round here rather than folded into "approved first pass", matching how Lab 2's record treats
@@ -249,6 +254,54 @@ single-line filter rule now starts at 1080px, and R-02 adds boundary coverage at
 and 1080px to keep all five filters inside the panel without document overflow. … I found no
 remaining issue in the requested change and approved it."
 
+### #84 — Changes requested: 992–1024px Staff Ticket Detail clipping documented as a known gap
+
+**Round 1** (submitted 2026-09-25T05:14:23Z, reviewing commit `d98e68c8`):
+
+> Thanks for the responsive follow-up. I inspected the updated desktop, tablet, and mobile
+> screenshots; the layout looks good at those captured widths. However, I can't approve while the
+> PR documents a remaining clipping gap at approximately 992–1024px. ui-spec.md V-10 requires no
+> clipping, but tests.md currently marks V-10 as Pass while §7 says read-only Ticket Information
+> values can still be ellipsized in this range.
+>
+> Please identify the affected fields, fix the layout so ordinary Ticket Information values remain
+> fully readable while preserving the required desktop two-column layout, and add focused
+> responsive regression coverage around the affected widths (for example, 992px and 1024px plus the
+> relevant breakpoint boundary). Assert that the affected values—not just the page's overall
+> scrollWidth—are not truncated. Then update the V-10 result/known-limitations text and provide the
+> test result. I'll re-review after that.
+
+**Response.** Accepted. Measured with the longest real seed values (Category "Account and Access",
+Related System "Grade Submission App", Requester "Jennifer Anderson", Ticket No. `TKT-2026-…`,
+Ticket Date "25 Sep 2026, 11:56"): Ticket No., Ticket Date, Category and Related System truncated
+between 992 and 1024px, and Category and Related System were also truncated at every desktop width
+up to 1440px — wider than the gap originally reported. Fixed in `StaffTicketDetailScreen.css`:
+80c310e makes the Ticket Information field grid 2-up (was 3-up) from 768px while keeping the
+two-column Information/Operations layout from 992px; 7990a53 switches read-only values from
+ellipsis-truncation to wrapping (`white-space: normal; overflow-wrap: anywhere`) so values of any
+length stay fully readable, including a long Requester name that was still clipped even after the
+first fix. New regression coverage, R-03b (`e2e/lab-03/responsive.spec.ts`, bf735da + bfb2e30): at
+991/992/1024/1080/1440px, each of Ticket No., Ticket Date, Category, Requester and Related System is
+located by its label and asserted `scrollWidth <= clientWidth` with its exact full text present, and
+a 65-character Requester name is asserted untruncated and inside its field box at 992/1024/1440px.
+Sabotage-verified — reverting 80c310e fails with "Ticket No. field is truncated at 992px: scrollWidth
+159px > clientWidth 154px" (and Ticket Date at 1024px, Category at 1080/1440px); reverting 7990a53
+fails with "Requester field is truncated at 992px with a long (65-char) value: scrollWidth 497px >
+clientWidth 214px" (also at 1024/1440px). `tests.md`'s V-10 no longer carries a remaining-gap
+exception; §7 and the R-03 row describe the fix and R-03b. Screenshots re-captured and inspected: no
+clipping at any width. Results on this branch: server 591/591, client 349/349, e2e 143/143.
+
+**Round 2** (submitted 2026-09-26T04:51:02Z, reviewing commit `5f03af1`) — approved and merged.
+Reviewer's own words: "Re-reviewed the latest commit (5f03af1). The previously reported responsive
+clipping issue is addressed: Ticket Information values wrap instead of being ellipsized, the Ticket
+Operations controls can wrap without being squeezed, and the desktop two-column layout is preserved.
+R-03b now checks the actual field values and truncation at 991/992/1024/1080/1440px, and checks a
+65-character Requester value at 992/1024/1440px. I also inspected the updated desktop, tablet, and
+mobile screenshots and found no visible clipping. … I found no remaining blocking issue in the
+reviewed changes. … Approved Natthawat, LGTM!" The review also noted, without it being a blocking
+finding: "GitHub reports no status checks, so these are the test results recorded by the author
+rather than hosted CI checks."
+
 ## 4. Corrections issued by the author
 
 No claim made to the reviewer during Lab 3 has needed retraction so far (unlike Lab 2's #32/#33/#44
@@ -257,7 +310,7 @@ PR.
 
 ## 5. Direction of review
 
-Every Lab 3 pull request (#75–#83, and the release PR once opened) is authored by
+Every Lab 3 pull request (#75–#84, #85, and the pending release PR once opened) is authored by
 `N0TAW00D` and reviewed by `Palapluem`. Review within Lab 3 therefore flows in one direction, the
 same as Lab 2 (see `docs/lab-02/reviewer.md` §5): this record holds the comments the author
 **received** and the author's **responses**, not comments given by the author on a teammate's PR.
