@@ -241,14 +241,14 @@ keyboard/reflow checks, which axe's automated ruleset cannot express.
 | ID | T | AC | What it tests | Expected result | File | Status |
 |---|---|---|---|---|---|---|
 | A-01 | A11Y | AC-56 | Login screen | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
-| A-02 | A11Y | AC-56, AC-02 | Change Password, forced | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-02 | A11Y | AC-56 | Change Password, forced | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
 | A-03 | A11Y | AC-56 | Requester My Tickets | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
-| A-04 | A11Y | AC-56, AC-21, AC-42 | Requester Ticket Detail, with a posted Public Comment | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-04 | A11Y | AC-56 | Requester Ticket Detail, with a posted Public Comment | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
 | A-05 | A11Y | AC-56 | IT Staff Ticket Queue, desktop and 390px mobile | Zero `serious`/`critical` axe violations at both widths | `e2e/lab-03/accessibility.spec.ts` | Pass |
-| A-06 | A11Y | AC-56, AC-41, AC-42 | IT Staff Ticket Detail, with a populated Internal Notes panel | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-06 | A11Y | AC-56 | IT Staff Ticket Detail, with a populated Internal Notes panel | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
 | A-07 | A11Y | AC-56 | Administrator User Management list, desktop and 390px mobile | Zero `serious`/`critical` axe violations at both widths | `e2e/lab-03/accessibility.spec.ts` | Pass |
 | A-08 | A11Y | AC-56 | Administrator User Management, Create User dialog open | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
-| A-09 | A11Y | AC-18, AC-56 | Forbidden screen (a Requester visiting an Administrator route) | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
+| A-09 | A11Y | AC-56 | Forbidden screen (a Requester visiting an Administrator route) | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
 
 A-04 and A-06 found one real, reproducible finding during authoring — not a rule exclusion, a genuine
 transient defect this dispatch tracked down and fixed at its root: `MessageThread`'s submit button
@@ -271,12 +271,12 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC | Tests | AC | Tests |
 |---|---|---|---|
 | AC-01 | API-01, E2E-01 | AC-36 | API-27 |
-| AC-02 | API-12, API-16, C-04, E2E-02, A-02 | AC-37 | API-28, E2E-06 |
+| AC-02 | API-12, API-16, C-04, E2E-02 | AC-37 | API-28, E2E-06 |
 | AC-03 | SEC-03 | AC-38 | UNIT-04, API-29, E2E-06 |
 | AC-04 | SEC-05 | AC-39 | UNIT-05, API-30, C-14 |
 | AC-05 | API-02, C-02, E2E-01, E2E-03 | AC-40 | UNIT-06, API-31 |
-| AC-06 | C-01 | AC-41 | API-37, E2E-07, A-06 |
-| AC-07 | UNIT-02, API-13, C-06 | AC-42 | C-13, E2E-07, A-04, A-06 |
+| AC-06 | C-01 | AC-41 | API-37, E2E-07 |
+| AC-07 | UNIT-02, API-13, C-06 | AC-42 | C-13, E2E-07 |
 | AC-08 | UNIT-03, API-13, C-06 | AC-43 | API-32, E2E-08 |
 | AC-09 | API-12, E2E-02 | AC-44 | API-33, E2E-08 |
 | AC-10 | API-07, E2E-04 | AC-45 | API-41, C-16 |
@@ -287,10 +287,10 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-15 | SEC-02 | AC-50 | API-46 |
 | AC-16 | SEC-04 | AC-51 | API-47, E2E-09 |
 | AC-17 | C-07 | AC-52 | API-48, E2E-10 |
-| AC-18 | C-09, A-09 | AC-53 | API-49, C-17, E2E-11 |
+| AC-18 | C-09 | AC-53 | API-49, C-17, E2E-11 |
 | AC-19 | MIG-01, MIG-07 | AC-54 | API-50, C-18, E2E-11 |
 | AC-20 | MIG-08 | AC-55 | SEC-09, E2E-12 |
-| AC-21 | API-34, E2E-07, A-04 | AC-56 | R-01, A-01…A-09 |
+| AC-21 | API-34, E2E-07 | AC-56 | R-01, A-01…A-09 |
 | AC-22 | UNIT-11, API-35 | AC-57 | SEC-08 |
 | AC-23 | UNIT-11, API-35 | AC-58 | MIG-06 |
 | AC-24 | API-39, E2E-08 | AC-59 | API-09 |
