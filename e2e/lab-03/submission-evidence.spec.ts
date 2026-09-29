@@ -949,7 +949,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await createDialog.locator("#user-dialog-password").fill(NEW_USER_PASSWORD);
     await page.screenshot({
       path: shot(PART8_DIR, "06-create-user-dialog.png"),
-      fullPage: true,
     });
 
     // --- success ---------------------------------------------------------------
@@ -961,9 +960,11 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await expect(newUserRow).toContainText(NEW_USER_NAME);
     await expect(newUserRow).toContainText("IT Staff");
     await expect(newUserRow).toContainText("Active");
+    // Filter to the new account so the capture shows just it, not every fixture user.
+    await page.locator("#user-mgmt-search").fill(NEW_USER_EMAIL);
+    await expect(rows).toHaveCount(1);
     await page.screenshot({
       path: shot(PART8_DIR, "07-create-user-success.png"),
-      fullPage: true,
     });
 
     // --- duplicate-email rejection -----------------------------------------
@@ -981,7 +982,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await page.screenshot({
       path: shot(PART8_DIR, "08-duplicate-email-error.png"),
-      fullPage: true,
     });
     await duplicateDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -1006,7 +1006,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     );
     await page.screenshot({
       path: shot(PART8_DIR, "09-invalid-input-validation.png"),
-      fullPage: true,
     });
     await invalidDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -1059,9 +1058,11 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     await expect(editedRow).toContainText(EDITED_NAME);
     await expect(editedRow).toContainText("IT Staff");
     await expect(editedRow).toContainText("Inactive");
+    // Filter to the edited account so the capture shows just it.
+    await page.locator("#user-mgmt-search").fill(EDITED_EMAIL);
+    await expect(rows).toHaveCount(1);
     await page.screenshot({
       path: shot(PART8_DIR, "10-edit-name-email-role-active.png"),
-      fullPage: true,
     });
 
     // Re-activate before the password-reset/forced-login round trip below —
@@ -1090,7 +1091,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     ).toBeVisible();
     await page.screenshot({
       path: shot(PART8_DIR, "11-set-new-initial-password.png"),
-      fullPage: true,
     });
     await resetDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -1162,7 +1162,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
       ).toBeVisible();
       await page.screenshot({
         path: shot(PART8_DIR, "13-self-deactivation-blocked.png"),
-        fullPage: true,
       });
       await selfDialog.getByRole("button", { name: "Cancel" }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -1180,7 +1179,6 @@ test.describe("Part 8 — User Management (EV-04)", () => {
       );
       await page.screenshot({
         path: shot(PART8_DIR, "14-last-active-administrator-blocked.png"),
-        fullPage: true,
       });
       await lastAdminDialog.getByRole("button", { name: "Cancel" }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
