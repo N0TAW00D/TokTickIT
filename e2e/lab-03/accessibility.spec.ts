@@ -161,7 +161,7 @@ test.describe("A-03 Requester My Tickets accessibility (AC-56)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A-04: Requester Ticket Detail, with Public Comments (AC-56, AC-21, AC-42)
+// A-04: Requester Ticket Detail, with Public Comments (AC-56)
 // ---------------------------------------------------------------------------
 
 test.describe("A-04 Requester Ticket Detail (with Public Comments) accessibility (AC-56)", () => {
@@ -213,7 +213,7 @@ test.describe("A-05 IT Staff Ticket Queue accessibility (AC-56)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A-06: IT Staff Ticket Detail, with Internal Notes panel (AC-56, AC-41, AC-42)
+// A-06: IT Staff Ticket Detail, with Internal Notes panel (AC-56)
 // ---------------------------------------------------------------------------
 
 test.describe("A-06 IT Staff Ticket Detail (with Internal Notes) accessibility (AC-56)", () => {
@@ -289,10 +289,10 @@ test.describe("A-08 Administrator User Management (Create dialog) accessibility 
 });
 
 // ---------------------------------------------------------------------------
-// A-09: Forbidden screen (AC-18, AC-56)
+// A-09: Forbidden screen (AC-56)
 // ---------------------------------------------------------------------------
 
-test.describe("A-09 Forbidden screen accessibility (AC-18, AC-56)", () => {
+test.describe("A-09 Forbidden screen accessibility (AC-56)", () => {
   test("a Requester's forbidden-state view of an Administrator route has no serious/critical accessibility violations", async ({
     page,
   }, testInfo) => {
