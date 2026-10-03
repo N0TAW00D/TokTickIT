@@ -204,9 +204,10 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | R-01 | R | AC-56, V-11 | No horizontal overflow | `scrollWidth <= clientWidth` on every Lab 3 screen at 390, 820 and 1440 px | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-02 | R | V-10 | Queue reflow | Table at ≥ 992 px; Category dropped at tablet; cards below 768 px; five filters fit inside the controls panel at 991/992/1079/1080 px (filter row single-line from 1080 px) | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-03 | R | V-10 | Detail reflow | Two-column at desktop; single column with the operational panel first below; R-03b: every Ticket Information value fully readable (no truncation) at 991/992/1024/1080/1440 px, including a long Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-03c | R | V-10 | Requester Ticket Detail truncation | Every read-only field (Ticket No., Ticket Date, Category, Requester, Related System, Ticket Owner) fully readable (no truncation) at 390/820/992/1024/1440 px, including a 44-character Requester name | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-04 | R | V-14 | Dialogs at mobile | Create/edit dialogs usable at 390 px and restore focus on close | `e2e/lab-03/responsive.spec.ts` | Pass |
 | R-05 | R | V-09 | Focus visibility | Focus ring visible on every interactive element including Claim and badge links | `e2e/lab-03/responsive.spec.ts` | Pass |
-| R-06 | R | — | Screenshots | All four required folders populated at all three widths | `e2e/lab-03/responsive.spec.ts` | Pass |
+| R-06 | R | — | Screenshots | The four handout-required folders (Login, IT Staff Ticket Queue, IT Staff Ticket Detail, Administrator User Management) plus the extra change-password, requester-ticket-detail and forbidden folders populated at all three widths (`submission/` holds the Part 5–8 evidence set and is outside that list) | `e2e/lab-03/responsive.spec.ts` | Pass |
 
 ### 2.9 End-to-end
 
@@ -224,6 +225,37 @@ Desktop 1440×900, tablet 820×1180, mobile 390×844 — the Lab 2 matrix, uncha
 | E2E-10 | E | AC-52 | Initial password round trip | Admin sets a new initial password; that user logs in and is forced to change it | `e2e/lab-03/user-administration.spec.ts` | Pass |
 | E2E-11 | E | AC-53, AC-54 | Admin safety rails | Self-deactivation and last-active-Administrator are both refused in the UI | `e2e/lab-03/user-administration.spec.ts` | Pass |
 | E2E-12 | E | AC-55 | Forbidden admin access | A Requester navigating to `/admin/users` sees the forbidden state | `e2e/lab-03/user-administration.spec.ts` | Pass |
+
+### 2.9a Submission evidence
+
+Added in Issue #74: the handout's submission PDF (§14, Parts 5–8) asks the Lab report to
+"demonstrate" specific UI behaviours with evidence, not just claim a test covers them. E2E-01..E2E-12
+above already exercise most of that behaviour, but their screenshots (§2.8's R-01/R-05/R-06) are
+default-state shots at three viewports, not the individual named STATES (busy, validation failure,
+confirmation dialog, safe API failure, role-restricted absence, …) each Part's demonstration list
+calls for. `e2e/lab-03/submission-evidence.spec.ts` adds one `test.describe` per Part, each targeting
+one specific, asserted state before capturing it — the same idiom
+`e2e/lab-02/submission-evidence.spec.ts` established for Lab 2 — writing numbered screenshots to
+`artifacts/lab-03/screenshots/submission/part-N-*/NN-*.png`.
+
+| ID | T | AC | What it tests | Expected result | File | Status |
+|---|---|---|---|---|---|---|
+| EV-01 | E | AC-01, AC-02, AC-09 | Part 5 — Login/Change Password/Logout evidence | Valid landing (name+role), invalid-credentials safe error, inactive-account safe error, busy/submitting state, forced Change Password banner, a password-rule validation error, successful continuation, logout, and a protected URL after logout redirecting to Login | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-02 | E | AC-26…AC-30, AC-32, AC-33 | Part 6 — IT Staff Ticket Queue evidence | Realistic queue data with assigned/unassigned owners and status/priority badges, search, filters, sorting, pagination page 2, opening a ticket, the no-results state, the genuinely-empty (zero-ticket) state, an API-failure state, and the mobile card layout | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-03 | E | AC-04, AC-24, AC-34, AC-37, AC-41, AC-42 | Part 7 — IT Staff Ticket Detail evidence | Claim, reassign, IT Priority change, a Public Comment, an Internal Note (visually distinct), attachment-list continuity, a Requester's "Problem appears resolved" indication seen by staff, an empty-comment validation error, a routed-500 safe failure, a permitted status change with its confirmation dialog, a Requester's role-restricted view (no Internal Notes, no staff controls), and direct-API authorization evidence (`GET /api/tickets/:id/notes` as unauthenticated → 401, as the owning Requester → 404, written to `part-7-staff-detail/api-authz-evidence.json`) | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+| EV-04 | E | AC-45…AC-49, AC-51…AC-54 | Part 8 — Administrator User Management evidence | The Name/Email/Role/Status/Edit list, search by name, search by email, a role filter, the Create User dialog and its success, a duplicate-email rejection, invalid-input validation (name/email/password together), editing name/email/role/active, setting a new initial password and that user's next forced-change login, self-deactivation blocked, last-active-Administrator blocked, a non-admin forbidden state, the mobile layout, and a safe API failure | `e2e/lab-03/submission-evidence.spec.ts` | Pass |
+
+The AC column lists only the criteria whose UI side an EV test asserts. The EV rows are screenshot
+evidence, not the proof of the ACs: AC-05 and AC-10 (same status/body for all three login failures; a
+logged-out token is unauthenticated) are proven by API tests, as are AC-31 (400 on bad query
+parameters), AC-38…AC-40 (the §5.1 transition matrix, conflicts and the no-owner rule), AC-50 (invalid
+role) and AC-55 (Requester and IT Staff both refused on every Administrator endpoint). EV-04 shows only
+the Requester half of AC-55's forbidden state. Rows that use a `page.route` stub (EV-02's empty and
+API-failure states, EV-03's routed 500, EV-04's API failure) show a stubbed response, not a real
+backend failure.
+
+Everything each Part's demonstration list asks for was reproducible in the running app and is captured
+above — nothing in Parts 5–8 needed to be reported as unable-to-demonstrate.
 
 ### 2.10 Accessibility
 
@@ -251,7 +283,7 @@ keyboard/reflow checks, which axe's automated ruleset cannot express.
 | A-09 | A11Y | AC-56 | Forbidden screen (a Requester visiting an Administrator route) | Zero `serious`/`critical` axe violations | `e2e/lab-03/accessibility.spec.ts` | Pass |
 
 A-04 and A-06 found one real, reproducible finding during authoring — not a rule exclusion, a genuine
-transient defect this dispatch tracked down and fixed at its root: `MessageThread`'s submit button
+transient defect this work tracked down and fixed at its root: `MessageThread`'s submit button
 (`Button.css`'s `.zen-btn`, 150ms `background-color`/`color` transition) briefly toggles disabled
 (`--zen-readonly-bg`/`--zen-text-muted`) then re-enabled (`--zen-primary`/white) around its
 `postEntry(...)` call. Both end states independently clear WCAG AA contrast, but a scan landing mid-
@@ -313,8 +345,8 @@ C-03/08/12/15, S-01…S-06 (V-01…V-08) and R-02…R-06 (V-09…V-14). They are
 every one of them is cited from the rule or checklist row it serves.
 
 **Totals:** 11 unit, 50 API (16 auth + 24 operations + 10 admin), 9 security/authorization,
-8 migration/regression, 18 UI component, 6 UI style, 6 responsive, 12 E2E, 9 accessibility —
-**129 planned tests** covering all 70 acceptance criteria across the eight levels handout §10
+8 migration/regression, 18 UI component, 6 UI style, 7 responsive, 16 E2E, 9 accessibility —
+**134 planned tests** covering all 70 acceptance criteria across the eight levels handout §10
 requires, plus a ninth (accessibility) level added in Issue #74.
 
 ---
@@ -324,14 +356,14 @@ requires, plus a ninth (accessibility) level added in Issue #74.
 The V-01…V-14 checklist in [`ui-spec.md`](./ui-spec.md) §15, executed at all three viewports and
 recorded here at release. Ten rows (V-01, V-04–V-11, V-14) are proven automatically by S-01…S-06
 and R-01…R-06 above; the remaining four (V-02, V-03, V-12, V-13) have no automated assertion and
-were confirmed by personally inspecting all 12 committed screenshots in
-`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`.
+were confirmed by personally inspecting all 21 committed screenshots in
+`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management,change-password,requester-ticket-detail,forbidden}/`.
 
 | # | Check | Result |
 |---|---|---|
 | V-01 | Every colour comes from a token; no hard-coded hex outside `theme.css`. | Pass — S-01 |
-| V-02 | New screens are visually of a piece with the Lab 2 screens — same card, spacing and type scale. | Pass — all four screens share Lab 2's card shell, spacing scale and heading type; inspected directly. |
-| V-03 | Nav shows only the authenticated role's destinations; no unauthorized destination is rendered. | Pass — each screenshot's top nav shows exactly one destination for its role (Ticket Queue for IT Staff, User Management for Administrator, none for the unauthenticated Login screen). |
+| V-02 | New screens are visually of a piece with the Lab 2 screens — same card, spacing and type scale. | Pass — all seven screens share Lab 2's card shell, spacing scale and heading type; inspected directly. |
+| V-03 | Nav shows only the authenticated role's destinations; no unauthorized destination is rendered. | Pass — each screenshot's top nav shows exactly one destination for its role (My Tickets for Requester, Ticket Queue for IT Staff, User Management for Administrator, none for the unauthenticated Login screen); the forbidden screenshot (a Requester turned away from `/staff/tickets`) renders no nav at all — the wrapped IT Staff screen never mounts. |
 | V-04 | Status, Requested Priority, IT Priority and Role badges are consistent everywhere they appear. | Pass — S-02 |
 | V-05 | IT Priority is never mistakable for Requested Priority where both appear on one row. | Pass — S-03 |
 | V-06 | Editable fields are visually distinct from read-only fields on IT Staff Ticket Detail. | Pass — S-04; visually confirmed in the staff-ticket-detail screenshots (muted read-only boxes on the left, the white "Ticket Operations" card on the right). |
@@ -360,10 +392,14 @@ npm run test:all                  # everything, from the repository root
 
 ## 6. Final Results
 
-Filled in Issue #74 from a real run on the final branch (`feat/74-integration`). Every count below
-was independently observed by running the command in that row, not copied from an agent's
-self-report — see [`ai-use.md`](./ai-use.md) for how each level's implementation and this
-reconciliation pass were produced.
+Filled in Issue #74 from a real run on the final branch (`feat/74-integration`), then updated again
+when the submission-evidence work added EV-01..EV-04 (§2.9a). Every count below was independently
+observed by running the command in that row, not copied from an agent's self-report — see
+[`ai-use.md`](./ai-use.md) for how each level's implementation and this reconciliation pass were
+produced. The E2E/full-suite numbers below reflect a real, synchronous run of the FULL
+`npm run test:e2e` (not the submission-evidence file in isolation) made after that work fixed two
+tests that had turned out to be order-dependent on state an earlier spec file in the same run
+mutates — see this section's note below the table.
 
 | Level | Planned | Passing | Command |
 |---|---|---|---|
@@ -373,18 +409,47 @@ reconciliation pass were produced.
 | Migration / regression | 8 | 8 | `npm run test:server` |
 | UI component | 18 | 18 | `npm run test:client` |
 | UI style | 6 | 6 | `npm run test:client` |
-| Responsive | 6 | 6 | `npm run test:e2e` |
-| E2E | 12 | 12 | `npm run test:e2e` |
+| Responsive | 7 | 7 | `npm run test:e2e` |
+| E2E | 16 | 16 | `npm run test:e2e` |
 | Accessibility | 9 | 9 | `npm run test:e2e` |
-| **Total** | **129** | **129** | `npm run test:all` |
+| **Total** | **134** | **134** | `npm run test:all` |
 
-`npm run test:server`: 591/591 passing (27 files). `npm run test:client`: 349/349 passing (19
-files). `npm run test:e2e`: 154/154 passing (lab-02 regression suite + all lab-03 specs, including
-the 11 individual `test()` cases the 9 planned accessibility IDs above expand into — A-05 and A-07
-each cover a desktop and a 390px-mobile pass). No test is skipped, disabled or marked `.only`
-anywhere in the repository (`specification.md` §10.1) — every row in this document is now backed by
-a real, passing test written to the letter of its own claim; the full 129-test suite passes with no
-gap, matching Issue #74's own AC.
+The E2E row's 12 -> 16 planned IDs are E2E-01..E2E-12 (pre-existing) plus EV-01..EV-04 (§2.9a, added
+by the submission-evidence work).
+
+`npm run test:server`: 591/591 passing (27 files, unchanged by this work). `npm run test:client`:
+349/349 passing (19 files, unchanged by this work). `npm run test:e2e`: **210/210 passing**
+(lab-02 regression suite + all lab-03 specs, run to completion with zero failures). `lab3-staging`
+currently records 154/154; the jump to 210 is 56 individual `test()` cases:
+
+- **+24** from `e2e/lab-03/submission-evidence.spec.ts` (EV-01..EV-04: Part 5: 3, Part 6: 10,
+  Part 7: 4, Part 8: 7).
+- **+32** in `e2e/lab-03/responsive.spec.ts`: five R-03c per-width cases, and 27 from the three new
+  screens (Change Password, Requester Ticket Detail, forbidden) added to R-01/R-05/R-06's existing
+  per-screen loops.
+
+The 210 total is well above what the 7 Responsive + 16 E2E + 9 Accessibility planned IDs alone would
+suggest because most of those IDs expand into many individual `test()` cases (one per screen ×
+viewport, or per width). No test is skipped, disabled or marked `.only` anywhere in the repository
+(`specification.md` §10.1) — every row in this document is now backed by a real, passing test
+written to the letter of its own claim; the full 134-test suite (210 raw `npm run test:e2e` cases
+within it) passes with no gap, matching Issue #74's own AC.
+
+**Order-dependence fix (submission-evidence work):** an earlier version of
+`e2e/lab-03/submission-evidence.spec.ts` passed in isolation but failed twice when run as part of the
+FULL `npm run test:e2e` (`staff-ticket-flow.spec.ts` runs first alphabetically and its E2E-06
+permanently claims and moves TKT-2026-900001 out of `NEW`): two Part 6 assertions had keyed off that
+seed.ts ticket's mutable status/ownership instead of this spec's own fixtures. Fixed by scoping both
+assertions to `e2e/support/staffFixtures.ts`'s own pagination-fixture tickets (freshly re-created,
+NEW/unassigned, in this file's own `beforeAll` on every run) — one is assigned an owner through the
+real `PATCH /api/tickets/:id/owner` endpoint from inside the test itself, and the NEW-count filter
+check is scoped with a search marker unique to those fixtures — rather than any seed.ts ticket. The
+genuinely-empty-queue evidence (`10-queue-truly-empty-state.png`) was also changed from a `DELETE FROM
+"Ticket"` (destructive shared-DB state a later spec file could have depended on) to a `page.route`
+stub of `GET /api/staff/tickets` returning `{ items: [], totalItems: 0, ... }` — the same technique
+already used for the API-failure screenshot, and sufficient because
+`StaffTicketQueueScreen.tsx`'s `classifyQueue` derives the "empty" vs. "no-results" variant purely
+from that response shape plus whether a query is active, never from anything else.
 
 ## 7. Known Limitations
 
@@ -413,6 +478,18 @@ gap, matching Issue #74's own AC.
   checks at 991/992/1024/1080/1440 px with realistic values, plus a 65-character Requester name at
   992/1024/1440 px), sabotage-verified: reverting either CSS change fails R-03b on the specific
   field and width. The three `staff-ticket-detail` screenshots were re-captured and re-inspected.
+  A second, distinct instance of the same underlying bug was found during Issue #74's own
+  screenshot-evidence work: the Requester Ticket Detail screen's `.zen-ticket-detail__field-value`
+  also used ellipsis truncation, but `text-overflow: ellipsis` never actually applies to a flex
+  container's bare text content — so a long value (e.g. a long Requester name) was silently
+  hard-clipped mid-character with no ellipsis rendered at all, worse than the Staff screen's bug
+  above (which at least showed a too-narrow box). Fixed the same way: `.zen-ticket-detail__field-value`
+  switched from `white-space: nowrap; text-overflow: ellipsis; overflow: hidden` to `white-space:
+  normal; overflow-wrap: anywhere; overflow: visible`, matching `.zen-staff-detail__field-value`'s own
+  fix. Covered by R-03c (the same per-field `scrollWidth <= clientWidth` + full-text technique as
+  R-03b, at 390/820/992/1024/1440 px against the `requester-ticket-detail` fixture's own 44-character
+  Requester name), sabotage-verified: reverting the CSS change fails R-03c on the Requester field at
+  every width. The three `requester-ticket-detail` screenshots were re-captured and re-inspected.
 - **The E2E database (`toktickit_e2e`) reset script did not truncate the `User` table** until this
   Issue: every Lab 3 E2E spec that creates a real, persisted User through the live UI/API (a login
   fixture, an admin-created account) left that row behind indefinitely, since `seed.ts` only

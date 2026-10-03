@@ -329,8 +329,8 @@ Lab 2 §12 applies unchanged. Lab 3 additions:
 ## 15. Visual inspection checklist
 
 Executed in [`tests.md`](./tests.md); screenshots committed under
-`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/` at
-desktop, tablet and mobile. Every row is checked at all three widths.
+`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management,change-password,requester-ticket-detail,forbidden}/`
+at desktop, tablet and mobile. Every row is checked at all three widths.
 
 | # | Check |
 |---|---|

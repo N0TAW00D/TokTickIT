@@ -647,7 +647,8 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 - [ ] Test files exist at the handout §12 paths: `server/tests/lab-03/`, `client/tests/lab-03/`,
       `e2e/lab-03/`.
 - [ ] Screenshots are committed under `artifacts/lab-03/screenshots/` in the four required
-      subfolders, at all three widths.
+      subfolders (authentication, staff-queue, staff-ticket-detail, user-management) plus the extra
+      change-password, requester-ticket-detail and forbidden folders, at all three widths.
 - [ ] Every Lab 3 Issue is Done on the Kanban board, with feature branches merged into
       `lab3-staging` and then `main`.
 - [ ] `reviewer.md` records reviewer identity, PR links, comments, responses and approvals.
