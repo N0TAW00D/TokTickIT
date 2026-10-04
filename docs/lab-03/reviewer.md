@@ -6,13 +6,13 @@ release PR — there are no direct commits to `main` or `lab3-staging`.
 
 Complete through release PR #89 (Issue #74), approved and merged into `main`. Release PR #85
 (`lab3-staging` → `main`) was opened and then closed unmerged on 2026-09-27, before review; #89
-replaced it.
+replaced it. One documentation-only PR, #90, followed the release straight into `main`.
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#89). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#90). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed and merged every Lab 3 pull request. Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Not a reviewer on Lab 3, matching Lab 2 (see `docs/lab-02/reviewer.md`). |
 
@@ -40,6 +40,7 @@ Lab 2's record uses.
 | [#87](https://github.com/N0TAW00D/TokTickIT/pull/87) | axe accessibility e2e, A-01..A-09 (#74) | **Changes requested** ×4 → approved | 5 |
 | [#88](https://github.com/N0TAW00D/TokTickIT/pull/88) | Part 5–8 submission evidence + Requester detail wrap fix (#74) | **Changes requested** ×4 → approved | 5 |
 | [#89](https://github.com/N0TAW00D/TokTickIT/pull/89) | `lab3-staging` → `main` release integration (#74) | Commented (3 findings) → approved | 2 |
+| [#90](https://github.com/N0TAW00D/TokTickIT/pull/90) | Post-release docs: record #89, tick the Definition of Done, add the submission source | Approved | 1 |
 
 Notes:
 - Every Lab 3 feature PR (#75–#88) was approved and merged by `Palapluem`. #85, the first attempt at
@@ -320,15 +321,23 @@ no longer states 154/154 as a current total, and this file now covers #86–#89.
 591/591 passing. The test results and release record are also consistent now. I found no remaining
 blocking issues and approve this PR." `Palapluem` merged #89 into `main` as `6d66399`.
 
+### #90 — Approved: post-release documentation
+
+A documentation-only PR into `main` after the release: it records #89's approval here, ticks the
+Definition of Done in `specification.md` §10, and adds `submission.typ` with the Part 1 evidence
+screenshots. **Approval (2026-10-04, head `9f1a884`):** "The post-merge reviewer record and
+Definition of Done match PR #89, and the submission source contains Parts 1–9 in order with all
+referenced screenshot files present. I found no blocking issues and approve this documentation
+update." `Palapluem` merged #90 into `main` as `844f093`.
+
 ## 4. Corrections issued by the author
 
-No claim made to the reviewer during Lab 3 has needed retraction so far (unlike Lab 2's #32/#33/#44
-— see `docs/lab-02/reviewer.md` §4). This section will be updated if that changes on the release
-PR.
+No claim made to the reviewer during Lab 3 needed retraction (unlike Lab 2's #32/#33/#44 — see
+`docs/lab-02/reviewer.md` §4).
 
 ## 5. Direction of review
 
-Every Lab 3 pull request (#75–#89) is authored by
+Every Lab 3 pull request (#75–#90) is authored by
 `N0TAW00D` and reviewed by `Palapluem`. Review within Lab 3 therefore flows in one direction, the
 same as Lab 2 (see `docs/lab-02/reviewer.md` §5): this record holds the comments the author
 **received** and the author's **responses**, not comments given by the author on a teammate's PR.

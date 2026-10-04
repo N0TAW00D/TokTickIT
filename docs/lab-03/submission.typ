@@ -72,10 +72,11 @@
 
 == Git use with engineering workflow
 
-*Workflow.* `lab3-staging` was cut from `main`. Each of the nine Lab 3 Issues (#66–#74) was
+*Workflow.* `lab3-staging` was cut from `main`. Each of the nine Lab 3 Issues (\#66–\#74) was
 implemented on its own feature branch and merged into `lab3-staging` through a peer-reviewed pull
 request (#pr(75)–#pr(88)); `lab3-staging` reaches `main` through one release PR, #pr(89)
-(#pr(85), the first attempt, was closed unmerged before review). No direct commits to `main` or `lab3-staging`.
+(#pr(85), the first attempt, was closed unmerged before review). One documentation-only PR, #pr(90), followed
+the release into `main`. Nothing was committed directly to `main` or `lab3-staging`.
 
 - Commit history: #link(repo + "/commits/main")[github.com/N0TAW00D/TokTickIT/commits/main]
 - Pull requests: #link(repo + "/pulls?q=is:pr")[all PRs]
@@ -100,7 +101,7 @@ e857b06 2026-09-15  Merge pull request #77 from N0TAW00D/feat/68-authentication
 28347a2 2026-09-14  Merge pull request #75 from N0TAW00D/docs/66-lab-03-spec
 ```
 
-IDE Git graph of `main` (newest at top): the #pr(89) release merge of `lab3-staging` sits above the
+IDE Git graph of `main` (newest at top, captured before #pr(90)): the #pr(89) release merge of `lab3-staging` sits above the
 feature-branch merges #pr(88) → #pr(75), which in turn sit on Lab 2's #pr(65).
 
 #crop("submission/part-1-workflow/git-graph-1-recent.png", 990, 1386, [1. Newest: #pr(89) release merge → #pr(83)], w: 12.5cm)
@@ -110,32 +111,34 @@ feature-branch merges #pr(88) → #pr(75), which in turn sit on Lab 2's #pr(65).
 *Project board (Kanban).* GitHub Project: #link("https://github.com/users/N0TAW00D/projects/3")[TokTickIT Individual Sprints]
 (columns Backlog → Specified → Started → PR Review → (Fixing) → Done).
 
-#crop("submission/part-1-workflow/kanban-all-done.png", 2172, 1646, [Project board: Backlog, Specified, Started, PR Review and Fixing are all 0; Done holds all 21 items, including Lab 3 Issues #66–#74 (the Done list is scrolled, so #66 is just above the visible area).], w: 15cm)
+#crop("submission/part-1-workflow/kanban-all-done.png", 2172, 1646, [Project board: Backlog, Specified, Started, PR Review and Fixing are all 0; Done holds all 21 items, including Lab 3 Issues \#66–\#74 (the Done list is scrolled, so \#66 is just above the visible area).], w: 15cm)
 
 *Reviewer record* (#doc("docs/lab-03/reviewer.md") §1–§3). Author `N0TAW00D` (Natthawat
 Primsirikunawut); reviewer `Palapluem` (Wisit Suwannao), who reviewed and merged every Lab 3 feature PR
-(#pr(75)–#pr(88) in the record); `THN4` (Thanatip Nitinantakul) was not a Lab 3 reviewer.
+(#pr(75)–#pr(90) in the record); `THN4` (Thanatip Nitinantakul) was not a Lab 3 reviewer.
 
 #tbl((auto, 1fr, 1.2fr, auto), aligns: (center + horizon, left, left, center + horizon),
   [*PR*], [*Title*], [*Review outcome*], [*Rounds*],
-  [#pr(75)], [Lab 3 specification, API spec, UI spec and test plan (#66)], [Commented (1 real finding) → approved], [2],
-  [#pr(76)], [User model, Lab 2 migration and Lab 3 seed data (#67)], [Commented (1 finding) → approved], [2],
-  [#pr(77)], [Authentication foundation (#68)], [Changes requested → approved], [2],
-  [#pr(78)], [Role-based authorization and role-aware shell (#69)], [Changes requested → approved], [2],
-  [#pr(79)], [Requester regression, Public Comments, resolved indication (#70)], [Changes requested → approved], [2],
-  [#pr(80)], [IT Staff Ticket Queue (#71)], [Changes requested → approved], [2],
-  [#pr(81)], [IT Staff Ticket Detail (#72)], [Changes requested ×3 → approved], [4],
-  [#pr(82)], [Administrator User Management (#73)], [Changes requested → approved], [2],
-  [#pr(83)], [E2E, responsive/visual inspection, release integration (#74)], [Changes requested ×2 → approved], [3],
-  [#pr(84)], [Finish Staff Ticket Detail clipping; record #pr(83) review (#74)], [Changes requested → approved], [2],
+  [#pr(75)], [Lab 3 specification, API spec, UI spec and test plan (\#66)], [Commented (1 real finding) → approved], [2],
+  [#pr(76)], [User model, Lab 2 migration and Lab 3 seed data (\#67)], [Commented (1 finding) → approved], [2],
+  [#pr(77)], [Authentication foundation (\#68)], [Changes requested → approved], [2],
+  [#pr(78)], [Role-based authorization and role-aware shell (\#69)], [Changes requested → approved], [2],
+  [#pr(79)], [Requester regression, Public Comments, resolved indication (\#70)], [Changes requested → approved], [2],
+  [#pr(80)], [IT Staff Ticket Queue (\#71)], [Changes requested → approved], [2],
+  [#pr(81)], [IT Staff Ticket Detail (\#72)], [Changes requested ×3 → approved], [4],
+  [#pr(82)], [Administrator User Management (\#73)], [Changes requested → approved], [2],
+  [#pr(83)], [E2E, responsive/visual inspection, release integration (\#74)], [Changes requested ×2 → approved], [3],
+  [#pr(84)], [Finish Staff Ticket Detail clipping; record #pr(83) review (\#74)], [Changes requested → approved], [2],
   [#pr(85)], [`lab3-staging` → `main` release (first attempt)], [Closed unmerged, before review], [—],
-  [#pr(86)], [Traceability and reviewer-log audit fixes (#74)], [Changes requested ×2 → approved], [3],
-  [#pr(87)], [axe accessibility e2e, A-01..A-09 (#74)], [Changes requested ×4 → approved], [5],
-  [#pr(88)], [Part 5–8 submission evidence + Requester detail wrap fix (#74)], [Changes requested ×4 → approved], [5],
+  [#pr(86)], [Traceability and reviewer-log audit fixes (\#74)], [Changes requested ×2 → approved], [3],
+  [#pr(87)], [axe accessibility e2e, A-01..A-09 (\#74)], [Changes requested ×4 → approved], [5],
+  [#pr(88)], [Part 5–8 submission evidence + Requester detail wrap fix (\#74)], [Changes requested ×4 → approved], [5],
   [#pr(89)], [`lab3-staging` → `main` release PR], [Commented (3 findings), fixed → approved], [2],
+  [#pr(90)], [Post-release docs: reviewer record, Definition of Done, this submission source], [Approved], [1],
 )
 
-#pr(89) was approved on 2026-10-04 ("I found no remaining blocking issues and approve this PR") and merged into `main` as `6d66399`; `reviewer.md` records #pr(75)–#pr(89).
+#pr(89) was approved on 2026-10-04 ("I found no remaining blocking issues and approve this PR") and merged into `main` as `6d66399`.
+#pr(90) was approved the same day and merged as `844f093`, the final `main`. `reviewer.md` records #pr(75)–#pr(90).
 
 *Representative review findings and resolutions* (full quotes and replies in `reviewer.md` §3):
 
@@ -277,7 +280,7 @@ and known limitations (§7).
 AC-05 → API-02, C-02, E2E-01, E2E-03; AC-10 → API-07, E2E-04; AC-40 → UNIT-06, API-31; AC-14 → SEC-01; AC-41 → API-37, E2E-07.
 Authorization is asserted only at the HTTP layer (SEC rows), never by UI visibility.
 
-*Final status as recorded in `tests.md` §6* (a real, synchronous run on the Issue #74 integration work;
+*Final status as recorded in `tests.md` §6* (a real, synchronous run on the Issue \#74 integration work;
 no test skipped, disabled or `.only`):
 
 ```
@@ -289,13 +292,12 @@ planned IDs: 134 / 134 Pass
 
 The visual checklist V-01…V-14 is reproduced in Answer Part 9.
 
-*Run on `main`* (`6d66399`, merge of #pr(89)), `npm run test:all` after `npm install --prefix e2e`:
+*Passing test output from `main`* (`844f093`, after #pr(90)): `npm run test:all` runs the three suites
+in sequence. The terminal tail of each:
 
-```
-npm run test:server   27 files   591 / 591 passed
-npm run test:client   19 files   349 / 349 passed
-npm run test:e2e                 210 / 210 passed (3.5 min)
-```
+#crop("submission/part-3-tests/01-server-591.png", 1564, 534, [Server (unit, API, security, migration/regression): 27 files, *591 / 591 passed*.], w: 15cm)
+#crop("submission/part-3-tests/02-client-349.png", 1882, 836, [Client (UI component and UI style): 19 files, *349 / 349 passed*.], w: 15cm)
+#crop("submission/part-3-tests/03-e2e-210.png", 1224, 768, [E2E (Lab 2 regression and every Lab 3 spec: E2E, responsive, accessibility, evidence): *210 passed* in 3.4 min.], w: 12cm)
 
 These match the totals recorded in `tests.md` §6.
 
@@ -312,29 +314,41 @@ open a PR or merge); mechanical test-file touch-ups went to *Claude Haiku*. The 
 reviewed every output, decided every judgement call and responded to review; every merge was done by the
 reviewer `Palapluem`. No model version numbers are claimed beyond "Claude / Sonnet / Haiku".
 
-*Selected key prompts* (`ai-use.md`, 7 representative prompts, summarized and not verbatim):
+*Selected key prompts.* Eight prompts copied from my Claude Code sessions, typos left as typed
+(the full table, with what each one produced, is in `ai-use.md`):
 
-#tbl((auto, 1fr, 1.2fr),
-  [1 · #pr(75)], [Draft the four `docs/lab-03/` contract documents extending Lab 2's; every AC maps to a planned test with a real file path; minimal symmetric Issue dependency graph; self-audit for over-scope.], [Four documents + a self-audit that caught a dependency asymmetry and an over-scope leak; the reviewer re-derived the FR/BR/AC counts and contrast ratios.],
-  [2 · #pr(76)], [Rename `RequesterUser` to `User`, add Session / comment / note models, hand-write migration SQL so Lab 2 rows survive, seed all three roles idempotently.], [Hand-edited migration and a `lower(email)` unique index; sabotage-audited, MIG-01..06 re-run 198/198.],
-  [3 · all PRs], [For each slice break one specific guard (role check, 403 branch, page-reset …) and confirm exactly the matching test fails.], [60+ sabotage rounds, each re-run by the human rather than trusted.],
-  [4 · #pr(80)], [Reviewer found no endpoint to list IT Staff for the Owner filter: decide amend-now vs. defer, draft the amendment.], [New contract §4.2 endpoint `GET /api/staff/assignable-users` with a traceability row; decision made by the human.],
-  [5 · #pr(82)], [Fix sessions surviving deactivation and the last-Administrator race, each with a regression test.], [Session deletion on every deactivating PATCH; count + rows locked in one `$transaction` (`SELECT … FOR UPDATE`); both reverted individually to prove the new tests fail.],
-  [6 · #74], [Write the responsive/screenshot spec (R-01..R-06) for all Lab 3 screens at three viewports.], [Exposed a real 188 px tablet overflow in the five-filter row; fix reverted and restored to prove the test.],
-  [7 · #74], [Reconcile `tests.md` honestly: flip a row to Pass only if a real, non-trivial test matches its literal claim.], [111 of 120 initially verified, 9 left `Planned` with named gaps, 2 missing tests written from scratch; final 134 / 134.],
+#tbl((auto, 1fr, 1fr),
+  [*When*], [*My prompt*], [*What came out of it*],
+  [09-11 · \#66], ["Please define all detail and create board management throught this labsheet pls 100 percent follow the sheet, dont too much and lesser than the sheet define, concise to the sheet, pls prepare things that can wait for the \#65 merge"], [Nine Issues \#66–\#74 with a dependency graph. `lab3-staging` was cut only after Lab 2's \#65 merged.],
+  [09-12 · \#66], ["docs have been merge, it will be great to summon another opus to audit yours to be super concise"], [Issue bodies cut from 2,874 to 2,058 words by pointing at handout sections instead of retyping them.],
+  [09-15 · \#70], ["… last time we found the issue that it took to much resource on touching testcase fix, maybe when touch the test case we might use haiku to help"], [Mechanical test fixes went to Haiku from then on, and Sonnet was kept for design work.],
+  [09-17 · \#71], ["try to give agent with many of small task so token of agent will not overflow instead of summon 1 agent to fix all things"], [\#71 was split into six small dispatches (\#72 used 13, \#73 used 9), each small enough to re-run and read.],
+  [09-20 · \#72], ["why co author by claude" → "strip" → "i wanna cancel all since 59cee64 and recommit"], [History after `59cee64` rewritten without the AI co-author line, and "no co-author" added to every later brief.],
+  [09-25 · \#74], ["and i think we didnt have new update screenshot? from e2e test?" → "fix the clipping first, is it no need to re capture?"], [Staff Ticket Detail clipping fixed first, then screenshots re-captured (#pr(84)).],
+  [09-27 · release], ["pls summon subagent gang to check the completeness due to this pdf sheet" → "move 1 to the last we will finish all things first before big merge"], [Five auditors checked against the handout. #pr(85) was closed, the gaps were fixed in #pr(86)–#pr(88), then one release PR, #pr(89).],
+  [10-04 · submission], ["help me to correct does my action follow all of this '…/Lab_3_sheet.pdf'"], [A final requirement-by-requirement check. The reviewer record and the Definition of Done were completed in #pr(90).],
 )
 
-*My Reflection* (full text in `ai-use.md`). Lab 3 kept the controller/subagent split from Lab 2 and made
-three things sharper. First, *decomposition had to go deeper than PR size*: handing one agent a whole Issue
-filled its context with noise before I could trust its self-report; splitting an Issue into five or six small
-dispatches made each output small enough to actually read, and kept the sabotage audits meaningful across
-nine Issues. Second, *a green suite was still not an honest one*: `tests.md` was written entirely up front,
-and reconciling its Status column needed the same skepticism as auditing an agent's "done" — several rows
-claimed more than their test proved, two had never been picked up at all, and leaving nine rows honestly
-`Planned` looked worse than a clean 120/120 but was accurate. Third, *the controller sometimes had to make a
-call an agent rightly would not*: when the reviewer found the Owner filter had no staff endpoint, I amended
-the frozen `api-spec.md` first and only then had it implemented. Agents build faithfully against whatever
-contract they are given; deciding when the contract itself must change is where the human accountability lives.
+*My Reflection*
+
+_Specification agent._ Writing the four contract documents before any code helped the most. When a
+question came up (which status changes are allowed, can an Administrator comment, 403 or 404 for
+another Requester's ticket) the answer was already written down, so the coding agent did not guess.
+The contract still had holes. On #pr(80) the reviewer found that the Owner filter needed a staff list
+that no endpoint provided. I amended `api-spec.md` myself first and only then had an agent build it.
+I don't think the agent should be the one deciding to change the contract it is building against.
+
+_Coding agent._ The biggest change from Lab 2 was how I gave out work. One agent per Issue ran out of
+context and gave reports I couldn't trust. From \#71 on I split each Issue into small tasks, so I
+could read every result. I also stopped trusting "all tests pass". I re-ran each suite myself and
+broke guards on purpose to check that the right test failed. Even so, the reviewer found real bugs I
+had missed, such as the `/` redirect ignoring role (#pr(83)) and clipped fields on Staff Ticket Detail
+(#pr(84)), so peer review still mattered on top of my own checks.
+
+_Next time._ I would put the standing rules ("no co-author", "run tests in the foreground", "one small
+task per agent") into the first brief instead of adding them after something broke. I would also look
+at the screenshots myself earlier, because most of the layout bugs were visible there long before a
+test caught them.
 
 = Answer Part 5
 
