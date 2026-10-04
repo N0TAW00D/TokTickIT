@@ -624,38 +624,38 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 
 ### 10.1 Product completion — the coding agent may claim "done" only when all hold
 
-- [ ] Every FR in §4 is implemented and every BR in §5 is enforced on the server.
-- [ ] Every AC in §9 passes, each covered by at least one automated test in `tests.md`.
-- [ ] The authorization matrix in §4.1 is enforced by the backend for every protected operation;
+- [x] Every FR in §4 is implemented and every BR in §5 is enforced on the server.
+- [x] Every AC in §9 passes, each covered by at least one automated test in `tests.md`.
+- [x] The authorization matrix in §4.1 is enforced by the backend for every protected operation;
       no control is protected by UI visibility alone.
-- [ ] The migration applies to a database holding Lab 2 data with every Ticket and Attachment
+- [x] The migration applies to a database holding Lab 2 data with every Ticket and Attachment
       intact and correctly owned; the seed is idempotent across repeated runs.
-- [ ] No Development Requester selector, `GET /api/requesters` endpoint, `X-Requester-Id`
+- [x] No Development Requester selector, `GET /api/requesters` endpoint, `X-Requester-Id`
       middleware or stored client selection remains in the codebase.
-- [ ] Passwords exist only as bcrypt hashes; no secret is committed.
-- [ ] The full suite — unit, API/integration, UI component, UI style, responsive,
+- [x] Passwords exist only as bcrypt hashes; no secret is committed.
+- [x] The full suite — unit, API/integration, UI component, UI style, responsive,
       security/authorization, migration/regression and E2E — passes, with no skipped, disabled or
       `.only` tests.
-- [ ] Every major screen is verified at desktop, tablet and mobile, and the visual checklist in
+- [x] Every major screen is verified at desktop, tablet and mobile, and the visual checklist in
       `ui-spec.md` is complete.
-- [ ] Nothing from §3.2 has been built.
+- [x] Nothing from §3.2 has been built.
 
 ### 10.2 Course delivery
 
-- [ ] `docs/lab-03/` holds `specification.md`, `ui-spec.md`, `api-spec.md`, `tests.md`,
+- [x] `docs/lab-03/` holds `specification.md`, `ui-spec.md`, `api-spec.md`, `tests.md`,
       `reviewer.md` and `ai-use.md`.
-- [ ] Test files exist at the handout §12 paths: `server/tests/lab-03/`, `client/tests/lab-03/`,
+- [x] Test files exist at the handout §12 paths: `server/tests/lab-03/`, `client/tests/lab-03/`,
       `e2e/lab-03/`.
-- [ ] Screenshots are committed under `artifacts/lab-03/screenshots/` in the four required
+- [x] Screenshots are committed under `artifacts/lab-03/screenshots/` in the four required
       subfolders (authentication, staff-queue, staff-ticket-detail, user-management) plus the extra
       change-password, requester-ticket-detail and forbidden folders, at all three widths.
-- [ ] Every Lab 3 Issue is Done on the Kanban board, with feature branches merged into
+- [x] Every Lab 3 Issue is Done on the Kanban board, with feature branches merged into
       `lab3-staging` and then `main`.
-- [ ] `reviewer.md` records reviewer identity, PR links, comments, responses and approvals.
-- [ ] `ai-use.md` names the LLM and shows 6–10 key prompts with a reflection.
-- [ ] Evidence is captured that this specification existed before the implementation PRs were
+- [x] `reviewer.md` records reviewer identity, PR links, comments, responses and approvals.
+- [x] `ai-use.md` names the LLM and shows 6–10 key prompts with a reflection.
+- [x] Evidence is captured that this specification existed before the implementation PRs were
       completed (handout §14 Part 2).
-- [ ] `README.md` and `.gitignore` are current.
+- [x] `README.md` and `.gitignore` are current.
 
 ## 11. Assumptions and Decisions
 
