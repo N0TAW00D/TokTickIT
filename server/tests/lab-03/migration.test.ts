@@ -212,16 +212,18 @@ describe('Lab 2 -> Lab 3 migration (specification.md §7.4)', () => {
       );
       expect(columns.rows.length).toBeGreaterThan(0);
 
-      for (const { table_name, column_name } of columns.rows) {
-        const result = await raw.query(
-          `SELECT count(*)::int AS count FROM "${table_name}" WHERE "${column_name}" = $1`,
-          [LOCAL_DEV_PASSWORD]
-        );
-        expect(
-          result.rows[0].count,
-          `"${table_name}"."${column_name}" must never store the seeded password in clear text`
-        ).toBe(0);
-      }
+      // One round trip for every column rather than one query per column.
+      const hits = await raw.query<{ table_name: string; column_name: string }>(
+        columns.rows
+          .map(
+            ({ table_name, column_name }) =>
+              `SELECT '${table_name}' AS table_name, '${column_name}' AS column_name ` +
+              `FROM "${table_name}" WHERE "${column_name}" = $1`
+          )
+          .join(' UNION ALL '),
+        [LOCAL_DEV_PASSWORD]
+      );
+      expect(hits.rows, 'no column may store the seeded password in clear text').toEqual([]);
     } finally {
       await raw.end();
     }
@@ -235,7 +237,9 @@ describe('Lab 2 -> Lab 3 migration (specification.md §7.4)', () => {
       expect(u.passwordHash).toMatch(/^\$2[aby]\$/);
       await expect(bcrypt.compare(LOCAL_DEV_PASSWORD, u.passwordHash)).resolves.toBe(true);
     }
-  });
+    // One real bcrypt compare per seeded user is CPU-bound (~100 ms each), so
+    // this test needs more than the 5 s default on a slow or loaded machine.
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
