@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { prisma } from '../lib/prisma.ts';
 
 // GET /api/categories — api-spec.md §2.1. Not Requester-scoped: no
-// requesterContext middleware is mounted here, so the X-Requester-Id header
-// is ignored, per §1.2.
+// authentication middleware is mounted here at all — it is public reference
+// data, per §1.2.
 export const categoriesRouter: Router = Router();
 
 categoriesRouter.get('/', async (req: Request, res: Response) => {

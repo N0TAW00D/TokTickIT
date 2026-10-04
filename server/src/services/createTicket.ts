@@ -10,9 +10,10 @@ import type { Priority } from '../validation/ticketFields.ts';
 // transactional: checking the Category/RelatedSystem references are active,
 // allocating the Ticket Number, and inserting the Ticket row, all inside one
 // `prisma.$transaction`. Field-shape validation (summary/description/
-// priority via `validateTicketFields`) and the X-Requester-Id resolution
-// (via `requesterContext`) happen before this is ever called — slice 8c's
-// router (`../routes/tickets.ts`) is what wires those together.
+// priority via `validateTicketFields`) and identity resolution (session
+// auth, via `authenticate`/`requireRole('REQUESTER')`) happen before this is
+// ever called — the router (`../routes/tickets.ts`) is what wires those
+// together.
 
 /**
  * Thrown when `categoryId` or `relatedSystemId` does not reference an
@@ -136,6 +137,11 @@ export async function createTicket(input: CreateTicketInput) {
             categoryId: input.categoryId,
             relatedSystemId: input.relatedSystemId,
             requestedPriority: input.requestedPriority,
+            // itPriority is initialised to a copy of requestedPriority
+            // (docs/lab-03/specification.md §7.4 item 5, BR-22) and changed
+            // afterwards only by IT Staff or Administrator — not by this
+            // creation path.
+            itPriority: input.requestedPriority,
             summary: input.summary,
             description: input.description,
             status: 'NEW',

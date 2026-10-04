@@ -3,3 +3,7 @@ node_modules
 .env*
 !.env.example
 !.env.test.example
+# Ephemeral, self-cleaning temp dir used by
+# scripts/test-db-lab2-fixture.lib.ts (docs/lab-03/tests.md §1.4) — kept
+# here defensively in case a run is interrupted before its own cleanup.
+/scripts/.lab2-fixture-tmp

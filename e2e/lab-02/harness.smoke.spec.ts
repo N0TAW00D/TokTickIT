@@ -1,41 +1,56 @@
 import { test, expect } from "@playwright/test";
+import {
+  createPlainLoginFixtureUser,
+  loginAs,
+  LOCAL_DEV_PASSWORD,
+  SAFE_LOGIN_FAILURE_MESSAGE,
+} from "../support/auth.js";
 
-// Harness smoke test (Issue #20). This is the ONLY spec in this slice —
-// E2E-01..05 and R-01..06 (docs/lab-02/tests.md §2) are written by later
-// slices, several of which depend on PRs not yet merged into lab2-staging.
+// Harness smoke test (Issue #20; rewritten for Issue #74). This is the ONLY
+// spec in this slice that just proves the harness boots the whole stack —
+// E2E-01..12 and R-01..06 (docs/lab-03/tests.md §2.9) are the real behaviour
+// coverage, written in e2e/lab-03/*.spec.ts.
 //
-// Its only job is to prove the harness really boots the whole stack: the
-// Requester Selection screen (ui-spec.md §6) renders active Requesters that
-// can only have come from a live `GET /api/requesters` call, served by the
-// real Express app, reading the real (seeded) `toktickit_e2e` Postgres
-// database — see e2e/scripts/reset-e2e-db.ts and playwright.config.ts. If
-// the client can't reach the server, the server can't reach the database,
-// or the database wasn't seeded, this fails loudly instead of silently
-// passing on mocked/hardcoded data.
-test("boots the full stack: Requester Selection lists seeded active Requesters only", async ({
+// This file originally drove `/select-requester`, the Lab 2 Development
+// Requester Selector — Lab 3 (#70) deleted that screen and route entirely
+// (client/src/App.tsx: "`/select-requester` is gone with the selector it
+// served"), so the original assertions no longer have anything to drive.
+// Rewritten here to prove the same thing (the client can reach the server,
+// the server can reach the database, and the database was seeded — no
+// mocked/hardcoded data) through the real Login screen instead.
+
+test("boots the full stack: a real account can log in and its real name/role render", async ({
   page,
 }) => {
-  await page.goto("/select-requester");
+  // Every seeded Requester also carries mustChangePassword: true (auth.ts's
+  // own comment explains why), which routes to the forced Change Password
+  // screen — a deliberately shell-less layout with no UserBadge
+  // (ChangePasswordScreen.tsx's `forced` branch). A plain fixture user
+  // (mustChangePassword: false) reaches the real AppShell/UserBadge instead,
+  // and — being a row this test itself just inserted into `toktickit_e2e` —
+  // its name can only appear here if the client actually reached the
+  // server, which actually read it back from the real database.
+  const fixture = await createPlainLoginFixtureUser("harness-smoke");
+  await loginAs(page, fixture.email, LOCAL_DEV_PASSWORD);
 
-  const select = page.locator("#requester-select");
-  await expect(select).toBeVisible();
+  const userBadge = page.locator(".zen-user-badge");
+  await expect(userBadge.locator(".zen-user-badge__name")).toHaveText(fixture.name);
+  await expect(userBadge.getByText("Requester", { exact: true })).toBeVisible();
+});
 
-  const optionLabels = await select.locator("option").allTextContents();
-
-  // The 4 active Requesters seeded by server/prisma/seed.ts, listed
-  // alphabetically by the screen (RequesterSelectionScreen.tsx sorts by
-  // name) after the "Select a requester…" placeholder.
-  for (const activeName of [
-    "David Lee",
-    "Jennifer Anderson",
-    "Michael Brown",
-    "Sarah Johnson",
-  ]) {
-    expect(optionLabels).toContain(activeName);
-  }
-
+test("boots the full stack: a real seeded INACTIVE account is refused login", async ({ page }) => {
   // Robert Wilson is seeded INACTIVE (server/prisma/seed.ts) and must never
-  // be offered here (api-spec.md §2.3, ui-spec.md §6 "Only active
-  // development requesters are shown").
-  expect(optionLabels).not.toContain("Robert Wilson");
+  // be able to log in (api-spec.md §2.1, specification.md AC-05) — refused
+  // with the exact same safe-failure message a wrong password gets, even
+  // with the CORRECT password (so this isolates the `isActive` gate itself,
+  // not just a wrong credential). This can only fail loudly (not silently
+  // pass) if the server is actually checking `isActive` against the real
+  // seeded row.
+  await page.goto("/login");
+  await page.locator("#login-email").fill("robert.wilson@example.edu");
+  await page.locator("#login-password").fill(LOCAL_DEV_PASSWORD);
+  await page.getByRole("button", { name: /^Sign in$/ }).click();
+
+  await expect(page.getByText(SAFE_LOGIN_FAILURE_MESSAGE)).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
 });

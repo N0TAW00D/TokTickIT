@@ -1,19 +1,24 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Router, type Request, type Response } from 'express';
-import { requesterContext } from '../middleware/requesterContext.ts';
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { getUploadsDir } from '../services/attachmentStorage.ts';
-import { AttachmentNotFoundError, getOwnedAttachment } from '../services/attachmentAccess.ts';
+import { AttachmentNotFoundError, getDownloadableAttachment, getOwnedAttachment } from '../services/attachmentAccess.ts';
 import { AttachmentAlreadyRemovedError, removeAttachment } from '../services/removeAttachment.ts';
 import { validateRemovalReason } from '../validation/attachmentRemoval.ts';
 import { contentDispositionFilename } from '../validation/attachmentFile.ts';
 import type { FieldError } from '../validation/ticketFields.ts';
 
-// GET /api/attachments/:id — api-spec.md §4.2 (BR-14; AC-36).
+// GET /api/attachments/:id — api-spec.md §4.2 (BR-14; AC-36). Requester-only,
+// ownership-checked.
 // GET /api/attachments/:id/download — api-spec.md §4.3 (BR-30, BR-33;
-// AC-33, AC-34, AC-37).
+// AC-33, AC-34, AC-37), widened by §5/§9 (FR-27, AC-43) so IT_STAFF and
+// ADMINISTRATOR can download any attachment, not just their own — the
+// Staff Ticket Detail screen's Download/Preview controls (ui-spec.md §10)
+// call this route. A REQUESTER caller is still ownership-checked exactly
+// as before.
 // DELETE /api/attachments/:id — api-spec.md §4.4 (BR-07, BR-31, BR-32, A-08,
-// A-09; AC-34, AC-35, AC-36).
+// A-09; AC-34, AC-35, AC-36). Requester-only, ownership-checked.
 //
 // Mounted at /api/attachments (app.ts), separate from ticketsRouter — these
 // are attachment-scoped, not ticket-scoped, even though ownership is always
@@ -49,6 +54,28 @@ function malformedBody(res: Response): void {
     error: 'MALFORMED_BODY',
     message: 'Request body must be a JSON object.',
   });
+}
+
+function unsupportedMediaType(res: Response): void {
+  res.status(415).json({
+    error: 'UNSUPPORTED_MEDIA_TYPE',
+    message: 'Content-Type must be application/json.',
+  });
+}
+
+/**
+ * BR-40 (api-spec.md §1.6): every state-changing endpoint requires
+ * `Content-Type: application/json`, else `415`. Mounted first, ahead of
+ * `authenticate`, matching the order routes/tickets.ts's own
+ * `requireJsonContentType` uses. Scoped to `DELETE /:id` only — the two
+ * `GET` routes above are not state-changing, so BR-40 doesn't apply to them.
+ */
+function requireJsonContentType(req: Request, res: Response, next: NextFunction): void {
+  if (!req.is('application/json')) {
+    unsupportedMediaType(res);
+    return;
+  }
+  next();
 }
 
 function validationFailed(res: Response, fields: FieldError[]): void {
@@ -122,7 +149,7 @@ function attachmentToJson(attachment: {
 // GET /api/attachments/:id (api-spec.md §4.2)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.get('/:id', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   const attachmentId = parseAttachmentIdParam(String(req.params.id));
   if (attachmentId === null) {
     attachmentNotFound(res);
@@ -132,7 +159,7 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
   try {
     // Both active and removed attachments are returned here (§4.2, BR-33) —
     // getOwnedAttachment doesn't filter on isRemoved, only on ownership.
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
+    const attachment = await getOwnedAttachment(attachmentId, req.authUser!.id);
     res.status(200).json(attachmentToJson(attachment));
   } catch (error) {
     if (error instanceof AttachmentNotFoundError) {
@@ -148,69 +175,79 @@ attachmentsRouter.get('/:id', requesterContext, async (req: Request, res: Respon
 // GET /api/attachments/:id/download (api-spec.md §4.3)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.get('/:id/download', requesterContext, async (req: Request, res: Response) => {
-  const attachmentId = parseAttachmentIdParam(String(req.params.id));
-  if (attachmentId === null) {
-    attachmentNotFound(res);
-    return;
-  }
-
-  try {
-    const attachment = await getOwnedAttachment(attachmentId, req.requester!.id);
-
-    // BR-33: a soft-removed attachment's download endpoint returns 410, not
-    // the file — checked only after ownership is confirmed, so a stranger
-    // probing a removed attachment id still sees 404, never 410 (410 would
-    // disclose that the attachment exists).
-    if (attachment.isRemoved) {
-      attachmentRemoved(res);
-      return;
-    }
-
-    // storedFilename is server-generated (attachmentStorage.ts) and never
-    // derived from client input — reusing getUploadsDir's path resolution
-    // here, not rebuilding it, keeps that guarantee intact.
-    const absolutePath = path.join(getUploadsDir(), attachment.storedFilename);
-
-    let buffer: Buffer;
-    try {
-      buffer = await readFile(absolutePath);
-    } catch (fsError) {
-      // §4.3: the metadata row proves the resource exists and is owned, so
-      // a missing file on disk is deliberately a server fault (500), never
-      // a 404.
-      console.error(`Attachment file missing on disk for attachment ${attachmentId}:`, fsError);
-      internalError(res);
-      return;
-    }
-
-    res.status(200);
-    res.setHeader('Content-Type', attachment.mimeType);
-    // originalFilename is attacker-controlled and only lightly sanitized on
-    // the write path (safeOriginalFilename strips path separators and
-    // truncates to 255 chars — quotes, CR/LF, and non-ASCII all survive
-    // that), so it is never interpolated into this header directly; see
-    // contentDispositionFilename's own comment for exactly what it does to
-    // make that safe. This is a presentation-only concern — the stored
-    // originalFilename (BR-29, BR-30) is untouched.
-    res.setHeader('Content-Disposition', contentDispositionFilename(attachment.originalFilename));
-    res.setHeader('Content-Length', String(attachment.fileSize));
-    res.send(buffer);
-  } catch (error) {
-    if (error instanceof AttachmentNotFoundError) {
+attachmentsRouter.get(
+  '/:id/download',
+  authenticate,
+  passwordChangeGate,
+  // api-spec.md §5/§9: widened from REQUESTER-only so IT Staff and
+  // Administrators can download attachments on tickets they don't own,
+  // via Staff Ticket Detail (FR-27, AC-43) — getDownloadableAttachment
+  // below still ownership-checks a REQUESTER caller exactly as before.
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const attachmentId = parseAttachmentIdParam(String(req.params.id));
+    if (attachmentId === null) {
       attachmentNotFound(res);
       return;
     }
-    console.error('Error downloading attachment:', error);
-    internalError(res);
-  }
-});
+
+    try {
+      const attachment = await getDownloadableAttachment(attachmentId, req.authUser!);
+
+      // BR-33: a soft-removed attachment's download endpoint returns 410, not
+      // the file — checked only after ownership is confirmed, so a stranger
+      // probing a removed attachment id still sees 404, never 410 (410 would
+      // disclose that the attachment exists).
+      if (attachment.isRemoved) {
+        attachmentRemoved(res);
+        return;
+      }
+
+      // storedFilename is server-generated (attachmentStorage.ts) and never
+      // derived from client input — reusing getUploadsDir's path resolution
+      // here, not rebuilding it, keeps that guarantee intact.
+      const absolutePath = path.join(getUploadsDir(), attachment.storedFilename);
+
+      let buffer: Buffer;
+      try {
+        buffer = await readFile(absolutePath);
+      } catch (fsError) {
+        // §4.3: the metadata row proves the resource exists and is owned, so
+        // a missing file on disk is deliberately a server fault (500), never
+        // a 404.
+        console.error(`Attachment file missing on disk for attachment ${attachmentId}:`, fsError);
+        internalError(res);
+        return;
+      }
+
+      res.status(200);
+      res.setHeader('Content-Type', attachment.mimeType);
+      // originalFilename is attacker-controlled and only lightly sanitized on
+      // the write path (safeOriginalFilename strips path separators and
+      // truncates to 255 chars — quotes, CR/LF, and non-ASCII all survive
+      // that), so it is never interpolated into this header directly; see
+      // contentDispositionFilename's own comment for exactly what it does to
+      // make that safe. This is a presentation-only concern — the stored
+      // originalFilename (BR-29, BR-30) is untouched.
+      res.setHeader('Content-Disposition', contentDispositionFilename(attachment.originalFilename));
+      res.setHeader('Content-Length', String(attachment.fileSize));
+      res.send(buffer);
+    } catch (error) {
+      if (error instanceof AttachmentNotFoundError) {
+        attachmentNotFound(res);
+        return;
+      }
+      console.error('Error downloading attachment:', error);
+      internalError(res);
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // DELETE /api/attachments/:id (api-spec.md §4.4)
 // ---------------------------------------------------------------------------
 
-attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Response) => {
+attachmentsRouter.delete('/:id', requireJsonContentType, authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // Path-shape check first, same precedence as the other two routes and as
   // routes/tickets.ts's POST /:id/attachments: a non-integer id is 404
   // regardless of the request body (§1.4 — "the route matched, the resource
@@ -221,9 +258,10 @@ attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Res
     return;
   }
 
-  // §1.4a: DELETE /api/attachments/:id requires Content-Type:
-  // application/json; anything else (or a non-object body) -> 400
-  // MALFORMED_BODY. Same guard as POST /api/tickets (routes/tickets.ts).
+  // requireJsonContentType above already turns a missing/non-JSON
+  // Content-Type into 415 (BR-40) before this handler runs at all, so
+  // what's left for this guard to reject is a body that declared
+  // `application/json` and parsed fine but isn't a plain object.
   if (!isPlainRequestBody(req.body)) {
     malformedBody(res);
     return;
@@ -242,7 +280,7 @@ attachmentsRouter.delete('/:id', requesterContext, async (req: Request, res: Res
   try {
     const updated = await removeAttachment({
       attachmentId,
-      requesterId: req.requester!.id,
+      requesterId: req.authUser!.id,
       reason: reasonResult.value,
     });
     res.status(200).json(attachmentToJson(updated));

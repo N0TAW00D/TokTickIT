@@ -171,8 +171,8 @@ export interface FetchMyTicketsParams {
 
 /**
  * `GET /api/tickets` (api-spec.md §3.2): the calling Requester's own
- * tickets, identified via the `X-Requester-Id` header (§1.2) exactly like
- * `createTicket` below — never scoped by anything sent in the query.
+ * tickets, identified via the session cookie (`credentials: "include"`,
+ * api-spec.md §1.2) — never scoped by anything sent in the query.
  *
  * A blank/whitespace-only `search` is dropped rather than sent, matching
  * the server's own "blank search ⇒ ignored" rule (BR-16) so an empty
@@ -180,7 +180,6 @@ export interface FetchMyTicketsParams {
  * omitting the param entirely.
  */
 export async function fetchMyTickets(
-  requesterId: number,
   params: FetchMyTicketsParams = {},
 ): Promise<TicketListResponse> {
   const query = new URLSearchParams();
@@ -201,7 +200,7 @@ export async function fetchMyTickets(
   const queryString = query.toString();
   const response = await fetch(
     `${API_BASE_URL}/api/tickets${queryString ? `?${queryString}` : ""}`,
-    { headers: { "X-Requester-Id": String(requesterId) } },
+    { credentials: "include" },
   );
   if (!response.ok) {
     throw new Error(`Failed to load tickets (status ${response.status})`);
@@ -211,11 +210,19 @@ export async function fetchMyTickets(
 
 /**
  * `GET /api/tickets/:id` (api-spec.md §3.3) response: same shape as the
- * `POST /api/tickets` `201` body, plus a populated `attachments` array. The
- * Requester Ticket Detail screen (ui-spec.md §10) ignores `attachments` —
- * that section belongs to a later slice.
+ * `POST /api/tickets` `201` body, plus a populated `attachments` array and
+ * (Lab 3) `owner`/`requesterResolvedAt` — `owner` is `null` when
+ * unassigned (ui-spec.md §7: rendered as "Unassigned"); `itPriority` is
+ * deliberately never included for a Requester caller (api-spec.md §9), so
+ * it is optional here rather than nullable — the key is simply absent from
+ * that response, never sent as `null`. IT Staff/Administrator callers
+ * (api-spec.md §5) do get it.
  */
-export type TicketDetailResponse = CreateTicketResponse;
+export interface TicketDetailResponse extends CreateTicketResponse {
+  owner: { id: number; name: string } | null;
+  requesterResolvedAt: string | null;
+  itPriority?: RequestedPriority;
+}
 
 /**
  * Thrown by `fetchTicketDetail` on a `404` (api-spec.md §3.3). An unknown
@@ -232,20 +239,17 @@ export class TicketNotFoundError extends Error {
 
 /**
  * `GET /api/tickets/:id` (api-spec.md §3.3): one ticket owned by the
- * calling Requester, identified via the `X-Requester-Id` header (§1.2)
- * exactly like `createTicket`/`fetchMyTickets`.
+ * calling Requester, identified via the session cookie
+ * (`credentials: "include"`) exactly like `createTicket`/`fetchMyTickets`.
  *
  * A `404` raises `TicketNotFoundError`; every other failure (network error,
  * 400, 500) raises a generic `Error`.
  */
 export async function fetchTicketDetail(
-  requesterId: number,
   ticketId: number,
 ): Promise<TicketDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}`, {
-    headers: {
-      "X-Requester-Id": String(requesterId),
-    },
+    credentials: "include",
   });
   if (response.status === 404) {
     throw new TicketNotFoundError();
@@ -258,22 +262,21 @@ export async function fetchTicketDetail(
 
 /**
  * `POST /api/tickets` (api-spec.md §3.1): create one ticket for the current
- * Requester, identified via the `X-Requester-Id` header (§1.2) rather than
- * the request body.
+ * Requester, identified via the session cookie (`credentials: "include"`)
+ * rather than the request body.
  *
  * A `400 VALIDATION_FAILED` response raises `CreateTicketValidationError`
  * with its `fields[]` preserved; every other failure (network error, 5xx,
  * or a `400` of a different `error` code) raises a generic `Error`.
  */
 export async function createTicket(
-  requesterId: number,
   payload: CreateTicketRequest,
 ): Promise<CreateTicketResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      "X-Requester-Id": String(requesterId),
     },
     body: JSON.stringify(payload),
   });
@@ -366,8 +369,8 @@ function readErrorMessage(body: unknown, status: number): string {
 
 /**
  * `POST /api/tickets/:id/attachments` (api-spec.md §4.1): upload one file
- * to a ticket owned by the calling Requester, identified via the
- * `X-Requester-Id` header (§1.2) exactly like `createTicket` above.
+ * to a ticket owned by the calling Requester, identified via the session
+ * cookie (`credentials: "include"`) exactly like `createTicket` above.
  *
  * The request body is `multipart/form-data` with a single `file` part —
  * `Content-Type` (including its boundary) is left for the browser/runtime
@@ -379,7 +382,6 @@ function readErrorMessage(body: unknown, status: number): string {
  * generic `Error`.
  */
 export async function uploadAttachment(
-  requesterId: number,
   ticketId: number,
   file: File,
 ): Promise<AttachmentResponse> {
@@ -390,7 +392,7 @@ export async function uploadAttachment(
     `${API_BASE_URL}/api/tickets/${ticketId}/attachments`,
     {
       method: "POST",
-      headers: { "X-Requester-Id": String(requesterId) },
+      credentials: "include",
       body: formData,
     },
   );
@@ -454,17 +456,16 @@ export class RemoveAttachmentError extends Error {
 /**
  * `DELETE /api/attachments/:id` (api-spec.md §4.4): soft-remove one
  * attachment on a ticket owned by the calling Requester, identified via
- * the `X-Requester-Id` header (§1.2) exactly like `uploadAttachment`
- * above. `reason` is sent as-is (trimmed) — the caller (the Remove
- * dialog) is expected to have already validated it client-side so this
- * request is only made once it passes.
+ * the session cookie (`credentials: "include"`) exactly like
+ * `uploadAttachment` above. `reason` is sent as-is (trimmed) — the caller
+ * (the Remove dialog) is expected to have already validated it
+ * client-side so this request is only made once it passes.
  *
  * `400 VALIDATION_FAILED` and `409 ALREADY_REMOVED` raise the matching
  * `RemoveAttachmentError` code; every other failure (network error,
  * `404`, `5xx`) raises a generic `Error`.
  */
 export async function removeAttachment(
-  requesterId: number,
   attachmentId: number,
   reason: string,
 ): Promise<TicketAttachment> {
@@ -472,9 +473,9 @@ export async function removeAttachment(
     `${API_BASE_URL}/api/attachments/${attachmentId}`,
     {
       method: "DELETE",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        "X-Requester-Id": String(requesterId),
       },
       body: JSON.stringify({ reason }),
     },
@@ -561,20 +562,19 @@ export interface AttachmentDownload {
 /**
  * `GET /api/attachments/:id/download` (api-spec.md §4.3): fetch the raw
  * bytes of an **active** attachment on an owned ticket, identified via the
- * `X-Requester-Id` header (§1.2) exactly like the calls above. The bytes
- * come back as a `Blob` together with the filename parsed from
+ * session cookie (`credentials: "include"`) exactly like the calls above.
+ * The bytes come back as a `Blob` together with the filename parsed from
  * `Content-Disposition`.
  *
  * A `410` raises `AttachmentRemovedError`; every other failure (`404`,
  * `5xx`, network error) raises a generic `Error`.
  */
 export async function downloadAttachment(
-  requesterId: number,
   attachmentId: number,
 ): Promise<AttachmentDownload> {
   const response = await fetch(
     `${API_BASE_URL}/api/attachments/${attachmentId}/download`,
-    { headers: { "X-Requester-Id": String(requesterId) } },
+    { credentials: "include" },
   );
 
   if (!response.ok) {
@@ -595,4 +595,358 @@ export async function downloadAttachment(
     response.headers.get("Content-Disposition"),
   );
   return { blob, filename };
+}
+
+// ---------------------------------------------------------------------------
+// Public Comments and "Problem Appears Resolved" (api-spec.md §3.1-3.3)
+// ---------------------------------------------------------------------------
+
+/** One entry in a comment thread (api-spec.md §3.1) — `author.role` is one of the three Lab 3 roles. */
+export interface CommentEntry {
+  id: number;
+  body: string;
+  createdAt: string;
+  author: { id: number; name: string; role: "REQUESTER" | "IT_STAFF" | "ADMINISTRATOR" };
+}
+
+/**
+ * `GET /api/tickets/:id/comments` (api-spec.md §3.1): the owning Requester,
+ * any IT Staff, or any Administrator, via the session cookie. Ordered
+ * `createdAt` ascending, matching the server's own ordering.
+ */
+export async function fetchComments(ticketId: number): Promise<CommentEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/comments`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load comments (status ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
+ * Thrown by `postComment` for a `400 VALIDATION_FAILED` (empty,
+ * whitespace-only, or over 2000 characters — BR-17, AC-22, AC-23).
+ */
+export class PostCommentValidationError extends Error {
+  readonly fields: CreateTicketFieldError[];
+
+  constructor(fields: CreateTicketFieldError[]) {
+    super("Comment failed validation.");
+    this.name = "PostCommentValidationError";
+    this.fields = fields;
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/comments` (api-spec.md §3.2): post one Public
+ * Comment as the calling Requester or IT Staff member, via the session
+ * cookie. `author`/`createdAt` come from the server (BR-16) regardless of
+ * what this call sends — there is nothing to send but `body`.
+ *
+ * A `400 VALIDATION_FAILED` raises `PostCommentValidationError`; every
+ * other failure (network error, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function postComment(ticketId: number, body: string): Promise<CommentEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/comments`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 400) {
+      const errorBody = await readErrorBody(response);
+      if (
+        typeof errorBody === "object" &&
+        errorBody !== null &&
+        (errorBody as Record<string, unknown>).error === "VALIDATION_FAILED" &&
+        Array.isArray((errorBody as Record<string, unknown>).fields)
+      ) {
+        const fields = ((errorBody as Record<string, unknown>).fields as unknown[]).filter(isFieldError);
+        throw new PostCommentValidationError(fields);
+      }
+    }
+    throw new Error(`Failed to post comment (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * ui-spec.md §7's frozen conflict-banner copy. The server's own `409
+ * INVALID_STATE` message (api-spec.md §3.3) is a generic description, not
+ * this exact UI string — `RequesterResolvedConflictError` always carries
+ * this literal text regardless of what the response body says, so the
+ * banner's wording can't drift if the server's message ever changes.
+ */
+export const REQUESTER_RESOLVED_CONFLICT_MESSAGE =
+  "This ticket has been updated by IT Staff. Refresh to see its current state.";
+
+/**
+ * Thrown by `postRequesterResolved` for a `409 INVALID_STATE` (api-spec.md
+ * §3.3) — IT Staff moved the ticket on (to Resolved, Closed or Cancelled)
+ * since the page loaded. ui-spec.md §7's conflict banner is wired to this
+ * error specifically.
+ */
+export class RequesterResolvedConflictError extends Error {
+  constructor() {
+    super(REQUESTER_RESOLVED_CONFLICT_MESSAGE);
+    this.name = "RequesterResolvedConflictError";
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/requester-resolved` (api-spec.md §3.3): the owning
+ * Requester indicates the problem appears resolved. No request body. Does
+ * not change the Ticket's status (BR-26) — the caller re-reads
+ * `requesterResolvedAt` from a subsequent `fetchTicketDetail` to reflect
+ * it, since this call itself returns no body.
+ *
+ * A `409 INVALID_STATE` raises `RequesterResolvedConflictError`; every
+ * other failure (network error, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function postRequesterResolved(ticketId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/requester-resolved`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      throw new RequesterResolvedConflictError();
+    }
+    throw new Error(`Failed to record the resolution indication (status ${response.status})`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IT Staff ticket operations (api-spec.md §5.1-§5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by `patchTicketOwner` on a `409 INVALID_OWNER` (api-spec.md §5.1) —
+ * the given `ownerId` names an inactive user, a Requester, or a user that
+ * does not exist. The server intentionally doesn't say which (BR-20,
+ * AC-36), so this error just carries the response's safe `message` (or a
+ * sensible default) rather than a code to branch on.
+ */
+export class InvalidOwnerError extends Error {
+  constructor(message?: string) {
+    super(message ?? "That user can't be assigned to this ticket.");
+    this.name = "InvalidOwnerError";
+  }
+}
+
+/**
+ * `PATCH /api/tickets/:id/owner` (api-spec.md §5.1): claim, assign or
+ * reassign a ticket's owner as the calling IT Staff member, via the session
+ * cookie (`credentials: "include"`). `ownerId: null` unassigns; claiming is
+ * the client sending its own user id.
+ *
+ * A `409 INVALID_OWNER` raises `InvalidOwnerError`; every other failure
+ * (network error, `404`, `403`, `5xx`) raises a generic `Error`.
+ */
+export async function patchTicketOwner(
+  ticketId: number,
+  ownerId: number | null,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/owner`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ownerId }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      const body = await readErrorBody(response);
+      throw new InvalidOwnerError(extractSafeMessage(body));
+    }
+    throw new Error(`Failed to update ticket owner (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * `PATCH /api/tickets/:id/it-priority` (api-spec.md §5.2): set a ticket's IT
+ * Priority as the calling IT Staff member or Administrator, via the session
+ * cookie. `requestedPriority` is untouched — no endpoint in this API can
+ * change it after creation (BR-21, AC-37).
+ *
+ * A `400` here is a client bug (an out-of-enum value the UI should never
+ * send), not a user-recoverable state, so every non-ok response (including
+ * `400`) raises a generic `Error`.
+ */
+export async function patchTicketItPriority(
+  ticketId: number,
+  itPriority: RequestedPriority,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/it-priority`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ itPriority }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update IT priority (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * The two conflict codes `patchTicketStatus` can raise (api-spec.md §5.3):
+ * `INVALID_TRANSITION` (the (current, requested) pair isn't in
+ * `specification.md` §5.1, including a no-op to the current status —
+ * BR-23, AC-39) and `OWNER_REQUIRED` (target is `IN_PROGRESS` with no
+ * owner — BR-24, AC-40). ui-spec.md §10 shows the same conflict copy for
+ * both, but this error still carries the code so a caller could branch on
+ * it later if that ever changes.
+ */
+export type StatusTransitionConflictCode = "INVALID_TRANSITION" | "OWNER_REQUIRED";
+
+/**
+ * ui-spec.md §10's frozen conflict-state copy for a rejected status
+ * transition — the same message for both `INVALID_TRANSITION` and
+ * `OWNER_REQUIRED` (§10: "A rejected transition (409) renders the conflict
+ * state").
+ */
+export const STATUS_TRANSITION_CONFLICT_MESSAGE =
+  "That status change is no longer possible — the ticket has moved on. Refresh to see its current state.";
+
+/**
+ * Thrown by `patchTicketStatus` for a `409 INVALID_TRANSITION` or `409
+ * OWNER_REQUIRED` (api-spec.md §5.3). Always carries ui-spec.md §10's
+ * literal conflict copy regardless of which of the two codes triggered it,
+ * plus the `code` itself so the UI can distinguish them if it ever needs
+ * to.
+ */
+export class StatusTransitionConflictError extends Error {
+  readonly code: StatusTransitionConflictCode;
+
+  constructor(code: StatusTransitionConflictCode) {
+    super(STATUS_TRANSITION_CONFLICT_MESSAGE);
+    this.name = "StatusTransitionConflictError";
+    this.code = code;
+  }
+}
+
+/**
+ * `PATCH /api/tickets/:id/status` (api-spec.md §5.3): move a ticket to a new
+ * status as the calling IT Staff member, via the session cookie.
+ *
+ * A `409 INVALID_TRANSITION` or `409 OWNER_REQUIRED` raises
+ * `StatusTransitionConflictError` with the matching code; every other
+ * failure (network error, `400`, `404`, `403`, `5xx`) raises a generic
+ * `Error`.
+ */
+export async function patchTicketStatus(
+  ticketId: number,
+  status: string,
+): Promise<TicketDetailResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/status`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      const body = await readErrorBody(response);
+      const code =
+        typeof body === "object" &&
+        body !== null &&
+        (body as Record<string, unknown>).error === "OWNER_REQUIRED"
+          ? "OWNER_REQUIRED"
+          : "INVALID_TRANSITION";
+      throw new StatusTransitionConflictError(code);
+    }
+    throw new Error(`Failed to update ticket status (status ${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * `GET /api/tickets/:id/notes` (api-spec.md §5.4): Internal Notes for an IT
+ * Staff or Administrator caller, via the session cookie. Same shape as
+ * comments (§5.4), so this reuses `CommentEntry` rather than a separate
+ * `NoteEntry` type — that same shape also satisfies `MessageThread`'s
+ * `MessageThreadEntry` prop (`client/src/components/MessageThread.tsx`).
+ * Ordered `createdAt` ascending, matching the server's own ordering.
+ *
+ * A Requester caller gets `404`, not `403` (api-spec.md §1.4's rule), which
+ * this mirrors as a generic `Error` like every other non-ok response —
+ * there's no note-specific error to distinguish here.
+ */
+export async function fetchTicketNotes(ticketId: number): Promise<CommentEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/notes`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load notes (status ${response.status})`);
+  }
+  return response.json();
+}
+
+/**
+ * Thrown by `postTicketNote` for a `400 VALIDATION_FAILED` (empty,
+ * whitespace-only, or over 2000 characters — BR-17, api-spec.md §5.5). Kept
+ * independent from `PostCommentValidationError` even though the logic is
+ * identical, matching this file's existing pattern of not sharing error
+ * classes between near-identical call sites (see `RemoveAttachmentError`
+ * vs. `UploadAttachmentError`).
+ */
+export class PostNoteValidationError extends Error {
+  readonly fields: CreateTicketFieldError[];
+
+  constructor(fields: CreateTicketFieldError[]) {
+    super("Note failed validation.");
+    this.name = "PostNoteValidationError";
+    this.fields = fields;
+  }
+}
+
+/**
+ * `POST /api/tickets/:id/notes` (api-spec.md §5.5): post one Internal Note
+ * as the calling IT Staff member, via the session cookie. `author`/
+ * `createdAt` come from the server (BR-16) regardless of what this call
+ * sends — there is nothing to send but `body`.
+ *
+ * A `400 VALIDATION_FAILED` raises `PostNoteValidationError`; every other
+ * failure (network error, `404`, `403`, `5xx`) raises a generic `Error`.
+ */
+export async function postTicketNote(ticketId: number, body: string): Promise<CommentEntry> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/notes`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 400) {
+      const errorBody = await readErrorBody(response);
+      if (
+        typeof errorBody === "object" &&
+        errorBody !== null &&
+        (errorBody as Record<string, unknown>).error === "VALIDATION_FAILED" &&
+        Array.isArray((errorBody as Record<string, unknown>).fields)
+      ) {
+        const fields = ((errorBody as Record<string, unknown>).fields as unknown[]).filter(isFieldError);
+        throw new PostNoteValidationError(fields);
+      }
+    }
+    throw new Error(`Failed to post note (status ${response.status})`);
+  }
+
+  return response.json();
 }

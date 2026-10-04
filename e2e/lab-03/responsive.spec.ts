@@ -1,0 +1,1048 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, test, type Page } from "@playwright/test";
+import {
+  createMustChangePasswordFixtureUser,
+  createPlainLoginFixtureUser,
+  loginAs,
+  loginAsSeededUser,
+  LOCAL_DEV_PASSWORD,
+} from "../support/auth.js";
+import {
+  createRequesterOwnedFixtureTicket,
+  createTruncationRegressionFixtureTicket,
+  TRUNCATION_FIXTURE_TICKET_NUMBER,
+} from "../support/staffFixtures.js";
+
+// Responsive + screenshot-evidence harness for Lab 3 (docs/lab-03/tests.md
+// §2.8 R-01..R-06, Issue #74). Follows `e2e/lab-02/responsive.spec.ts`'s
+// structure and conventions directly (viewport matrix, the
+// `scrollWidth <= clientWidth` no-overflow check, the screenshot-to-
+// `artifacts/` pattern, and the Tab-traversal focus-ring check) rather than
+// reinventing them — see that file for the fuller rationale behind each
+// pattern reused here.
+//
+// The screenshots this file takes at `R-06` ARE Issue #74's screenshot
+// deliverable, not a separate manual step (docs/lab-03/ui-spec.md §15,
+// docs/lab-03/tests.md §4).
+//
+// Every test drives the REAL client against the REAL server + the
+// dedicated `toktickit_e2e` Postgres database (see ../playwright.config.ts)
+// — no mocked responses, no stubbed components. Logging in as anyone other
+// than a Requester deliberately does NOT rely on the post-login redirect:
+// `e2e/support/auth.ts`'s own comment documents that a successful login
+// always redirects to the hardcoded `"/"` route, which resolves to the
+// Requester-only `/tickets` route regardless of the caller's real role —
+// landing a non-Requester on the forbidden state instead of their own
+// role's landing page. Every Lab 3 spec file (staff-ticket-flow.spec.ts,
+// user-administration.spec.ts) works around this the same way this file
+// does: sign in via `loginAsSeededUser`, then `page.goto` the target route
+// directly.
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+// docs/lab-03/ui-spec.md §15 / tests.md §4: screenshots committed under
+// these seven folders. `here` is e2e/lab-03, so the repo root is two levels
+// up.
+const SCREENSHOT_ROOT = path.resolve(here, "../../artifacts/lab-03/screenshots");
+
+/**
+ * docs/lab-03/tests.md §1.5 "Viewport matrix": "Desktop 1440×900, tablet
+ * 820×1180, mobile 390×844 — the Lab 2 matrix, unchanged." (heights differ
+ * slightly from Lab 2's own file — this is the exact Lab 3 matrix, not a
+ * re-derivation.)
+ */
+const VIEWPORTS = {
+  desktop: { width: 1440, height: 900 },
+  tablet: { width: 820, height: 1180 },
+  mobile: { width: 390, height: 844 },
+} as const;
+
+type ViewportName = keyof typeof VIEWPORTS;
+const VIEWPORT_NAMES: ViewportName[] = ["desktop", "tablet", "mobile"];
+
+// The seven screens/folders this dispatch covers (Issue #74's screenshot
+// requirement + docs/lab-03/tests.md §2.8's R-01..R-06 rows) — one per
+// ui-spec.md section: §5 Login, §6 Change Password (forced path), §7
+// Requester Ticket Detail (Public Comments + the "Problem appears
+// resolved" action), §9 IT Staff Ticket Queue, §10 IT Staff Ticket Detail,
+// §11 Administrator User Management, and §4.3's forbidden state (a
+// Requester turned away from an IT-Staff-only route).
+const SCREENS = [
+  "authentication",
+  "staff-queue",
+  "staff-ticket-detail",
+  "user-management",
+  "change-password",
+  "requester-ticket-detail",
+  "forbidden",
+] as const;
+type ScreenName = (typeof SCREENS)[number];
+
+// server/prisma/seed.ts SEED_ACTIVE_IT_STAFF / SEED_ADMINISTRATORS — same
+// accounts e2e/lab-03/staff-ticket-flow.spec.ts and
+// e2e/lab-03/user-administration.spec.ts already log in as.
+const IT_STAFF_EMAIL = "priya.natarajan@example.edu";
+const ADMIN_EMAIL = "olivia.grant@example.edu";
+
+// Own ticket-number band, distinct from both seed.ts's "900xxx" fixtures
+// and staffFixtures.ts's own pagination-fixture "990001".."990005" band, so
+// this can never collide with either (see staffFixtures.ts's own comment
+// on why that separation matters).
+const DETAIL_TICKET_NUMBER = "TKT-2026-991000";
+
+// Own band again, distinct from every other "TKT-2026-9910xx" number
+// already claimed in this file, staffFixtures.ts and
+// e2e/lab-03/accessibility.spec.ts ("991020"/"991021") and
+// staff-ticket-flow.spec.ts ("991001"/"991002") — see this file's own
+// R-03b comment for why that separation matters.
+const REQUESTER_DETAIL_TICKET_NUMBER = "TKT-2026-991030";
+
+let detailTicketId: number;
+let requesterDetailTicketId: number;
+let requesterDetailEmail: string;
+let mustChangePasswordEmail: string;
+let forbiddenRequesterEmail: string;
+
+test.beforeAll(async () => {
+  // An unassigned, non-terminal (OPEN) ticket: unassigned so the Claim
+  // button (ui-spec.md §10, R-05's "including Claim... links" requirement)
+  // actually renders on IT Staff Ticket Detail, and non-terminal so the
+  // Status select offers real transitions rather than being disabled.
+  const fixture = await createRequesterOwnedFixtureTicket(
+    "responsive-detail",
+    DETAIL_TICKET_NUMBER,
+  );
+  detailTicketId = fixture.id;
+
+  // A second, separate OPEN ticket (own Requester, own ticket number) for
+  // the `requester-ticket-detail` screenshot: OPEN (non-terminal) so the
+  // "Problem appears resolved" button (ui-spec.md §7) renders, and its own
+  // fixture Requester (not `detailTicketId`'s) so posting the Public
+  // Comment below can't ever collide with anything R-03/R-03b/R-05 do
+  // against the shared `detailTicketId` fixture.
+  const requesterDetailFixture = await createRequesterOwnedFixtureTicket(
+    "responsive-requester-detail",
+    REQUESTER_DETAIL_TICKET_NUMBER,
+  );
+  requesterDetailTicketId = requesterDetailFixture.id;
+  requesterDetailEmail = requesterDetailFixture.requester.email;
+
+  // A forced-first-login fixture (`mustChangePassword: true`) for the
+  // `change-password` screenshot — `auth.ts`'s own
+  // `createMustChangePasswordFixtureUser` doc comment explains why no
+  // *seeded* account can reliably reach this path.
+  const mustChangeFixture = await createMustChangePasswordFixtureUser();
+  mustChangePasswordEmail = mustChangeFixture.email;
+
+  // A plain (non-forced-change) Requester fixture, used only to be turned
+  // away from an IT-Staff-only route for the `forbidden` screenshot — it
+  // owns no ticket of its own.
+  const forbiddenFixture = await createPlainLoginFixtureUser("responsive-forbidden");
+  forbiddenRequesterEmail = forbiddenFixture.email;
+});
+
+// ---------------------------------------------------------------------------
+// Navigation helpers
+// ---------------------------------------------------------------------------
+
+function screenPath(screen: ScreenName): string {
+  switch (screen) {
+    case "authentication":
+      return "/login";
+    case "staff-queue":
+      return "/staff/tickets";
+    case "staff-ticket-detail":
+      return `/staff/tickets/${detailTicketId}`;
+    case "user-management":
+      return "/admin/users";
+    case "change-password":
+      return "/change-password";
+    case "requester-ticket-detail":
+      return `/tickets/${requesterDetailTicketId}`;
+    case "forbidden":
+      // A Requester (`forbiddenRequesterEmail`'s role) hitting an
+      // IT-Staff-only route — App.tsx's `RequireRole(['IT_STAFF'])` on
+      // `/staff/tickets` renders the ui-spec.md §4.3 forbidden state
+      // instead of `StaffTicketQueueScreen`.
+      return "/staff/tickets";
+  }
+}
+
+/**
+ * Logs in as whichever role owns `screen` (skipped for `authentication`,
+ * which IS the Login screen and must stay unauthenticated) and navigates to
+ * it directly via `page.goto` — see this file's header comment for why the
+ * post-login redirect itself isn't used. Waits for real, populated content
+ * (never a loading skeleton) before returning, same "ready" contract as
+ * lab-02's own `goToPopulatedScreen`.
+ */
+async function goToScreen(page: Page, screen: ScreenName): Promise<void> {
+  if (screen === "authentication") {
+    await page.goto("/login");
+    await expect(page.locator("#login-email")).toBeVisible();
+    return;
+  }
+
+  if (screen === "change-password") {
+    // Forced first-login change (ui-spec.md §6): logging in with a
+    // `mustChangePassword` account redirects straight to
+    // `/change-password` (RequireAuth.tsx via RoleLandingRedirect) —
+    // there is no separate `page.goto` step, since every other route
+    // would just bounce back here anyway.
+    await loginAs(page, mustChangePasswordEmail, LOCAL_DEV_PASSWORD);
+    await expect(page).toHaveURL(/\/change-password$/);
+    await expect(page.getByRole("heading", { name: "Change password" })).toBeVisible();
+    return;
+  }
+
+  if (screen === "requester-ticket-detail") {
+    await loginAs(page, requesterDetailEmail, LOCAL_DEV_PASSWORD);
+    await page.goto(screenPath(screen));
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Problem appears resolved" }),
+    ).toBeVisible();
+
+    // ui-spec.md §7/§8: the screenshot must show at least one Public
+    // Comment. No fixture helper seeds Comment rows directly, so this
+    // posts one through the real composer (`MessageThread`) — the same
+    // real create-comment flow a Requester would use, not a mocked
+    // response. Guarded by a prior existence check so re-running this
+    // across R-01/R-05/R-06 (all three iterate every screen) doesn't post
+    // a growing pile of duplicate comments.
+    // `MessageThread` fetches its entries on mount, independently of the
+    // header fetch the "Ticket Details" heading above already waited on —
+    // wait for that fetch to resolve (the list always renders, empty or
+    // not, once loaded) BEFORE checking for an existing comment below,
+    // otherwise a still-loading thread reads as "no comment yet" and this
+    // posts a duplicate.
+    await expect(page.locator(".zen-message-thread__list")).toBeVisible();
+
+    const commentBody =
+      "Thanks for looking into this — I'm still seeing the same issue on my end.";
+    // Scoped to a rendered comment entry, not `getByText` — the composer's
+    // own `<textarea>` still carries this exact string as its value right
+    // after `.fill()`/submit (before `setValue("")` clears it), and
+    // `getByText` matches that too, which would make this ambiguous
+    // (strict-mode violation) rather than a real absence check.
+    const postedComment = page.locator(".zen-message-thread__body", { hasText: commentBody });
+    const alreadyPosted = await postedComment.count();
+    if (alreadyPosted === 0) {
+      await page.locator("#message-thread-public-body").fill(commentBody);
+      await page.getByRole("button", { name: "Post comment" }).click();
+    }
+    await expect(postedComment).toBeVisible();
+    return;
+  }
+
+  if (screen === "forbidden") {
+    await loginAs(page, forbiddenRequesterEmail, LOCAL_DEV_PASSWORD);
+    await page.goto(screenPath(screen));
+    // ui-spec.md §4.3: RequireRole renders this in place of the wrapped
+    // screen, never alongside it.
+    await expect(
+      page.getByRole("heading", { name: "You don't have access to this page" }),
+    ).toBeVisible();
+    return;
+  }
+
+  await loginAsSeededUser(
+    page,
+    screen === "user-management" ? ADMIN_EMAIL : IT_STAFF_EMAIL,
+  );
+  await page.goto(screenPath(screen));
+
+  if (screen === "staff-queue") {
+    await expect(page.getByRole("heading", { name: "Ticket Queue" })).toBeVisible();
+    // `.zen-staff-queue__row-link` is only ever rendered on a REAL row —
+    // both the desktop/tablet table's ticket-number cell and the mobile
+    // card's header share this class (StaffTicketQueueScreen.tsx) — never
+    // on the loading skeleton, which uses its own
+    // `.zen-staff-queue__skeleton-block` markup instead. Waiting on this
+    // rather than the table/cards wrapper (present during loading too)
+    // guarantees this is the loaded, populated state.
+    await expect(page.locator(".zen-staff-queue__row-link").first()).toBeVisible();
+  } else if (screen === "staff-ticket-detail") {
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+    await expect(page.getByText(DETAIL_TICKET_NUMBER)).toBeVisible();
+  } else if (screen === "user-management") {
+    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+    await expect(
+      page.locator("table.zen-user-mgmt__table tbody tr, .zen-user-mgmt__card").first(),
+    ).toBeVisible();
+  }
+}
+
+/**
+ * `getBoundingClientRect()`-based "on screen, not clipped" check — R-04's
+ * "dialogs usable at 390px" requirement. Mirrors lab-02's own
+ * `expectFullyVisible`, trimmed to the viewport-containment check this file
+ * needs (no scrollable-ancestor `container` case — Lab 3's dialogs aren't
+ * nested in one).
+ */
+async function expectFullyVisible(
+  locator: ReturnType<Page["locator"]>,
+): Promise<void> {
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThan(0);
+  expect(box!.height).toBeGreaterThan(0);
+
+  const viewport = locator.page().viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+}
+
+// ---------------------------------------------------------------------------
+// R-01: no horizontal overflow (AC-56, V-11)
+// ---------------------------------------------------------------------------
+
+test.describe("R-01 no horizontal overflow (tests.md:197, AC-56, V-11)", () => {
+  for (const screen of SCREENS) {
+    for (const viewportName of VIEWPORT_NAMES) {
+      test(`${screen} at ${viewportName} has no horizontal overflow`, async ({ page }) => {
+        await page.setViewportSize(VIEWPORTS[viewportName]);
+        await goToScreen(page, screen);
+
+        // Measured on `document.documentElement`, not `document.body` —
+        // same rationale as lab-02's own R-01: `body { overflow-x: hidden
+        // }` (theme.css) would make a weaker body-scoped check pass no
+        // matter how far content actually overflows.
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }));
+        expect(
+          scrollWidth,
+          `${screen} at ${viewportName}: document overflows its client width by ${scrollWidth - clientWidth}px`,
+        ).toBeLessThanOrEqual(clientWidth);
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-02: queue reflow (V-10, ui-spec.md §9 / §12)
+// ---------------------------------------------------------------------------
+//
+// StaffTicketQueueScreen.tsx's `DESKTOP_QUERY` ("min-width: 768px") decides
+// table vs. cards in JS; StaffTicketQueueScreen.css then hides the Category
+// column via `@media (max-width: 991px)` — the table only ever mounts at
+// >=768px, so that single CSS rule is what turns the desktop's
+// seven-column table into the tablet's six-column one. This describe block
+// asserts exactly that split at each of the three viewports.
+
+test.describe("R-02 queue reflow (tests.md:198, V-10, ui-spec.md §9)", () => {
+  test("desktop (>=992px): seven-column table with Category visible", async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await goToScreen(page, "staff-queue");
+
+    await expect(page.locator(".zen-staff-queue__table")).toBeVisible();
+    await expect(page.locator(".zen-staff-queue__cards")).toHaveCount(0);
+    await expect(
+      page.locator(".zen-staff-queue__table thead th.zen-staff-queue__category-col"),
+    ).toBeVisible();
+    await expect(
+      page.locator(".zen-staff-queue__table tbody td.zen-staff-queue__category-col").first(),
+    ).toBeVisible();
+  });
+
+  test("tablet (768-991px): table stays, Category column dropped", async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.tablet);
+    await goToScreen(page, "staff-queue");
+
+    await expect(page.locator(".zen-staff-queue__table")).toBeVisible();
+    await expect(page.locator(".zen-staff-queue__cards")).toHaveCount(0);
+    // Still in the DOM (a single CSS rule hides it, it isn't a second JS
+    // markup) — so this asserts hidden, not absent.
+    await expect(
+      page.locator(".zen-staff-queue__table thead th.zen-staff-queue__category-col"),
+    ).toBeHidden();
+  });
+
+  test("mobile (<768px): cards, no table", async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await goToScreen(page, "staff-queue");
+
+    await expect(page.locator("table")).toHaveCount(0);
+    await expect(page.locator(".zen-staff-queue__card").first()).toBeVisible();
+  });
+});
+
+// Filter-row breakpoint boundaries (PR #83 review): the five queue filters
+// are forced onto one line at >= 1080px (StaffTicketQueueScreen.css) and
+// wrap below it. At every width on either side of each boundary, all five
+// selects must be visible AND lie fully inside the controls panel, and the
+// document must not overflow. 991/992 covers the Category-column breakpoint
+// (the width the reviewer flagged); 1079/1080 covers the filter-row one.
+test.describe("R-02 queue filter row at breakpoint boundaries (tests.md:198, AC-56)", () => {
+  for (const width of [991, 992, 1079, 1080]) {
+    test(`staff-queue filters fit inside the controls panel at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await goToScreen(page, "staff-queue");
+
+      const panel = page.locator(".zen-staff-queue__controls");
+      const panelBox = await panel.boundingBox();
+      expect(panelBox, "controls panel has a box").not.toBeNull();
+
+      const filterSelects = page.locator(".zen-staff-queue__filters select");
+      await expect(filterSelects).toHaveCount(5);
+      for (let i = 0; i < 5; i++) {
+        const select = filterSelects.nth(i);
+        await expect(select).toBeVisible();
+        const box = await select.boundingBox();
+        expect(box, `filter ${i} has a box`).not.toBeNull();
+        expect(
+          box!.x + box!.width,
+          `filter ${i} at ${width}px overflows the panel's right edge`,
+        ).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 0.5);
+        expect(box!.x, `filter ${i} at ${width}px starts left of the panel`).toBeGreaterThanOrEqual(
+          panelBox!.x - 0.5,
+        );
+      }
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-03: detail reflow (V-10, ui-spec.md §10 / §12)
+// ---------------------------------------------------------------------------
+//
+// StaffTicketDetailScreen.css's `.zen-staff-detail__layout` is a CSS grid
+// with named `grid-template-areas` that swap at `max-width: 991px`:
+// "readonly operations" side by side (desktop) becomes "operations" over
+// "readonly" (tablet + mobile) — read-only column DOM order never changes,
+// only the visual grid-area placement does, which is exactly what this
+// describe block probes via bounding boxes rather than DOM order.
+
+test.describe("R-03 detail reflow (tests.md:199, V-10, ui-spec.md §10)", () => {
+  test("desktop (>=992px): two columns, operations to the right of read-only", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await goToScreen(page, "staff-ticket-detail");
+
+    const readonlyBox = await page
+      .locator(".zen-staff-detail__readonly-column")
+      .boundingBox();
+    const operationsBox = await page
+      .locator(".zen-staff-detail__card--operations")
+      .boundingBox();
+    expect(readonlyBox).not.toBeNull();
+    expect(operationsBox).not.toBeNull();
+
+    // Side by side: operations starts at or after the read-only column's
+    // right edge...
+    expect(operationsBox!.x).toBeGreaterThanOrEqual(readonlyBox!.x + readonlyBox!.width - 1);
+    // ...and their vertical extents overlap (same grid row), not stacked.
+    expect(operationsBox!.y).toBeLessThan(readonlyBox!.y + readonlyBox!.height);
+    expect(operationsBox!.y + operationsBox!.height).toBeGreaterThan(readonlyBox!.y);
+  });
+
+  for (const viewportName of ["tablet", "mobile"] as const) {
+    test(`${viewportName} (<992px): one column, operations panel first`, async ({ page }) => {
+      await page.setViewportSize(VIEWPORTS[viewportName]);
+      await goToScreen(page, "staff-ticket-detail");
+
+      const readonlyBox = await page
+        .locator(".zen-staff-detail__readonly-column")
+        .boundingBox();
+      const operationsBox = await page
+        .locator(".zen-staff-detail__card--operations")
+        .boundingBox();
+      expect(readonlyBox).not.toBeNull();
+      expect(operationsBox).not.toBeNull();
+
+      // Stacked, operations above read-only: same horizontal band (one
+      // column)...
+      expect(Math.abs(operationsBox!.x - readonlyBox!.x)).toBeLessThan(1);
+      // ...and it renders entirely above the read-only column.
+      expect(operationsBox!.y + operationsBox!.height).toBeLessThanOrEqual(
+        readonlyBox!.y + 1,
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-03b: Ticket Information values are not truncated at the desktop
+// breakpoint boundary (PR #83/#84 review, commit 80c310e)
+// ---------------------------------------------------------------------------
+//
+// Commit 80c310e changed `.zen-staff-detail__grid` from a 3-up to a 2-up
+// split because, with the longest REAL field values, Ticket No./Ticket
+// Date/Category/Related System ellipsis-truncated between 992-1024px, and
+// Category/Related System truncated at every desktop width up to 1440px
+// (that CSS file's own comment above `.zen-staff-detail__grid` has the
+// full measurement rationale). The reviewer asked for focused regression
+// coverage around those widths that asserts the affected VALUES — not just
+// the page's overall `scrollWidth` (R-01 already covers that, and R-01's
+// document-level check would stay green even if an individual field's own
+// text clipped inside its fixed-height, `overflow: hidden` box).
+//
+// Unlike R-03 above (which reuses the shared, deliberately short-valued
+// `detailTicketId` fixture), this uses a dedicated fixture ticket
+// (`createTruncationRegressionFixtureTicket`) carrying the longest REAL
+// values from server/prisma/seed.ts's own reference data — not a long
+// artificial name chosen to make the assertion easy to pass.
+test.describe("R-03b: Ticket Information values are not truncated at 991-1440px (tests.md:199, V-10, PR #83 review)", () => {
+  let truncationTicketId: number;
+
+  test.beforeAll(async () => {
+    const fixture = await createTruncationRegressionFixtureTicket();
+    truncationTicketId = fixture.id;
+  });
+
+  // Own ticket-number band, distinct from `TRUNCATION_FIXTURE_TICKET_NUMBER`
+  // ("TKT-2026-991010") and every other band in this file/staffFixtures.ts.
+  const LONG_VALUE_TICKET_NUMBER = "TKT-2026-991012";
+
+  // PR #84 review: the fixes above (80c310e, bf735da) only hold up to the
+  // longest REAL seed value they measured against — a value longer than
+  // that still clips. `createRequesterOwnedFixtureTicket` names its
+  // fixture Requester `E2E Plain Login Fixture (${discriminator})`
+  // (e2e/support/auth.ts's `createPlainLoginFixtureUser`), same helper
+  // already used for `DETAIL_TICKET_NUMBER` above — a longer discriminator
+  // here gives a 65-char Requester name, well past 40 and past the
+  // 45-char name that same helper produced for "responsive-detail" (the
+  // one visibly cut off in the committed 1440px screenshot before this
+  // fix), so this can't pass just because the value happens to still be
+  // short enough for the existing column widths.
+  let longRequesterTicketId: number;
+  let longRequesterName: string;
+
+  test.beforeAll(async () => {
+    const fixture = await createRequesterOwnedFixtureTicket(
+      "responsive-detail-long-value-regression",
+      LONG_VALUE_TICKET_NUMBER,
+    );
+    longRequesterTicketId = fixture.id;
+    longRequesterName = fixture.requester.name;
+  });
+
+  // The five fields the reviewer named, each with its real, full expected
+  // display value. Ticket Date is derived from the fixture's pinned
+  // `createdAt` (04:56 UTC == 11:56 Asia/Bangkok) via the same
+  // `formatDateTimeWithYear` rule the screen itself uses
+  // (client/src/tickets/formatDateTime.ts).
+  const EXPECTED_FIELDS: { label: string; value: string }[] = [
+    { label: "Ticket No.", value: TRUNCATION_FIXTURE_TICKET_NUMBER },
+    { label: "Ticket Date", value: "25 Sep 2026, 11:56" },
+    { label: "Category", value: "Account and Access" },
+    { label: "Requester", value: "Jennifer Anderson" },
+    { label: "Related System", value: "Grade Submission App" },
+  ];
+
+  // 991: the breakpoint boundary, still single-column. 992/1024: the exact
+  // range PR #83's review flagged as clipping between a 2-vs-3-column swap.
+  // 1080/1440: further out, where Category/Related System alone were
+  // still clipping under the old 3-up grid.
+  const WIDTHS = [991, 992, 1024, 1080, 1440];
+
+  /**
+   * Locates one `.zen-staff-detail__field-value` by its sibling
+   * `.zen-staff-detail__field-label` text — never by column position/
+   * nth-child, so this can't accidentally pass by reading the wrong field
+   * if the grid's own field order ever changes.
+   */
+  function fieldValueByLabel(page: Page, label: string) {
+    return page
+      .locator(".zen-staff-detail__field")
+      .filter({ has: page.locator(".zen-staff-detail__field-label", { hasText: label }) })
+      .locator(".zen-staff-detail__field-value");
+  }
+
+  for (const width of WIDTHS) {
+    test(`Ticket Information values are not truncated at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await loginAsSeededUser(page, IT_STAFF_EMAIL);
+      await page.goto(`/staff/tickets/${truncationTicketId}`);
+      await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+      await expect(page.getByText(TRUNCATION_FIXTURE_TICKET_NUMBER)).toBeVisible();
+
+      for (const { label, value } of EXPECTED_FIELDS) {
+        const fieldValue = fieldValueByLabel(page, label);
+
+        // The full, real value actually rendered — not just "some text",
+        // so a value silently swapped for a shorter placeholder would also
+        // fail this.
+        await expect(fieldValue).toHaveText(value);
+
+        // The no-truncation assertion itself: an ellipsis-truncated value
+        // (`.zen-staff-detail__field-value`'s `overflow: hidden;
+        // text-overflow: ellipsis; white-space: nowrap`, StaffTicketDetail
+        // Screen.css) still renders `scrollWidth > clientWidth` even
+        // though the box itself never overflows the page — exactly the
+        // clipping R-01's page-level `document.documentElement` check
+        // cannot see.
+        const { scrollWidth, clientWidth } = await fieldValue.evaluate((el) => ({
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+        }));
+        expect(
+          scrollWidth,
+          `${label} field is truncated at ${width}px: scrollWidth ${scrollWidth}px > ` +
+            `clientWidth ${clientWidth}px (value "${value}")`,
+        ).toBeLessThanOrEqual(clientWidth);
+      }
+
+      // The two-column layout (Ticket Information left, Ticket Operations
+      // right) must still hold at every width >=992px, and single-column
+      // at the 991px boundary — same bounding-box checks R-03 above uses.
+      const readonlyBox = await page
+        .locator(".zen-staff-detail__readonly-column")
+        .boundingBox();
+      const operationsBox = await page
+        .locator(".zen-staff-detail__card--operations")
+        .boundingBox();
+      expect(readonlyBox, `readonly column has a box at ${width}px`).not.toBeNull();
+      expect(operationsBox, `operations card has a box at ${width}px`).not.toBeNull();
+
+      if (width >= 992) {
+        expect(
+          operationsBox!.x,
+          `expected two columns at ${width}px`,
+        ).toBeGreaterThanOrEqual(readonlyBox!.x + readonlyBox!.width - 1);
+        expect(operationsBox!.y).toBeLessThan(readonlyBox!.y + readonlyBox!.height);
+        expect(operationsBox!.y + operationsBox!.height).toBeGreaterThan(readonlyBox!.y);
+      } else {
+        expect(
+          Math.abs(operationsBox!.x - readonlyBox!.x),
+          `expected a single column at ${width}px`,
+        ).toBeLessThan(1);
+        expect(operationsBox!.y + operationsBox!.height).toBeLessThanOrEqual(
+          readonlyBox!.y + 1,
+        );
+      }
+    });
+  }
+
+  // PR #84 review: the checks above only prove the fix holds for the
+  // longest REAL seed values this file happens to measure against — they
+  // say nothing about a value longer than that. `.zen-staff-detail__field-
+  // value` must wrap ANY value instead of clipping it (StaffTicketDetail
+  // Screen.css), so this asserts the same no-truncation contract against
+  // `longRequesterTicketId`'s 65-char Requester name at the three widths
+  // PR #83's review flagged (992/1024, the 2-up column swap; 1440, the
+  // desktop cap) — not just that the value doesn't overflow internally
+  // (`scrollWidth <= clientWidth`), but that its full text is present (not
+  // silently swapped for something shorter) and that wrapping to extra
+  // lines actually grows the box rather than being clipped by some
+  // ancestor's own fixed height (the value element's bounding box stays
+  // within its `.zen-staff-detail__field` container's box).
+  const LONG_VALUE_WIDTHS = [992, 1024, 1440];
+
+  for (const width of LONG_VALUE_WIDTHS) {
+    test(`Requester value wraps rather than clipping at ${width}px (long value)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await loginAsSeededUser(page, IT_STAFF_EMAIL);
+      await page.goto(`/staff/tickets/${longRequesterTicketId}`);
+      await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+      const fieldValue = fieldValueByLabel(page, "Requester");
+
+      // The full, real value actually rendered — a value silently swapped
+      // for a shorter placeholder would also fail this.
+      await expect(fieldValue).toHaveText(longRequesterName);
+
+      // No internal clipping: an ellipsis/`overflow: hidden` box would
+      // still report `scrollWidth > clientWidth` even though the box
+      // itself never overflows the page.
+      const { scrollWidth, clientWidth } = await fieldValue.evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(
+        scrollWidth,
+        `Requester field is truncated at ${width}px with a long ` +
+          `(${longRequesterName.length}-char) value: scrollWidth ${scrollWidth}px > ` +
+          `clientWidth ${clientWidth}px (value "${longRequesterName}")`,
+      ).toBeLessThanOrEqual(clientWidth);
+
+      // Fully visible: the value's own rendered box (which may now be
+      // taller than one line) stays inside its field container's box,
+      // rather than a wrapped-but-clipped box that scrollWidth/clientWidth
+      // alone wouldn't catch.
+      const fieldValueBox = await fieldValue.boundingBox();
+      const fieldBox = await page
+        .locator(".zen-staff-detail__field")
+        .filter({ has: page.locator(".zen-staff-detail__field-label", { hasText: "Requester" }) })
+        .boundingBox();
+      expect(fieldValueBox, `Requester value has a box at ${width}px`).not.toBeNull();
+      expect(fieldBox, `Requester field has a box at ${width}px`).not.toBeNull();
+      expect(
+        fieldValueBox!.y,
+        `Requester value's top is clipped above its field box at ${width}px`,
+      ).toBeGreaterThanOrEqual(fieldBox!.y - 1);
+      expect(
+        fieldValueBox!.y + fieldValueBox!.height,
+        `Requester value's bottom is clipped below its field box at ${width}px ` +
+          `(the long value's wrapped box grew taller than its ancestor allows)`,
+      ).toBeLessThanOrEqual(fieldBox!.y + fieldBox!.height + 1);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-03c: Requester Ticket Detail read-only values are not truncated
+// (Issue #74 screenshot-review follow-up)
+// ---------------------------------------------------------------------------
+//
+// The Issue #74 screenshot dispatch's own `requester-ticket-detail`
+// screenshot review found `.zen-ticket-detail__field-value` (Requester
+// Ticket Detail, `/tickets/:id`) silently hard-clipping its "Requester"
+// field's value with no ellipsis at all — the same class of bug R-03b
+// already regression-guards on the sibling Staff Ticket Detail screen,
+// just never covered here (this screen had no per-field truncation
+// coverage before this dispatch). Fixed in TicketDetailScreen.css by
+// switching `.zen-ticket-detail__field-value` from ellipsis-truncation to
+// wrap-any-length (mirroring PR #83/#84's fix on
+// `.zen-staff-detail__field-value`); this proves it, modelled directly on
+// R-03b's own fieldValueByLabel/scrollWidth technique.
+test.describe("R-03c: Requester Ticket Detail values are not truncated at 390-1440px (Issue #74 review)", () => {
+  // The project's three-tier viewport matrix (390/820) plus the exact
+  // desktop widths R-03b already exercises (992/1024/1440) — this screen's
+  // own grid switches 3-up -> 2-up -> 1-up at the same 991/767px
+  // boundaries as `.zen-ticket-detail__grid` (TicketDetailScreen.css).
+  const WIDTHS = [390, 820, 992, 1024, 1440];
+
+  const FIELD_LABELS = [
+    "Ticket No.",
+    "Ticket Date",
+    "Category",
+    "Requester",
+    "Related System",
+    "Ticket Owner",
+  ] as const;
+  type FieldLabel = (typeof FIELD_LABELS)[number];
+
+  /**
+   * Locates one `.zen-ticket-detail__field-value` by its sibling
+   * `.zen-ticket-detail__field-label` text — never by column position/
+   * nth-child, same rationale as R-03b's identical helper.
+   */
+  function fieldValueByLabel(page: Page, label: string) {
+    return page
+      .locator(".zen-ticket-detail__field")
+      .filter({ has: page.locator(".zen-ticket-detail__field-label", { hasText: label }) })
+      .locator(".zen-ticket-detail__field-value");
+  }
+
+  let expectedValues: Record<FieldLabel, string>;
+
+  test.beforeAll(async ({ browser }) => {
+    // Captures each field's real rendered value ONCE, from a fresh page
+    // load of the SAME `requesterDetailTicketId`/`requesterDetailEmail`
+    // fixture the `requester-ticket-detail` screenshot itself uses — its
+    // real 44-char Requester name ("E2E Plain Login Fixture
+    // (responsive-requester-detail)") is exactly the value the screenshot
+    // review found clipping. A field's rendered `textContent` doesn't
+    // depend on viewport width (CSS truncation hides characters visually,
+    // it never removes them from the DOM), so capturing it once here and
+    // asserting the SAME text at every width below still proves each width
+    // renders the FULL value — not one silently swapped for a shorter
+    // placeholder — while the per-width `scrollWidth`/`clientWidth` check
+    // below is what actually proves nothing is visually clipped.
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await loginAs(page, requesterDetailEmail, LOCAL_DEV_PASSWORD);
+    await page.goto(`/tickets/${requesterDetailTicketId}`);
+    await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+    expectedValues = {} as Record<FieldLabel, string>;
+    for (const label of FIELD_LABELS) {
+      const text = (await fieldValueByLabel(page, label).textContent())?.trim() ?? "";
+      expect(text.length, `${label} captured a non-empty baseline value`).toBeGreaterThan(0);
+      expectedValues[label] = text;
+    }
+    await context.close();
+  });
+
+  for (const width of WIDTHS) {
+    test(`every read-only field is not truncated at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await loginAs(page, requesterDetailEmail, LOCAL_DEV_PASSWORD);
+      await page.goto(`/tickets/${requesterDetailTicketId}`);
+      await expect(page.getByRole("heading", { name: "Ticket Details" })).toBeVisible();
+
+      for (const label of FIELD_LABELS) {
+        const fieldValue = fieldValueByLabel(page, label);
+
+        // The full, real value actually rendered — not just "some text",
+        // so a value silently swapped for a shorter placeholder would also
+        // fail this.
+        await expect(fieldValue).toHaveText(expectedValues[label]);
+
+        // The no-truncation assertion itself, identical to R-03b's: an
+        // ellipsis/`overflow: hidden` box still renders `scrollWidth >
+        // clientWidth` even though the box itself never overflows the
+        // page — exactly the clipping R-01's page-level
+        // `document.documentElement` check cannot see.
+        const { scrollWidth, clientWidth } = await fieldValue.evaluate((el) => ({
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+        }));
+        expect(
+          scrollWidth,
+          `${label} field is truncated at ${width}px: scrollWidth ${scrollWidth}px > ` +
+            `clientWidth ${clientWidth}px (value "${expectedValues[label]}")`,
+        ).toBeLessThanOrEqual(clientWidth);
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-04: dialogs at mobile (V-14, ui-spec.md §11 / §12 / §13)
+// ---------------------------------------------------------------------------
+
+test.describe("R-04 dialogs usable and focus-restoring at mobile (tests.md:200, V-14)", () => {
+  test("Create dialog is usable at 390px and restores focus to New user on close", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await goToScreen(page, "user-management");
+
+    const newUserButton = page.getByRole("button", { name: "New user" });
+    await newUserButton.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "New user" })).toBeVisible();
+
+    // Usable at 390px: every field and both actions are on-screen, not
+    // clipped by the viewport (ui-spec.md §12: dialogs become full-screen
+    // sheets below 768px).
+    await expectFullyVisible(dialog.locator("#user-dialog-name"));
+    await expectFullyVisible(dialog.locator("#user-dialog-email"));
+    await expectFullyVisible(dialog.locator("#user-dialog-role"));
+    await expectFullyVisible(dialog.locator("#user-dialog-active"));
+    await expectFullyVisible(dialog.locator("#user-dialog-password"));
+    await expectFullyVisible(dialog.getByRole("button", { name: "Cancel" }));
+    await expectFullyVisible(dialog.getByRole("button", { name: "Save" }));
+
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // ui-spec.md §13: dialogs restore focus to their trigger on close.
+    await expect(newUserButton).toBeFocused();
+  });
+
+  test("Edit dialog is usable at 390px and restores focus to its row's Edit button on close", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await goToScreen(page, "user-management");
+
+    // Mobile renders cards (`< 768px`), so the trigger is a card's Edit
+    // button, not a table row's.
+    const firstEditButton = page.locator(".zen-user-mgmt__card-edit").first();
+    await expect(firstEditButton).toBeVisible();
+    await firstEditButton.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Edit user" })).toBeVisible();
+    await expectFullyVisible(dialog.locator("#user-dialog-name"));
+    await expectFullyVisible(dialog.locator("#user-dialog-email"));
+    await expectFullyVisible(dialog.getByRole("button", { name: "Cancel" }));
+    await expectFullyVisible(dialog.getByRole("button", { name: "Save" }));
+
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(firstEditButton).toBeFocused();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-05: focus visibility (V-09)
+// ---------------------------------------------------------------------------
+//
+// Same Tab-traversal + computed-outline approach as lab-02's own R-06
+// (`listFocusable`/`currentFocusSnapshot`), applied to all four Lab 3
+// screens at all three viewports. This directly covers V-09's "including
+// badges-as-links and the claim button" — the IT Staff Ticket Queue's
+// ticket-number links (`.zen-staff-queue__row-link`) and IT Staff Ticket
+// Detail's Claim button are both real, tabbable controls this traversal
+// reaches, since `detailTicketId`'s fixture ticket is deliberately
+// unassigned (see `beforeAll`).
+
+interface FocusDescriptor {
+  tag: string;
+  type: string;
+  id: string;
+  name: string;
+}
+
+interface FocusSnapshot extends FocusDescriptor {
+  outlineStyle: string;
+  outlineWidth: string;
+}
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+
+/** Every visible, keyboard-reachable control on the page, in DOM order — the order Tab is expected to visit them in (this app never uses a positive tabindex). */
+async function listFocusable(page: Page): Promise<FocusDescriptor[]> {
+  return page.evaluate((selector) => {
+    function isVisible(el: Element): boolean {
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") {
+        return false;
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+    function describe(el: Element) {
+      return {
+        tag: el.tagName,
+        type: (el as HTMLInputElement).type ?? "",
+        id: el.id ?? "",
+        name:
+          el.getAttribute("aria-label") ??
+          el.getAttribute("title") ??
+          (el.textContent ?? "").trim().slice(0, 80),
+      };
+    }
+    return Array.from(document.querySelectorAll(selector))
+      .filter((el) => {
+        const tabindex = el.getAttribute("tabindex");
+        if (tabindex !== null && Number(tabindex) < 0) return false;
+        return isVisible(el);
+      })
+      .map(describe);
+  }, FOCUSABLE_SELECTOR);
+}
+
+/** The currently focused element's descriptor plus its computed outline — the ":focus-visible ring" R-05 requires. */
+async function currentFocusSnapshot(page: Page): Promise<FocusSnapshot | null> {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return null;
+    const style = getComputedStyle(el);
+    return {
+      tag: el.tagName,
+      type: (el as HTMLInputElement).type ?? "",
+      id: el.id ?? "",
+      name:
+        el.getAttribute("aria-label") ??
+        el.getAttribute("title") ??
+        (el.textContent ?? "").trim().slice(0, 80),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+    };
+  });
+}
+
+test.describe("R-05 focus visibility (tests.md:201, V-09)", () => {
+  for (const screen of SCREENS) {
+    for (const viewportName of VIEWPORT_NAMES) {
+      test(`${screen} at ${viewportName} reaches every control with a focus ring`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(VIEWPORTS[viewportName]);
+        await goToScreen(page, screen);
+
+        const expected = await listFocusable(page);
+        expect(expected.length).toBeGreaterThan(0);
+
+        // Start with nothing focused, so the first Tab lands on the first
+        // focusable element in DOM order.
+        await page.evaluate(() => {
+          const active = document.activeElement as HTMLElement | null;
+          active?.blur();
+        });
+
+        const visited: FocusSnapshot[] = [];
+        for (let i = 0; i < expected.length; i++) {
+          await page.keyboard.press("Tab");
+          const snapshot = await currentFocusSnapshot(page);
+          if (snapshot) visited.push(snapshot);
+        }
+
+        // Every expected control was reached, in DOM order — tabbing never
+        // skipped one or stopped early.
+        expect(visited.map((v) => ({ tag: v.tag, id: v.id, name: v.name }))).toEqual(
+          expected.map((e) => ({ tag: e.tag, id: e.id, name: e.name })),
+        );
+
+        // Every one of them shows a real focus-visible ring.
+        for (const snapshot of visited) {
+          const hasNoOutline =
+            snapshot.outlineStyle === "none" || snapshot.outlineWidth === "0px";
+          expect(
+            hasNoOutline,
+            `expected a focus-visible ring on ${snapshot.tag} "${snapshot.name}" (id="${snapshot.id}"), got outline-style: ${snapshot.outlineStyle}, outline-width: ${snapshot.outlineWidth}`,
+          ).toBe(false);
+        }
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R-06: screenshots (Issue #74's screenshot deliverable)
+// ---------------------------------------------------------------------------
+
+test.describe("R-06 screenshot capture (tests.md:202, Issue #74)", () => {
+  for (const screen of SCREENS) {
+    for (const viewportName of VIEWPORT_NAMES) {
+      test(`captures ${screen} at ${viewportName}`, async ({ page }) => {
+        await page.setViewportSize(VIEWPORTS[viewportName]);
+        await goToScreen(page, screen);
+
+        if (screen === "user-management") {
+          // The full suite runs every lab-02 AND lab-03 spec in one
+          // invocation before this screenshot test executes, and several
+          // of those earlier specs create their own real, persisted Users
+          // through the live UI (login fixtures, admin-created accounts)
+          // that are never individually cleaned up mid-run — see
+          // e2e/scripts/reset-e2e-db.ts's own comment on why "User" is
+          // truncated once per invocation but necessarily stays populated
+          // *within* one. Left unfiltered, this screenshot would show a
+          // long tail of "E2E ... Fixture" rows alongside the real seed
+          // accounts, which is accurate but not a readable admin-screen
+          // deliverable. Every seeded account uses an "@example.edu"
+          // address (server/prisma/seed.ts) while every E2E-created
+          // fixture uses "@toktickit.local" — a real, structural
+          // distinction, not a cosmetic one — so filtering through the
+          // screen's own AC-46 search feature to "example.edu" shows
+          // exactly the seeded roster this screenshot is meant to
+          // demonstrate, using the real search the way an Administrator
+          // would to find those accounts, not a special screenshot-only
+          // code path.
+          const search = page.locator("#user-mgmt-search");
+          await search.fill("example.edu");
+          // The search is debounced (SEARCH_DEBOUNCE_MS = 300ms) before it
+          // re-fetches, so the unfiltered rows are still on screen
+          // immediately after `fill`. Assert on the debounced OUTCOME
+          // (every toktickit.local fixture row gone) rather than a fixed
+          // wait — Playwright's auto-retrying `toHaveCount` polls through
+          // the debounce and the re-fetch for us.
+          await expect(
+            page.locator("tbody tr, .zen-user-mgmt__card").filter({ hasText: "toktickit.local" }),
+          ).toHaveCount(0);
+          await expect(
+            page.locator("tbody tr, .zen-user-mgmt__card").filter({ hasText: "example.edu" }).first(),
+          ).toBeVisible();
+        }
+
+        const dir = path.join(SCREENSHOT_ROOT, screen);
+        fs.mkdirSync(dir, { recursive: true });
+        await page.screenshot({
+          path: path.join(dir, `${viewportName}.png`),
+          fullPage: true,
+        });
+      });
+    }
+  }
+});

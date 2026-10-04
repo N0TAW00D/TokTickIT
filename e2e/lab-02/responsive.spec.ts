@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
+import {
+  LOCAL_DEV_PASSWORD,
+  createPlainLoginFixtureUser,
+  loginAs,
+  type FixtureUser,
+} from "../support/auth.js";
 
 // Responsive + screenshot-evidence harness (docs/lab-02/tests.md R-01..R-06,
 // Issue #20). E2E-01..05 are a later slice and are NOT written here (several
@@ -10,6 +16,23 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 // Every test below drives the REAL client against the REAL server + the
 // dedicated `toktickit_e2e` Postgres database (see ../playwright.config.ts)
 // — no mocked responses, no stubbed components.
+//
+// Originally written against Lab 2's dev-only "Development Requester
+// Selector" (`GET /api/requesters`, `X-Requester-Id`, `/select-requester`),
+// which Lab 3 (#70) deleted entirely in favour of real session-cookie
+// authentication (`POST /api/auth/login`, `/login`). Migrated to that real
+// auth, following the same convention `e2e/lab-03/*.spec.ts` and
+// `e2e/support/auth.ts` already established: every login below drives the
+// real Login screen, and every seeded Requester has `mustChangePassword:
+// true` (would force a `/change-password` detour before reaching any of
+// the screens this file asserts on), so this uses a dedicated fixture
+// Requester (`createPlainLoginFixtureUser`) instead of a *seeded* one. The
+// fixture-ticket creation in `beforeAll` still goes through the real
+// `POST /api/tickets` HTTP API (never direct DB writes) by reusing the real
+// cookie session a UI login produces, carried into a raw
+// `APIRequestContext` via Playwright's own `storageState()` — the
+// real-auth equivalent of the old flow's `X-Requester-Id` header, without
+// ever poking a header or cookie by hand.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,8 +77,7 @@ type ScreenName = (typeof SCREENS)[number];
 // real, populated rows to render and screenshot.
 // ---------------------------------------------------------------------------
 
-let requesterId: number;
-let requesterName: string;
+let fixtureUser: FixtureUser;
 let ticketId: number;
 let ticketNumber: string;
 
@@ -84,24 +106,27 @@ const TICKET_FIXTURES: Array<{
   },
 ];
 
-test.beforeAll(async () => {
-  const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
+test.beforeAll(async ({ browser }) => {
+  fixtureUser = await createPlainLoginFixtureUser("responsive");
 
-  const requestersResponse = await api.get("/api/requesters");
-  if (!requestersResponse.ok()) {
-    throw new Error(
-      `GET /api/requesters failed: ${requestersResponse.status()} ${await requestersResponse.text()}`,
-    );
-  }
-  const requesters: Array<{ id: number; name: string }> =
-    await requestersResponse.json();
-  if (requesters.length === 0) {
-    throw new Error(
-      "No active requesters seeded — expected server/prisma/seed.ts to have run (pretest:e2e).",
-    );
-  }
-  requesterId = requesters[0].id;
-  requesterName = requesters[0].name;
+  // Establish one real, cookie-based session via the real Login screen —
+  // never a header/cookie poked by hand — then carry that session's cookie
+  // into a raw `APIRequestContext` (Playwright's own `storageState()`) so
+  // the fixture-ticket POSTs below still exercise the real, unmocked
+  // `POST /api/tickets` HTTP API, exactly like the pre-migration version of
+  // this file did (just authenticated for real now that the endpoint reads
+  // the requester from the session rather than an `X-Requester-Id` header).
+  const loginContext = await browser.newContext();
+  const loginPage = await loginContext.newPage();
+  await loginAs(loginPage, fixtureUser.email, LOCAL_DEV_PASSWORD);
+  await expect(loginPage).toHaveURL(/\/tickets$/);
+  const storageState = await loginContext.storageState();
+  await loginContext.close();
+
+  const api = await playwrightRequest.newContext({
+    baseURL: SERVER_URL,
+    storageState,
+  });
 
   const categoriesResponse = await api.get("/api/categories");
   const categories: Array<{ id: number; name: string }> =
@@ -120,7 +145,6 @@ test.beforeAll(async () => {
     const category = categories[index % categories.length];
     const relatedSystem = relatedSystems[index % relatedSystems.length];
     const response = await api.post("/api/tickets", {
-      headers: { "X-Requester-Id": String(requesterId) },
       data: {
         categoryId: category.id,
         relatedSystemId: relatedSystem.id,
@@ -162,18 +186,15 @@ function screenPath(screen: ScreenName): string {
 }
 
 /**
- * Drives the real Requester Selection screen (ui-spec.md §6) exactly as a
- * user would: pick the seeded Requester from the dropdown and click
- * Continue. Lands on `/tickets`. Deliberately does not poke localStorage
- * directly — every test's "logged in" state is produced by the same UI flow
- * E2E-01 will exercise later.
+ * Drives the real Login screen (ui-spec.md §5) exactly as a user would: fill
+ * the fixture Requester's email + password and submit. Lands on `/tickets`
+ * (the fixture has `mustChangePassword: false`, so there's no forced
+ * `/change-password` detour). Deliberately does not poke localStorage or
+ * cookies directly — every test's "logged in" state is produced by the same
+ * real UI flow `e2e/lab-03/authentication.spec.ts`'s E2E-01 exercises.
  */
 async function loginAsSeededRequester(page: Page): Promise<void> {
-  await page.goto("/select-requester");
-  await page
-    .getByLabel("Development Requester")
-    .selectOption({ label: requesterName });
-  await page.getByRole("button", { name: /Continue/ }).click();
+  await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
   await expect(page).toHaveURL(/\/tickets$/);
 }
 
@@ -385,15 +406,23 @@ test.describe("R-01b app header spans the viewport (ui-spec.md \u00a72, \u00a74)
     });
   }
 
-  test("the selection screen's slim top bar is also full-bleed (desktop)", async ({
+  // The old "selection screen's slim top bar" this regression test named
+  // (`.zen-selection-screen__topbar`, on `/select-requester`) no longer
+  // exists — Lab 3 (#70) deleted that screen entirely. `LoginScreen.css`'s
+  // own header comment confirms `.zen-login-screen__topbar` (on the real,
+  // public `/login` screen) is its direct successor ("Mirrors
+  // RequesterSelectionScreen.css's layout, which this screen replaces"), so
+  // this asserts the same full-bleed regression against that real
+  // replacement element instead.
+  test("the login screen's slim top bar is also full-bleed (desktop)", async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto("/select-requester");
-    await expect(page.locator("#requester-select")).toBeVisible();
+    await page.goto("/login");
+    await expect(page.locator("#login-email")).toBeVisible();
 
     const box = await page
-      .locator(".zen-selection-screen__topbar")
+      .locator(".zen-login-screen__topbar")
       .evaluate((el) => {
         const r = el.getBoundingClientRect();
         return { left: r.left, width: r.width };

@@ -9,14 +9,19 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
-import {
-  RequesterProvider,
-  useRequester,
-} from "../../src/requester/RequesterContext.tsx";
+import { AuthProvider, useAuth } from "../../src/auth/AuthContext.tsx";
+import type { AuthUser } from "../../src/auth/api.ts";
 
 // Covers docs/lab-02/tests.md rows C-09 through C-14. Attachments (C-15,
 // C-16, C-17) belong to the AttachmentUploader built in Issue #17 — this
 // screen only renders the placeholder section from ui-spec.md §8.
+//
+// Issue #70 rewires CreateTicketScreen off the deleted Development
+// Requester selector (RequesterContext/RequesterProvider/X-Requester-Id)
+// and onto the session cookie: the "Requester" read-only field now reads
+// AuthContext's signed-in user, and POST /api/tickets is identified by
+// credentials: "include" rather than a header. This file is re-pointed
+// accordingly (AC-19's spirit: re-point, don't gut).
 
 const API_BASE_URL = "http://localhost:3000";
 const CATEGORIES_URL = `${API_BASE_URL}/api/categories`;
@@ -98,31 +103,37 @@ function postCallCount(fetchMock: ReturnType<typeof mockFetch>) {
   ).length;
 }
 
+const REQUESTER_USER: AuthUser = {
+  id: 1,
+  name: "Jennifer Anderson",
+  email: "jennifer.anderson@example.edu",
+  role: "REQUESTER",
+  mustChangePassword: false,
+};
+
 /**
- * Seeds the RequesterContext the same way a real Continue click / route
- * guard pass would, so CreateTicketScreen can be rendered directly without
- * depending on RequireRequester or the selection screen (mirrors the
- * Bootstrap idiom in AppShell.test.tsx).
+ * Seeds AuthContext with a known authenticated Requester the same way a
+ * real login would, so CreateTicketScreen can be rendered directly without
+ * depending on RequireRole/RequireAuth (mirrors the AuthBootstrap idiom in
+ * client/tests/lab-03/AppShell.test.tsx).
  */
-function Bootstrap({ children }: { children: ReactNode }) {
-  const { requesterName, selectRequester } = useRequester();
+function AuthBootstrap({ children }: { children: ReactNode }) {
+  const { user, setUser } = useAuth();
 
   useEffect(() => {
-    if (requesterName === null) {
-      selectRequester({ id: 1, name: "Jennifer Anderson" });
-    }
+    if (!user) setUser(REQUESTER_USER);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (requesterName === null) return null;
+  if (!user) return null;
 
   return <>{children}</>;
 }
 
 function renderScreen() {
   return render(
-    <RequesterProvider>
-      <Bootstrap>
+    <AuthProvider>
+      <AuthBootstrap>
         <MemoryRouter initialEntries={["/tickets/new"]}>
           <Routes>
             <Route path="/tickets/new" element={<CreateTicketScreen />} />
@@ -130,8 +141,8 @@ function renderScreen() {
             <Route path="/tickets/:id" element={<h1>Ticket Details</h1>} />
           </Routes>
         </MemoryRouter>
-      </Bootstrap>
-    </RequesterProvider>,
+      </AuthBootstrap>
+    </AuthProvider>,
   );
 }
 
@@ -577,12 +588,12 @@ describe("create API failure — generic path is unaffected", () => {
     ).toBeEnabled();
   });
 
-  it("falls back to the generic error when a 400 body has no fields[] (e.g. MISSING_REQUESTER)", async () => {
+  it("falls back to the generic error when a 400 body has no fields[] (e.g. MALFORMED_BODY)", async () => {
     mockFetch({
       createTicket: () =>
         jsonResponse(400, {
-          error: "MISSING_REQUESTER",
-          message: "X-Requester-Id is required.",
+          error: "MALFORMED_BODY",
+          message: "Request body must be a JSON object.",
         }),
     });
     renderScreen();
@@ -598,12 +609,13 @@ describe("create API failure — generic path is unaffected", () => {
   });
 });
 
-// api-spec.md §1.2/§3.1: POST /api/tickets is Requester-scoped via
-// X-Requester-Id, not the request body. No tests.md row asserts this
-// header directly — without it every create would 400 MISSING_REQUESTER
-// server-side, a failure this suite would otherwise never catch.
-describe("createTicket sends X-Requester-Id (api-spec.md §1.2, §3.1)", () => {
-  it("includes the caller's Requester id header on POST /api/tickets", async () => {
+// api-spec.md §1.2/§3.1 (Lab 3 change): POST /api/tickets identifies the
+// caller via the session cookie, not a request header. No tests.md row
+// asserts this directly — without it every create would 401
+// UNAUTHENTICATED server-side, a failure this suite would otherwise never
+// catch.
+describe("createTicket sends the session cookie (api-spec.md §1.2, §3.1)", () => {
+  it("includes credentials on POST /api/tickets", async () => {
     const fetchMock = mockFetch({
       createTicket: () => jsonResponse(201, SUCCESS_TICKET),
     });
@@ -619,6 +631,6 @@ describe("createTicket sends X-Requester-Id (api-spec.md §1.2, §3.1)", () => {
     );
     expect(postCall).toBeDefined();
     const [, init] = postCall as [string, RequestInit];
-    expect(init.headers).toMatchObject({ "X-Requester-Id": "1" });
+    expect(init.credentials).toBe("include");
   });
 });

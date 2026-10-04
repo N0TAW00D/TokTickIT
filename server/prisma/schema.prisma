@@ -21,16 +21,70 @@ model Category {
   tickets Ticket[]
 }
 
-model RequesterUser {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  isActive  Boolean  @default(true)
+// Evolved from Lab 2's `RequesterUser` (docs/lab-03/specification.md §7.1,
+// §7.4 item 1): the migration renames the table so every existing row, id
+// and foreign key survives untouched. Now models all three Lab 3 roles, not
+// only Requesters.
+model User {
+  id   Int    @id @default(autoincrement())
+  name String
+
+  // Case-insensitively unique and stored lower-cased (BR-09). Deliberately
+  // NOT declared `@unique` here: Prisma's own diffing has no representation
+  // for the case-insensitive unique index this needs, so the constraint is
+  // hand-written as `CREATE UNIQUE INDEX ... ON "User" (lower(email))` in
+  // migration SQL instead (specification.md §7.4 item 6). Adding `@unique`
+  // to this field would make Prisma start managing its own case-*sensitive*
+  // unique constraint on the next `prisma migrate dev`, silently
+  // reintroducing the duplicate-email hole this design avoids — don't.
+  email String
+
+  // bcrypt hash, cost 12 (BR-06). Never a plaintext password.
+  passwordHash String
+
+  role Role @default(REQUESTER)
+
+  isActive Boolean @default(true)
+
+  // Cleared once a valid new password is saved (FR-07). Defaults true so a
+  // freshly migrated Lab 2 Requester, and every seeded/created account,
+  // must choose a real password before entering the application.
+  mustChangePassword Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tickets            Ticket[]
-  removedAttachments Attachment[] @relation("AttachmentRemovedBy")
+  requestedTickets   Ticket[]        @relation("TicketRequester")
+  ownedTickets       Ticket[]        @relation("TicketOwner")
+  removedAttachments Attachment[]    @relation("AttachmentRemovedBy")
+  sessions           Session[]
+  publicComments     PublicComment[]
+  internalNotes      InternalNote[]
+
+  // Administrator role filter and the last-active-Administrator check
+  // (BR-32).
+  @@index([role, isActive])
+}
+
+enum Role {
+  REQUESTER
+  IT_STAFF
+  ADMINISTRATOR
+}
+
+// New in Lab 3 (specification.md §7.1). The cookie carries only the raw
+// 256-bit token, base64url-encoded; `tokenHash` stores its SHA-256 hash, so
+// a database leak yields no usable session.
+model Session {
+  tokenHash String   @id
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Bulk invalidation on logout-all and deactivation (BR-12).
+  @@index([userId])
 }
 
 model RelatedSystem {
@@ -43,27 +97,49 @@ model RelatedSystem {
 }
 
 model Ticket {
-  id                Int           @id @default(autoincrement())
-  ticketNumber      String        @unique
+  id                Int          @id @default(autoincrement())
+  ticketNumber      String       @unique
   requesterId       Int
   categoryId        Int
   relatedSystemId   Int
   summary           String
   description       String
   requestedPriority Priority
-  status            TicketStatus  @default(NEW)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  status            TicketStatus @default(NEW)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  requester     RequesterUser @relation(fields: [requesterId], references: [id], onDelete: Restrict)
-  category      Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  relatedSystem RelatedSystem @relation(fields: [relatedSystemId], references: [id], onDelete: Restrict)
-  attachments   Attachment[]
+  // --- Lab 3 additions (specification.md §7.1) ---
+
+  // Primary Ticket Owner; null = unassigned (BR-19).
+  ownerId Int?
+
+  // Initialised to a copy of requestedPriority (BR-22) and afterwards
+  // changed only by IT Staff or Administrator, independently of
+  // requestedPriority.
+  itPriority Priority
+
+  // Set by "Problem Appears Resolved" (BR-26); does not change status.
+  requesterResolvedAt DateTime?
+
+  requester      User            @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  owner          User?           @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  category       Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  relatedSystem  RelatedSystem   @relation(fields: [relatedSystemId], references: [id], onDelete: Restrict)
+  attachments    Attachment[]
+  publicComments PublicComment[]
+  internalNotes  InternalNote[]
 
   @@index([requesterId, createdAt])
   @@index([requesterId, updatedAt])
   @@index([requesterId, ticketNumber])
   @@index([categoryId])
+  // Default queue ordering: IT Priority desc, created date asc (§8.2, D-10).
+  @@index([itPriority, createdAt])
+  // Queue filter by status.
+  @@index([status])
+  // Queue filter by owner, including "unassigned".
+  @@index([ownerId])
 }
 
 model Attachment {
@@ -79,10 +155,42 @@ model Attachment {
   removedById      Int?
   createdAt        DateTime  @default(now())
 
-  ticket    Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  removedBy RequesterUser? @relation("AttachmentRemovedBy", fields: [removedById], references: [id], onDelete: Restrict)
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  removedBy User?  @relation("AttachmentRemovedBy", fields: [removedById], references: [id], onDelete: Restrict)
 
   @@index([ticketId, isRemoved])
+}
+
+// New in Lab 3 (specification.md §7.1). Visible to the owning Requester, IT
+// Staff and Administrator (BR-04). Append-only (BR-15).
+model PublicComment {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  // Thread retrieval in order.
+  @@index([ticketId, createdAt])
+}
+
+// New in Lab 3 (specification.md §7.1). Visible only to IT Staff and
+// Administrator (BR-04). Append-only (BR-15).
+model InternalNote {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  // Thread retrieval in order.
+  @@index([ticketId, createdAt])
 }
 
 model TicketCounter {
@@ -96,6 +204,16 @@ enum Priority {
   HIGH
 }
 
+// Extended in Lab 3 from the single Lab 2 value to the eight statuses in
+// the §5.1 transition matrix. Every existing Lab 2 ticket stays `NEW`,
+// which remains valid (specification.md §7.4 item 7).
 enum TicketStatus {
   NEW
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_REQUESTER
+  RESOLVED
+  CLOSED
+  REOPENED
+  CANCELLED
 }

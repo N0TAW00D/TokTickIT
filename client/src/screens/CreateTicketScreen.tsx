@@ -12,7 +12,7 @@ import {
   AttachmentUploader,
   type QueuedAttachment,
 } from "../components/AttachmentUploader";
-import { useRequester } from "../requester/RequesterContext";
+import { useAuth } from "../auth/AuthContext";
 import {
   createTicket,
   fetchCategories,
@@ -105,14 +105,13 @@ type SubmitState =
  * caller can still show the success panel (AC-21).
  */
 async function uploadQueuedAttachments(
-  requesterId: number,
   ticketId: number,
   queue: QueuedAttachment[],
 ): Promise<string[]> {
   const failedNames: string[] = [];
   for (const item of queue) {
     try {
-      await uploadAttachment(requesterId, ticketId, item.file);
+      await uploadAttachment(ticketId, item.file);
     } catch {
       failedNames.push(item.file.name);
     }
@@ -189,7 +188,7 @@ function validateAll(values: FormValues): FieldErrors {
  */
 export function CreateTicketScreen() {
   const navigate = useNavigate();
-  const { requesterId, requesterName } = useRequester();
+  const { user } = useAuth();
 
   const [referenceState, setReferenceState] = useState<ReferenceState>({
     phase: "loading",
@@ -249,9 +248,6 @@ export function CreateTicketScreen() {
 
     if (referenceState.phase !== "loaded") return;
     if (submitLockRef.current) return;
-    // RequireRequester guarantees a valid requesterId by the time this
-    // screen renders; this is a type-narrowing guard, not a real branch.
-    if (requesterId === null) return;
 
     const errors = validateAll(values);
     if (Object.keys(errors).length > 0) {
@@ -265,7 +261,7 @@ export function CreateTicketScreen() {
     submitLockRef.current = true;
     setSubmitState({ phase: "submitting" });
 
-    createTicket(requesterId, {
+    createTicket({
       categoryId: Number(values.categoryId),
       relatedSystemId: Number(values.relatedSystemId),
       requestedPriority: values.requestedPriority,
@@ -278,7 +274,6 @@ export function CreateTicketScreen() {
         // never rejects (see uploadQueuedAttachments) so it can't be
         // mistaken for the ticket creation itself failing (AC-21).
         const failedAttachments = await uploadQueuedAttachments(
-          requesterId,
           ticket.id,
           queuedAttachments,
         );
@@ -404,7 +399,7 @@ export function CreateTicketScreen() {
                 </FormField>
               </div>
               <FormField id="create-ticket-requester" label="Requester">
-                <TextInput readOnly value={requesterName ?? ""} />
+                <TextInput readOnly value={user?.name ?? ""} />
               </FormField>
             </section>
 

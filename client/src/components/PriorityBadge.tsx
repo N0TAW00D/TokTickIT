@@ -1,16 +1,27 @@
 import "./Badge.css";
 
-/** Known Requested Priority values (ui-spec.md §7.1). */
+/** Known priority values, shared by Requested and IT Priority (ui-spec.md §7.1, lab-03/ui-spec.md §3.2). */
 export type PriorityValue = "LOW" | "MEDIUM" | "HIGH";
+
+/**
+ * Which priority this badge shows (lab-03/ui-spec.md §3.2): `requested` is
+ * the Lab 2 Requested Priority (unchanged colours, no prefix); `it` is the
+ * Lab 3 IT Priority — same three colours, plus a solid 2px left border in
+ * the text colour and an "IT: " label prefix, so the two are never
+ * confused when they appear side by side on the same queue row.
+ */
+export type PriorityBadgeVariant = "requested" | "it";
 
 export interface PriorityBadgeProps {
   /**
-   * Requested Priority to render. Typed as `PriorityValue | (string & {})`
-   * rather than the bare union: editors still suggest LOW/MEDIUM/HIGH, but
-   * the type doesn't reject a value this build doesn't recognize yet — the
+   * Priority to render. Typed as `PriorityValue | (string & {})` rather
+   * than the bare union: editors still suggest LOW/MEDIUM/HIGH, but the
+   * type doesn't reject a value this build doesn't recognize yet — the
    * badge is meant to degrade gracefully instead (see the fallback below).
    */
   value: PriorityValue | (string & {});
+  /** Defaults to "requested" — Lab 2's only variant, unchanged. */
+  variant?: PriorityBadgeVariant;
 }
 
 interface PriorityPresentation {
@@ -71,8 +82,8 @@ function humanizeUnknown(rawValue: string): string {
 }
 
 /**
- * Requested Priority badge (ui-spec.md §7.1). Shared by My Tickets (§9) and
- * Ticket Detail (§10).
+ * Priority badge (ui-spec.md §7.1, lab-03/ui-spec.md §3.2). Shared by My
+ * Tickets, Ticket Detail and the IT Staff Ticket Queue.
  *
  * Always renders the text label — the icon only accompanies it and is
  * `aria-hidden`, since the label alone already carries the meaning (§12:
@@ -80,8 +91,13 @@ function humanizeUnknown(rawValue: string): string {
  * still renders — neutral style, no icon, humanized label — instead of
  * crashing or leaving a blank badge (§7.2's "default style for unknown",
  * which applies equally here since the two badges share one table shape).
+ *
+ * `variant="it"` adds the left-border modifier class and prefixes the
+ * label with "IT: " (lab-03/ui-spec.md §3.2) — including on the unknown
+ * fallback, so an IT Priority badge never silently loses its "IT:" framing
+ * just because the value is one this build doesn't recognize yet.
  */
-export function PriorityBadge({ value }: PriorityBadgeProps) {
+export function PriorityBadge({ value, variant = "requested" }: PriorityBadgeProps) {
   const presentation: PriorityPresentation = isKnownPriority(value)
     ? PRIORITY_PRESENTATION[value]
     : {
@@ -90,14 +106,20 @@ export function PriorityBadge({ value }: PriorityBadgeProps) {
         className: "zen-badge--unknown",
       };
 
+  const label = variant === "it" ? `IT: ${presentation.label}` : presentation.label;
+  const className =
+    variant === "it"
+      ? `zen-badge ${presentation.className} zen-badge--it-priority`
+      : `zen-badge ${presentation.className}`;
+
   return (
-    <span className={`zen-badge ${presentation.className}`}>
+    <span className={className}>
       {presentation.icon !== null && (
         <span className="zen-badge__icon" aria-hidden="true">
           {presentation.icon}
         </span>
       )}
-      <span className="zen-badge__label">{presentation.label}</span>
+      <span className="zen-badge__label">{label}</span>
     </span>
   );
 }

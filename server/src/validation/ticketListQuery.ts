@@ -40,10 +40,10 @@ const DEFAULT_PAGE_SIZE: PageSize = 10;
 
 /**
  * Largest value Postgres `int4` can hold. Mirrors the same constant in
- * `requesterContext.ts` and `routes/tickets.ts`: an id-shaped query value
- * larger than this can never reference any row and querying with it raises
- * a driver-level range error rather than a clean "no match" — so it is
- * bounds-checked here, in the pure parser, before any query is ever built.
+ * `routes/tickets.ts`: an id-shaped query value larger than this can never
+ * reference any row and querying with it raises a driver-level range error
+ * rather than a clean "no match" — so it is bounds-checked here, in the
+ * pure parser, before any query is ever built.
  */
 const PG_INT4_MAX = 2_147_483_647;
 
@@ -134,8 +134,8 @@ function parseCategoryId(raw: unknown): ParamResult<number> {
   // Category row, so it is treated the same as an unknown category id —
   // 400 INVALID_QUERY — rather than being handed to the database, which
   // would raise "value out of range for type integer" and surface as an
-  // unrelated 500. Same reasoning as requesterContext.ts's X-Requester-Id
-  // bound and tickets.ts's categoryId/relatedSystemId bound on create.
+  // unrelated 500. Same reasoning as tickets.ts's own categoryId/
+  // relatedSystemId bound on create.
   if (!Number.isSafeInteger(num) || num > PG_INT4_MAX) {
     return {
       ok: false,

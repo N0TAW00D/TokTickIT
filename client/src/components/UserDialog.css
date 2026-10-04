@@ -1,0 +1,135 @@
+/* Create/Edit User dialog (ui-spec.md §11). Same overlay/shell language as
+   ConfirmStatusChangeDialog.css under its own class prefix, widened for a
+   multi-field form instead of two buttons.
+
+   ui-spec.md §12 gives this dialog the same responsive tiers as the other
+   confirm dialogs, on top of the Desktop ≥992px centered-card default below:
+     - Tablet 768-991px: full-width with a 24px margin (not the 520px cap).
+     - Mobile <768px: a full-screen sheet — no overlay margin, no floating
+       card, the dialog fills the viewport edge-to-edge. */
+
+.zen-user-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--zen-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--zen-space-group-gap);
+  z-index: 1000;
+}
+
+.zen-user-dialog {
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - 2 * var(--zen-space-group-gap));
+  overflow-y: auto;
+  background: var(--zen-surface);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-desktop);
+  box-sizing: border-box;
+}
+
+.zen-user-dialog h2 {
+  margin: 0 0 var(--zen-space-field-gap);
+}
+
+.zen-user-dialog h3 {
+  margin: 0 0 var(--zen-space-unit);
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-user-dialog__error {
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border-radius: var(--zen-radius-control);
+  padding: 8px 12px;
+  margin-bottom: var(--zen-space-field-gap);
+  font-size: var(--zen-font-size-error);
+}
+
+.zen-user-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-field-gap);
+}
+
+.zen-user-dialog__checkbox-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.zen-user-dialog__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--zen-font-size-body);
+  color: var(--zen-text);
+  cursor: pointer;
+}
+
+.zen-user-dialog__checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.zen-user-dialog__checkbox-label input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.zen-user-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: var(--zen-space-unit);
+}
+
+.zen-user-dialog__password-section {
+  margin-top: var(--zen-space-group-gap);
+  padding-top: var(--zen-space-group-gap);
+  border-top: 1px solid var(--zen-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-field-gap);
+}
+
+.zen-user-dialog__reset-success {
+  margin: 0;
+  color: var(--zen-secondary);
+  font-size: var(--zen-font-size-body);
+}
+
+/* Tablet 768-991px (ui-spec.md §12: "dialogs go full-width with 24px
+   margin"). Same reasoning as ConfirmStatusChangeDialog.css's own tier. */
+@media (max-width: 991px) {
+  .zen-user-dialog {
+    max-width: none;
+  }
+}
+
+/* Mobile <768px (ui-spec.md §12: "dialogs become full-screen sheets"). */
+@media (max-width: 767px) {
+  .zen-user-dialog__overlay {
+    padding: 0;
+  }
+
+  .zen-user-dialog {
+    max-width: none;
+    max-height: none;
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    padding: var(--zen-space-card-padding-mobile);
+  }
+
+  .zen-user-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .zen-user-dialog__actions .zen-btn {
+    width: 100%;
+  }
+}

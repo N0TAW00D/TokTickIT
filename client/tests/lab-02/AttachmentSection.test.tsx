@@ -15,10 +15,8 @@ import {
 import { AttachmentList } from "../../src/components/AttachmentList.tsx";
 import { AttachmentSection } from "../../src/components/AttachmentSection.tsx";
 import { CreateTicketScreen } from "../../src/screens/CreateTicketScreen.tsx";
-import {
-  RequesterProvider,
-  useRequester,
-} from "../../src/requester/RequesterContext.tsx";
+import { AuthProvider, useAuth } from "../../src/auth/AuthContext.tsx";
+import type { AuthUser } from "../../src/auth/api.ts";
 import {
   AttachmentRemovedError,
   downloadAttachment,
@@ -385,25 +383,31 @@ function mockFetch(attachmentResult: (fileName: string) => Promise<Response>) {
   return fetchMock;
 }
 
-function Bootstrap({ children }: { children: ReactNode }) {
-  const { requesterName, selectRequester } = useRequester();
+const CREATE_TICKET_USER: AuthUser = {
+  id: 1,
+  name: "Jennifer Anderson",
+  email: "jennifer.anderson@example.edu",
+  role: "REQUESTER",
+  mustChangePassword: false,
+};
+
+function AuthBootstrap({ children }: { children: ReactNode }) {
+  const { user, setUser } = useAuth();
 
   useEffect(() => {
-    if (requesterName === null) {
-      selectRequester({ id: 1, name: "Jennifer Anderson" });
-    }
+    if (!user) setUser(CREATE_TICKET_USER);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (requesterName === null) return null;
+  if (!user) return null;
 
   return <>{children}</>;
 }
 
 function renderScreen() {
   return render(
-    <RequesterProvider>
-      <Bootstrap>
+    <AuthProvider>
+      <AuthBootstrap>
         <MemoryRouter initialEntries={["/tickets/new"]}>
           <Routes>
             <Route path="/tickets/new" element={<CreateTicketScreen />} />
@@ -411,8 +415,8 @@ function renderScreen() {
             <Route path="/tickets/:id" element={<h1>Ticket Details</h1>} />
           </Routes>
         </MemoryRouter>
-      </Bootstrap>
-    </RequesterProvider>,
+      </AuthBootstrap>
+    </AuthProvider>,
   );
 }
 
@@ -636,7 +640,6 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
 
     const promise = uploadAttachment(
-      1,
       42,
       makeFile("virus.exe", 10, "application/x-msdownload"),
     );
@@ -656,7 +659,6 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
 
     const promise = uploadAttachment(
-      1,
       42,
       makeFile("big.pdf", 10, "application/pdf"),
     );
@@ -676,7 +678,6 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
 
     const promise = uploadAttachment(
-      1,
       42,
       makeFile("one-more.pdf", 10, "application/pdf"),
     );
@@ -692,7 +693,7 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
         vi.fn(() => jsonResponse(status, { error: "X", message: "m" })),
       );
       try {
-        await uploadAttachment(1, 42, makeFile("f.pdf", 10, "application/pdf"));
+        await uploadAttachment(42, makeFile("f.pdf", 10, "application/pdf"));
       } catch (error) {
         if (error instanceof UploadAttachmentError) codes.add(error.code);
       }
@@ -709,7 +710,6 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
 
     const promise = uploadAttachment(
-      1,
       42,
       makeFile("f.pdf", 10, "application/pdf"),
     );
@@ -726,7 +726,6 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
 
     const promise = uploadAttachment(
-      1,
       42,
       makeFile("f.pdf", 10, "application/pdf"),
     );
@@ -734,7 +733,7 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     await expect(promise).rejects.toBeInstanceOf(Error);
   });
 
-  it("sends the file as multipart/form-data with the X-Requester-Id header (api-spec.md §1.2, §4.1)", async () => {
+  it("sends the file as multipart/form-data with the session cookie included (api-spec.md §1.2, §4.1)", async () => {
     const fetchMock = vi.fn(() =>
       jsonResponse(201, {
         id: 1,
@@ -750,17 +749,19 @@ describe("uploadAttachment distinguishes 415/413/409 (api-spec.md §4.1)", () =>
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await uploadAttachment(7, 42, makeFile("f.pdf", 10, "application/pdf"));
+    await uploadAttachment(42, makeFile("f.pdf", 10, "application/pdf"));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:3000/api/tickets/42/attachments");
     expect(init.method).toBe("POST");
-    expect(init.headers).toMatchObject({ "X-Requester-Id": "7" });
+    expect(init.credentials).toBe("include");
     // Content-Type must be left for the browser to set from the FormData
     // body — a manually-set "multipart/form-data" header would omit the
-    // boundary and break server-side parsing.
-    expect(init.headers).not.toHaveProperty("Content-Type");
+    // boundary and break server-side parsing. uploadAttachment sets no
+    // headers object at all (only credentials + body), so there is none to
+    // carry a Content-Type in the first place.
+    expect(init.headers).toBeUndefined();
     expect(init.body).toBeInstanceOf(FormData);
     const uploaded = (init.body as FormData).get("file");
     expect(uploaded).toBeInstanceOf(File);
@@ -896,12 +897,10 @@ const ATTACHMENT_DELETE_URL = `${API_BASE_URL}/api/attachments/1`;
  */
 function AttachmentSectionHarness({
   initialAttachments,
-  requesterId = 7,
   ticketId = 1,
   withUpload = false,
 }: {
   initialAttachments: TicketAttachment[];
-  requesterId?: number;
   ticketId?: number;
   /** When true, wire `onAttachmentAdded` so the Add-attachment control renders. */
   withUpload?: boolean;
@@ -910,7 +909,6 @@ function AttachmentSectionHarness({
   return (
     <AttachmentSection
       attachments={attachments}
-      requesterId={requesterId}
       ticketId={ticketId}
       onAttachmentRemoved={(updated) =>
         setAttachments((previous) =>
@@ -991,15 +989,15 @@ describe("C-18 remove dialog happy path (AC-34)", () => {
       screen.queryByRole("button", { name: /download/i }),
     ).not.toBeInTheDocument();
 
-    // Exactly one DELETE, with the right headers and JSON body
-    // (api-spec.md §4.4: X-Requester-Id, Content-Type: application/json,
+    // Exactly one DELETE, with the right credentials/headers and JSON body
+    // (api-spec.md §4.4: session cookie, Content-Type: application/json,
     // { reason }).
     const deleteCalls = deleteCallsOf(fetchMock);
     expect(deleteCalls).toHaveLength(1);
     const [url, init] = deleteCalls[0] as [string, RequestInit];
     expect(url).toBe(ATTACHMENT_DELETE_URL);
+    expect(init.credentials).toBe("include");
     expect(init.headers).toMatchObject({
-      "X-Requester-Id": "7",
       "Content-Type": "application/json",
     });
     expect(JSON.parse(init.body as string)).toEqual({
@@ -1355,7 +1353,7 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
       ),
     );
 
-    const promise = removeAttachment(1, 5, "ok reason");
+    const promise = removeAttachment(5, "ok reason");
     await expect(promise).rejects.toBeInstanceOf(RemoveAttachmentError);
     await expect(promise).rejects.toMatchObject({
       code: "VALIDATION_FAILED",
@@ -1380,7 +1378,7 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
       ),
     );
 
-    const promise = removeAttachment(1, 5, "ok reason");
+    const promise = removeAttachment(5, "ok reason");
     await expect(promise).rejects.toBeInstanceOf(RemoveAttachmentError);
     await expect(promise).rejects.toMatchObject({ code: "ALREADY_REMOVED" });
   });
@@ -1393,7 +1391,7 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
         vi.fn(() => jsonResponse(status, { error: "X", message: "m" })),
       );
       try {
-        await removeAttachment(1, 5, "ok reason");
+        await removeAttachment(5, "ok reason");
       } catch (error) {
         if (error instanceof RemoveAttachmentError) codes.add(error.code);
       }
@@ -1409,7 +1407,7 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
       ),
     );
 
-    const promise = removeAttachment(1, 5, "ok reason");
+    const promise = removeAttachment(5, "ok reason");
     await expect(promise).rejects.not.toBeInstanceOf(RemoveAttachmentError);
     await expect(promise).rejects.toBeInstanceOf(Error);
   });
@@ -1420,12 +1418,12 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
       vi.fn(() => jsonResponse(500, { error: "INTERNAL", message: "Broke." })),
     );
 
-    const promise = removeAttachment(1, 5, "ok reason");
+    const promise = removeAttachment(5, "ok reason");
     await expect(promise).rejects.not.toBeInstanceOf(RemoveAttachmentError);
     await expect(promise).rejects.toBeInstanceOf(Error);
   });
 
-  it("sends the reason as a JSON body with Content-Type and X-Requester-Id headers (api-spec.md §1.2, §4.4)", async () => {
+  it("sends the reason as a JSON body with the session cookie included (api-spec.md §1.2, §4.4)", async () => {
     const fetchMock = vi.fn(() =>
       jsonResponse(200, {
         ...REMOVABLE_ATTACHMENT,
@@ -1436,14 +1434,14 @@ describe("removeAttachment distinguishes 400/409 (api-spec.md §4.4)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await removeAttachment(9, 5, "ok reason");
+    await removeAttachment(5, "ok reason");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:3000/api/attachments/5");
     expect(init.method).toBe("DELETE");
+    expect(init.credentials).toBe("include");
     expect(init.headers).toMatchObject({
-      "X-Requester-Id": "9",
       "Content-Type": "application/json",
     });
     expect(JSON.parse(init.body as string)).toEqual({ reason: "ok reason" });
@@ -1514,7 +1512,7 @@ describe("downloadAttachment (api-spec.md §4.3)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("GETs /api/attachments/:id/download with the X-Requester-Id header and returns the blob + Content-Disposition filename", async () => {
+  it("GETs /api/attachments/:id/download with the session cookie included and returns the blob + Content-Disposition filename", async () => {
     const pdfBlob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
     const fetchMock = vi.fn(() =>
       blobResponse(200, {
@@ -1524,11 +1522,11 @@ describe("downloadAttachment (api-spec.md §4.3)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await downloadAttachment(9, 42);
+    const result = await downloadAttachment(42);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:3000/api/attachments/42/download");
-    expect(init.headers).toMatchObject({ "X-Requester-Id": "9" });
+    expect(init.credentials).toBe("include");
     expect(result.blob).toBe(pdfBlob);
     expect(result.filename).toBe("battery-report.pdf");
   });
@@ -1536,7 +1534,7 @@ describe("downloadAttachment (api-spec.md §4.3)", () => {
   it("returns filename: null when the response carries no Content-Disposition (caller falls back to originalFilename)", async () => {
     vi.stubGlobal("fetch", vi.fn(() => blobResponse(200, {})));
 
-    const result = await downloadAttachment(1, 1);
+    const result = await downloadAttachment(1);
     expect(result.filename).toBeNull();
   });
 
@@ -1553,7 +1551,7 @@ describe("downloadAttachment (api-spec.md §4.3)", () => {
       ),
     );
 
-    const promise = downloadAttachment(1, 5);
+    const promise = downloadAttachment(5);
     await expect(promise).rejects.toBeInstanceOf(AttachmentRemovedError);
     await expect(promise).rejects.toHaveProperty(
       "message",
@@ -1567,7 +1565,7 @@ describe("downloadAttachment (api-spec.md §4.3)", () => {
   ])("raises a plain Error, not AttachmentRemovedError, on a %i (%s)", async (status) => {
     vi.stubGlobal("fetch", vi.fn(() => blobResponse(status, {})));
 
-    const promise = downloadAttachment(1, 5);
+    const promise = downloadAttachment(5);
     await expect(promise).rejects.toBeInstanceOf(Error);
     await expect(promise).rejects.not.toBeInstanceOf(AttachmentRemovedError);
   });
@@ -1629,9 +1627,7 @@ describe("Attachment download wiring on Ticket Detail (AC-33)", () => {
     await vi.waitFor(() => expect(clicked).toHaveLength(1));
     expect(fetchMock).toHaveBeenCalledWith(
       DOWNLOAD_URL(REMOVABLE_ATTACHMENT.id),
-      expect.objectContaining({
-        headers: expect.objectContaining({ "X-Requester-Id": "7" }),
-      }),
+      expect.objectContaining({ credentials: "include" }),
     );
     // Server-provided name wins over the attachment's own originalFilename.
     expect(clicked[0].download).toBe("server-name.pdf");
@@ -1727,9 +1723,7 @@ describe("Image preview lightbox (ui-spec.md §10, BR-34)", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       DOWNLOAD_URL(ACTIVE_IMAGE_ROW.id),
-      expect.objectContaining({
-        headers: expect.objectContaining({ "X-Requester-Id": "7" }),
-      }),
+      expect.objectContaining({ credentials: "include" }),
     );
 
     const img = await within(dialog).findByRole("img", { name: "photo.png" });

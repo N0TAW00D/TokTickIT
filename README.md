@@ -47,12 +47,35 @@ cp .env.example .env
 npm install
 npm run db:start     # starts PostgreSQL via docker-compose
 npm run db:migrate   # applies all Prisma migrations (creates tables from empty)
-npm run db:seed      # loads reference data + Development Requesters (idempotent, safe to re-run)
+npm run db:seed      # loads reference data, Users and example Tickets (idempotent, safe to re-run)
 ```
 
 `db:migrate` and `db:seed` both target the database in `server/.env` (the dev database,
-`localdb` by default). Re-running `db:seed` never creates duplicate rows — it `upsert`s every
-row by its natural key (see `server/prisma/seed.ts`).
+`localdb` by default). Re-running `db:seed` never creates duplicate rows — it upserts every
+row by its natural key (email for Users, ticketNumber for Tickets — see
+`server/prisma/seed.ts`).
+
+#### Seeded accounts (local development only)
+
+`db:seed` creates one `User` row per seeded account, covering all three Lab 3 roles: 4 active +
+1 inactive Requester, 3 active + 1 inactive IT Staff, and 2 active Administrators (one more than
+the handout's stated minimum, so self-deactivation and last-active-Administrator can each be
+tested independently — see `docs/lab-03/specification.md` §7.5). Every seeded account shares one
+password:
+
+```
+DevPassword123!
+```
+
+This is a **fake, local-development-only** password — not a real secret, and it grants access to
+no non-local system (`specification.md` AC-58). Seeded accounts are flagged
+`mustChangePassword: false`, so they can log in and use the app immediately without going through
+the forced first-login change flow. An account created by an Administrator, or a Lab 2
+`RequesterUser` row carried forward by the Lab 3 migration, is different: both start with
+`mustChangePassword: true` and must choose a new password at first login — the migration backfills
+their password hash from this same `DevPassword123!` constant purely so that first login is
+actually possible (see
+`server/prisma/migrations/20260914120000_evolve_user_model_roles_sessions/migration.sql`).
 
 ### 2. Server
 
@@ -88,6 +111,24 @@ npm run db:test:reset
 The test setup refuses to run if `server/.env.test` is missing, or if it points at the same
 database as `server/.env`, or at a database whose name doesn't contain `test` — this is a
 safety net against accidentally wiping the dev database.
+
+#### Lab 2-era fixture database (migration tests)
+
+`server/tests/lab-03/migration.test.ts` (`docs/lab-03/tests.md` MIG-01..MIG-06) needs a database
+holding *only* Lab 2-era schema and data, so it can apply the Lab 3 migration to it and prove the
+`RequesterUser` → `User` rename and column backfills preserve every row. That test provisions this
+database itself (in its own `beforeAll`), so `npm test` needs no extra setup — but the same
+provisioning is also available as its own command, alongside `db:test:reset`, for inspecting that
+database by hand:
+
+```bash
+npm run db:test:lab2-fixture
+```
+
+This always drops and recreates a dedicated `toktickit_test_lab2fixture` database (derived from
+`server/.env.test`, so the same safety checks apply), applies only the two Lab 2 migrations, and
+hand-seeds it with representative Lab 2-era rows — never the Lab 3 migration, which is exactly
+what the test then applies and asserts against.
 
 ### 3. Client
 
@@ -144,6 +185,28 @@ Final column):
 The Final column of `docs/lab-02/tests.md` is the source of truth for which rows are passing on
 the current branch.
 
+Specs under `e2e/lab-03/`, each mapped to rows in `docs/lab-03/tests.md` (§2.9 End-to-end, §2.8
+Responsive):
+
+- `authentication.spec.ts` — the login journey (`tests.md` rows E2E-01..E2E-04): invalid vs. valid
+  login, the mandatory first-login forced password change, an inactive account's login attempt,
+  and logout (including that a re-typed protected URL lands back on Login).
+- `staff-ticket-flow.spec.ts` — the IT Staff queue-to-detail journey (E2E-05..E2E-08): search,
+  filter, sort and paginate the queue then open a ticket; claim/IT-Priority/status operations;
+  Public Comment vs. Internal Note visibility; the Requester-side "problem appears resolved" flow
+  and Lab 2-era attachment continuity.
+- `user-administration.spec.ts` — the Administrator User Management journey (E2E-09..E2E-12):
+  create/duplicate-email/edit, the initial-password reset round trip, the self-deactivation and
+  last-active-Administrator safety rails, and the forbidden state a non-Administrator sees at
+  `/admin/users`.
+- `responsive.spec.ts` — the Lab 3 responsive checks (R-01..R-06) across all four screens
+  (authentication, staff-queue, staff-ticket-detail, user-management) at the same three-viewport
+  matrix as Lab 2, plus the R-06 screenshot capture under `artifacts/lab-03/screenshots/`.
+
+The Status column of `docs/lab-03/tests.md` §2 is the source of truth for which rows are passing
+on the current branch; §6 Final Results and §7 Known Limitations record the final counts and the
+handful of planned rows whose real coverage falls short of their own literal claim.
+
 ### 5. Full suite
 
 From the repository root:
@@ -165,5 +228,7 @@ client/              React + TypeScript + Vite frontend
 server/              Express + TypeScript + Prisma backend
 e2e/                 Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
 docs/lab-02/         Lab 2 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
+docs/lab-03/         Lab 3 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
 artifacts/lab-02/    Committed Playwright screenshots for the submission PDF
+artifacts/lab-03/    Committed Playwright screenshots (authentication, staff-queue, staff-ticket-detail, user-management)
 ```

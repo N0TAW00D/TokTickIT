@@ -1,7 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
+import {
+  expect,
+  request as playwrightRequest,
+  test,
+  type Browser,
+  type Page,
+} from "@playwright/test";
+import {
+  LOCAL_DEV_PASSWORD,
+  createPlainLoginFixtureUser,
+  loginAs,
+  type FixtureUser,
+} from "../support/auth.js";
 
 // Requester ticketing E2E journey (docs/lab-02/tests.md §2, E2E-01..E2E-05).
 //
@@ -21,6 +33,32 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 // specific state needs a failing backend (E2E-04's create failure), a
 // Playwright `page.route(...)` intercept stubs that ONE request; nothing in
 // the app is swapped out and the real server process keeps running.
+//
+// Originally written against Lab 2's dev-only "Development Requester
+// Selector" (`GET /api/requesters`, `X-Requester-Id`, `/select-requester`,
+// and a "Change Requester" menu item to switch identities mid-session),
+// which Lab 3 (#70) deleted entirely in favour of real session-cookie
+// authentication (`POST /api/auth/login`, `/login`). Migrated to that real
+// auth following the same convention e2e/lab-02/responsive.spec.ts and
+// e2e/lab-03/*.spec.ts already established: every `page`-driven login below
+// drives the real Login screen (`e2e/support/auth.ts`'s `loginAs`), and a
+// raw `APIRequestContext` needed outside a `page` carries a real session's
+// cookie via Playwright's own `storageState()`. Every seeded Requester has
+// `mustChangePassword: true` (would force a `/change-password` detour), and
+// none of this file's assertions actually depend on a ticket's owner being a
+// specific NAMED seeded person (only on it being "the Requester who is
+// logged in" vs. "a different one") — the AC-16 ownership check compares
+// against the acting Requester's own id, not a name. So every seeded
+// Requester name this file used ("David Lee", "Michael Brown", "Jennifer
+// Anderson", "Sarah Johnson") is replaced with a dedicated, disposable
+// fixture Requester (`createPlainLoginFixtureUser`) instead — simpler than
+// depending on any seeded account's forced-change quirk, and a fresh fixture
+// is reliably empty of tickets without relying on any other spec file's
+// convention about which seeded name it leaves untouched. E2E-03's old
+// "Change Requester" mid-session switch (a screen that no longer exists) is
+// now a real Logout (ui-spec.md §4.1 UserBadge menu, the same one
+// e2e/lab-03/authentication.spec.ts's E2E-04 drives) followed by a fresh
+// login as the second Requester.
 
 // server/src/index.ts hardcodes port 3000 (see the SERVER_URL comment in
 // ../playwright.config.ts); duplicated here the same way responsive.spec.ts
@@ -47,54 +85,48 @@ async function clickSubmitTicket(page: Page): Promise<void> {
 }
 
 /**
- * Drives the real Development Requester Selection screen (ui-spec.md §6)
- * exactly as a user would: pick the Requester by name, click Continue,
- * land on `/tickets`. Never pokes localStorage directly. Same shape as the
- * `loginAs` helper in submission-evidence.spec.ts.
+ * Logs a fixture Requester in through the real Login screen (ui-spec.md §5)
+ * and waits for the landing redirect to My Tickets. Every fixture from
+ * `createPlainLoginFixtureUser` has `mustChangePassword: false`, so there is
+ * no forced `/change-password` detour — same idiom as
+ * responsive.spec.ts's `loginAsSeededRequester`.
  */
-async function loginAs(page: Page, requesterName: string): Promise<void> {
-  await page.goto("/select-requester");
-  await page
-    .getByLabel("Development Requester")
-    .selectOption({ label: requesterName });
-  await page.getByRole("button", { name: /Continue/ }).click();
+async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
+  await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
   await expect(page).toHaveURL(/\/tickets$/);
 }
 
-interface SeededRequester {
-  id: number;
-  name: string;
+/**
+ * Establishes one real, cookie-based session for `fixtureUser` via a
+ * throwaway browser context + the real Login screen, then carries that
+ * session's `toktickit.sid` cookie into a raw `APIRequestContext`
+ * (Playwright's own `storageState()`) — for callers that need to hit the
+ * real HTTP API directly (outside of driving `page`). Same idiom
+ * responsive.spec.ts's `beforeAll` already uses: the server now derives the
+ * acting Requester from the session (`req.authUser!.id`), not a header, so
+ * this is the real-auth equivalent of the old `X-Requester-Id` header.
+ */
+async function loginApiContext(
+  browser: Browser,
+  fixtureUser: FixtureUser,
+): Promise<Awaited<ReturnType<typeof playwrightRequest.newContext>>> {
+  const loginContext = await browser.newContext();
+  const loginPage = await loginContext.newPage();
+  await loginAs(loginPage, fixtureUser.email, LOCAL_DEV_PASSWORD);
+  await expect(loginPage).toHaveURL(/\/tickets$/);
+  const storageState = await loginContext.storageState();
+  await loginContext.close();
+
+  return playwrightRequest.newContext({ baseURL: SERVER_URL, storageState });
 }
 
-/** Resolves a seeded active Requester's id via the real GET /api/requesters. */
-async function requesterByName(
-  api: Awaited<ReturnType<typeof playwrightRequest.newContext>>,
-  name: string,
-): Promise<SeededRequester> {
-  const response = await api.get("/api/requesters");
-  if (!response.ok()) {
-    throw new Error(
-      `GET /api/requesters failed: ${response.status()} ${await response.text()}`,
-    );
-  }
-  const requesters: SeededRequester[] = await response.json();
-  const found = requesters.find((r) => r.name === name);
-  if (!found) {
-    throw new Error(
-      `Seeded active requester "${name}" not found via GET /api/requesters — check server/prisma/seed.ts.`,
-    );
-  }
-  return found;
-}
-
-/** How many tickets a Requester currently owns, straight from the API's `meta`. */
+/** How many tickets the CURRENT session's Requester owns, straight from the
+ * API's `meta` — the acting Requester comes from `api`'s own session
+ * cookie, not a header. */
 async function ownedTicketCount(
   api: Awaited<ReturnType<typeof playwrightRequest.newContext>>,
-  requesterId: number,
 ): Promise<number> {
-  const response = await api.get("/api/tickets", {
-    headers: { "X-Requester-Id": String(requesterId) },
-  });
+  const response = await api.get("/api/tickets");
   if (!response.ok()) {
     throw new Error(
       `GET /api/tickets failed: ${response.status()} ${await response.text()}`,
@@ -117,13 +149,18 @@ async function ownedTicketCount(
 // (`GET /api/tickets/:id` for a ticket the caller does not own is a 404,
 // surfaced as "Ticket not found").
 //
-// Requester A is "David Lee" (this test creates one real ticket for him).
-// Requester B is "Michael Brown", who only *views* here and never has a
-// ticket created for him by any spec, so he is reliably empty. That lets
-// the isolation check anchor on his empty-state screen — a settled state
-// only reachable when his list genuinely has zero rows — BEFORE asserting
-// A's ticket is absent. Asserting `toHaveCount(0)` on the ticket number
-// alone would also pass transiently while B's list is still loading.
+// Requester A and Requester B are two dedicated fixture Requesters
+// (`createPlainLoginFixtureUser`), not named seeded accounts: this test only
+// needs two DISTINCT Requesters — one who creates a ticket, one who only
+// *views* — and neither AC-03, AC-09 nor AC-37 cares which specific person
+// either one is. A freshly created fixture is reliably empty of tickets
+// (nothing else in the database has ever referenced it), which is stronger
+// than depending on a seeded name that happens to be untouched by every
+// other spec file. That reliable emptiness lets the isolation check anchor
+// on B's empty-state screen — a settled state only reachable when their
+// list genuinely has zero rows — BEFORE asserting A's ticket is absent.
+// Asserting `toHaveCount(0)` on the ticket number alone would also pass
+// transiently while B's list is still loading.
 
 test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
   test("a ticket created by Requester A is absent from Requester B's list and 404s on direct navigation", async ({
@@ -131,8 +168,11 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
   }) => {
     await page.setViewportSize(DESKTOP);
 
+    const requesterA = await createPlainLoginFixtureUser("e2e-03-a");
+    const requesterB = await createPlainLoginFixtureUser("e2e-03-b");
+
     // --- Requester A creates a ticket through the real form ---------------
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, requesterA);
     await page.goto("/tickets/new");
     await expect
       .poll(() => page.locator("#create-ticket-category option").count())
@@ -144,12 +184,12 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
     await page
       .locator("#create-ticket-related-system")
       .selectOption({ index: 1 });
-    const summary = "E2E-03: David Lee's private ticket";
+    const summary = "E2E-03: Requester A's private ticket";
     await page.locator("#create-ticket-summary").fill(summary);
     await page
       .locator("#create-ticket-description")
       .fill(
-        "This ticket belongs to David Lee and must never appear for another Requester or load on direct navigation by one.",
+        "This ticket belongs to Requester A and must never appear for another Requester or load on direct navigation by one.",
       );
     await clickSubmitTicket(page);
 
@@ -177,20 +217,21 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
       page.locator(`a[href="${ticketPath}"]`).first(),
     ).toBeVisible();
 
-    // --- Change Requester to B (ui-spec.md §4 menu) ----------------------
+    // --- Switch to Requester B --------------------------------------------
+    // Lab 3 (#70) deleted the old "Change Requester" dev-selector screen
+    // entirely; the real equivalent of switching who is acting is a real
+    // Logout (ui-spec.md §4.1 UserBadge menu — the same menu item
+    // e2e/lab-03/authentication.spec.ts's E2E-04 logout journey drives)
+    // followed by a fresh login as B.
     await page.locator('button[aria-haspopup="menu"]').click();
-    await page.getByRole("menuitem", { name: "Change Requester" }).click();
-    await expect(page).toHaveURL(/\/select-requester$/);
-    await page
-      .getByLabel("Development Requester")
-      .selectOption({ label: "Michael Brown" });
-    await page.getByRole("button", { name: /Continue/ }).click();
-    await expect(page).toHaveURL(/\/tickets$/);
+    await page.getByRole("menuitem", { name: "Logout" }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await loginAsFixture(page, requesterB);
 
     // --- AC-03: B's My Tickets does not list A's ticket ------------------
-    // Positive anchor first: Michael Brown owns zero tickets, so his list
+    // Positive anchor first: Requester B owns zero tickets, so their list
     // settles on the empty state (ui-spec.md §9). That heading is only
-    // reachable when `GET /api/tickets` for him returns zero rows — drop
+    // reachable when `GET /api/tickets` for them returns zero rows — drop
     // the server's caller-scoping and this list renders A's ticket instead
     // and the empty-state assertion fails.
     await expect(
@@ -206,9 +247,14 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
     await expect(
       page.getByRole("heading", { name: "Ticket not found" }),
     ).toBeVisible();
+    // client/src/screens/TicketDetailScreen.tsx's not-found copy no longer
+    // mentions the deleted "development requester" concept — it now reads
+    // "your account" for a real, session-authenticated Requester (the
+    // wording change is downstream of #70's real-auth rewrite, not
+    // something this migration introduces).
     await expect(
       page.getByText(
-        "This ticket doesn't exist or isn't associated with the current development requester.",
+        "This ticket doesn't exist or isn't associated with your account.",
       ),
     ).toBeVisible();
     await expect(
@@ -237,18 +283,21 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
 test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
   test("a failed create shows a safe error, keeps every entered value, and re-enables Submit", async ({
     page,
+    browser,
   }) => {
     await page.setViewportSize(DESKTOP);
-    // Any seeded active Requester works — this test never persists a ticket
-    // (the POST is intercepted and fails). It asserts BR-26 by comparing
-    // this Requester's ticket count before and after the failed submit, so
-    // it does not care whether they already own tickets and does not
-    // depend on any other spec's execution order.
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const david = await requesterByName(api, "David Lee");
-    const countBefore = await ownedTicketCount(api, david.id);
+    // Any active Requester works — this test never persists a ticket (the
+    // POST is intercepted and fails). It asserts BR-26 by comparing this
+    // Requester's ticket count before and after the failed submit, so it
+    // does not care whether they already own tickets and does not depend on
+    // any other spec's execution order — a dedicated fixture Requester
+    // (createPlainLoginFixtureUser) is enough; the identity itself is
+    // irrelevant.
+    const fixtureUser = await createPlainLoginFixtureUser("e2e-04");
+    const api = await loginApiContext(browser, fixtureUser);
+    const countBefore = await ownedTicketCount(api);
 
-    await loginAs(page, "David Lee");
+    await loginAsFixture(page, fixtureUser);
 
     await page.goto("/tickets/new");
 
@@ -339,7 +388,7 @@ test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
     // tickets as before the aborted submit — asserted as a delta, not an
     // absolute count, so the test holds whatever else they own.
     await page.unroute("**/api/tickets");
-    expect(await ownedTicketCount(api, david.id)).toBe(countBefore);
+    expect(await ownedTicketCount(api)).toBe(countBefore);
     await api.dispose();
   });
 });
@@ -363,32 +412,30 @@ test.describe("E2E-04 create failure preserves input (AC-17, BR-26)", () => {
 // search or filters.", "Clear filters") is pinned verbatim by the frozen
 // ui-spec.md §9 States table.
 //
-// Requester: "Jennifer Anderson". NOT "Michael Brown" (whom
-// submission-evidence.spec.ts reserves as a never-write, always-empty
-// Requester and whose `beforeAll` throws if he owns any ticket) — this test
-// must create a ticket for its subject Requester, so it needs a different
-// one. submission-evidence.spec.ts only ever uses Jennifer Anderson for the
-// Create Ticket screen + her requesterId, never for My Tickets list/count
-// assertions, and responsive.spec.ts uses David Lee — so the one ticket
-// created here does not pollute either. `pretest:e2e` truncates
-// Ticket/Attachment/TicketCounter before every run, and this test asserts
-// its Requester's live ticket count is zero before trusting the empty state
-// rather than assuming a starting count.
-const EMPTY_STATE_REQUESTER = "Jennifer Anderson";
+// Requester: a dedicated fixture (createPlainLoginFixtureUser), not a named
+// seeded account. This test must create a ticket for its subject Requester
+// and then trust that Requester's list started at zero, so it needs a
+// Requester no other spec has ever touched — a freshly created fixture row
+// is reliably that by construction, stronger than picking a seeded name by
+// convention (the pre-migration version of this test depended on
+// coordinating with submission-evidence.spec.ts's and responsive.spec.ts's
+// own choices of seeded name to avoid collisions). `pretest:e2e` truncates
+// Ticket/Attachment/TicketCounter before every run, and this test still
+// asserts its Requester's live ticket count is zero before trusting the
+// empty state rather than assuming a starting count.
 
 test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
-  let requesterId: number;
+  let fixtureUser: FixtureUser;
 
-  test.beforeAll(async () => {
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    requesterId = (await requesterByName(api, EMPTY_STATE_REQUESTER)).id;
-    const owned = await ownedTicketCount(api, requesterId);
+  test.beforeAll(async ({ browser }) => {
+    fixtureUser = await createPlainLoginFixtureUser("e2e-05");
+
+    const api = await loginApiContext(browser, fixtureUser);
+    const owned = await ownedTicketCount(api);
     if (owned !== 0) {
       throw new Error(
-        `E2E-05 needs "${EMPTY_STATE_REQUESTER}" (id ${requesterId}) to own zero tickets ` +
-          `for the empty-state assertion, but the API reports ${owned}. Another spec ` +
-          "created tickets for this Requester — pick a different genuinely-empty seeded " +
-          "active Requester for EMPTY_STATE_REQUESTER, or investigate what created them.",
+        `E2E-05 needs its fixture Requester (${fixtureUser.email}) to own zero tickets ` +
+          `for the empty-state assertion, but the API reports ${owned}.`,
       );
     }
     await api.dispose();
@@ -398,7 +445,7 @@ test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, EMPTY_STATE_REQUESTER);
+    await loginAsFixture(page, fixtureUser);
 
     // --- AC-29: empty state -------------------------------------------------
     // Landed on /tickets already (loginAs asserts the URL). The empty state
@@ -509,12 +556,12 @@ test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
 // Content-Disposition: attachment header" (api-spec.md §4.3: 200 + the raw
 // bytes + `Content-Disposition: attachment; filename="<originalFilename>"`).
 //
-// Requester: "Sarah Johnson" — a seeded active Requester that no other
-// describe block in this file seeds (E2E-04 uses David Lee, E2E-05 uses
-// Jennifer Anderson). submission-evidence.spec.ts also seeds Sarah but runs
-// as a separate file and asserts relative counts. Every assertion here is
-// keyed to the one ticket / attachment this test creates, by number and by
-// id — never an absolute count — so this block is order-independent.
+// Requester: a dedicated fixture (createPlainLoginFixtureUser) — the AC-16
+// ownership check only needs "the Requester who is logged in", not any
+// specific named seeded person, and every other assertion here is keyed to
+// the one ticket / attachment this test creates, by number and by id, never
+// an absolute count — so this block is order-independent regardless of who
+// its Requester is.
 
 /** Repo path of this spec's directory (e2e/lab-02), for building fixtures. */
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -544,12 +591,8 @@ test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC
     page,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Sarah Johnson");
-
-    // Sarah's seeded id, resolved through the real API, so the AC-16
-    // ownership check below compares against a known fact.
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const sarah = await requesterByName(api, "Sarah Johnson");
+    const fixtureUser = await createPlainLoginFixtureUser("e2e-01");
+    await loginAsFixture(page, fixtureUser);
 
     // --- create a ticket WITH one attachment, through the real form ------
     await page.goto("/tickets/new");
@@ -614,7 +657,7 @@ test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC
 
     // AC-16: the saved ticket is owned by the Requester chosen before
     // entering the app, and its status is NEW.
-    expect(createdTicket.requester.id).toBe(sarah.id);
+    expect(createdTicket.requester.id).toBe(fixtureUser.id);
     expect(createdTicket.status).toBe("NEW");
     expect(createdTicket.ticketNumber).toMatch(/^TKT-\d{4}-\d{6}$/);
 
@@ -711,8 +754,6 @@ test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC
 
     const download = await downloadEventPromise;
     expect(download.suggestedFilename()).toBe(ATTACHMENT_NAME);
-
-    await api.dispose();
   });
 });
 
@@ -742,22 +783,31 @@ test.describe("E2E-01 full requester attachment journey (AC-01, AC-15, AC-16, AC
 // click Retry (the intercept now lets the request through), and assert the
 // real active row appears.
 //
-// Requester: "Sarah Johnson", same rationale as E2E-01. The ticket and its
-// attachment are created here and every assertion is keyed to that
-// ticket/attachment id.
+// Requester: a dedicated fixture (createPlainLoginFixtureUser), same
+// rationale as E2E-01 — nothing here depends on a specific named seeded
+// person. The ticket and its attachment are created here and every
+// assertion is keyed to that ticket/attachment id.
 
 test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34, AC-36)", () => {
   test("a forced-fail upload on Ticket Detail shows the failure affordance and a retry adds the attachment; removing it with a reason shows the Removed row and blocks download", async ({
     page,
+    browser,
   }) => {
     await page.setViewportSize(DESKTOP);
-    await loginAs(page, "Sarah Johnson");
+    const fixtureUser = await createPlainLoginFixtureUser("e2e-02");
 
-    const api = await playwrightRequest.newContext({ baseURL: SERVER_URL });
-    const sarah = await requesterByName(api, "Sarah Johnson");
+    // Real cookie session, carried into a raw APIRequestContext (same idiom
+    // as loginApiContext elsewhere in this file) so the fixture-ticket seed
+    // POST below still exercises the real, unmocked `POST /api/tickets`
+    // HTTP API — the server now reads the acting Requester from the
+    // session, not an `X-Requester-Id` header.
+    const api = await loginApiContext(browser, fixtureUser);
 
-    // Seed one attachment-free ticket for Sarah through the real API, then
-    // drive the attachment journey through the UI on its detail screen.
+    await loginAsFixture(page, fixtureUser);
+
+    // Seed one attachment-free ticket for this Requester through the real
+    // API, then drive the attachment journey through the UI on its detail
+    // screen.
     const categories: Array<{ id: number }> = await (
       await api.get("/api/categories")
     ).json();
@@ -765,7 +815,6 @@ test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34,
       await api.get("/api/related-systems")
     ).json();
     const seedResponse = await api.post("/api/tickets", {
-      headers: { "X-Requester-Id": String(sarah.id) },
       data: {
         categoryId: categories[0].id,
         relatedSystemId: relatedSystems[0].id,
@@ -918,18 +967,13 @@ test.describe("E2E-02 attachment failure and soft-removal journey (AC-21, AC-34,
         isRemoved: boolean;
         originalFilename: string;
       }>;
-    } = await (
-      await api.get(`/api/tickets/${ticket.id}`, {
-        headers: { "X-Requester-Id": String(sarah.id) },
-      })
-    ).json();
+    } = await (await api.get(`/api/tickets/${ticket.id}`)).json();
     const removed = ticketState.attachments.find(
       (attachment) => attachment.originalFilename === ATTACHMENT_NAME,
     );
     expect(removed?.isRemoved).toBe(true);
     const blockedDownload = await api.get(
       `/api/attachments/${removed!.id}/download`,
-      { headers: { "X-Requester-Id": String(sarah.id) } },
     );
     expect(blockedDownload.status()).toBe(410);
 

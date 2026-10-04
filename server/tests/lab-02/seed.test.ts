@@ -11,7 +11,8 @@ import { runPackageBin, serverRoot } from "../../scripts/test-db.lib.js";
 //     inactive one.
 //   - The 4 categories and >= 6 related systems exist.
 //   - Schema-level uniqueness constraints hold: Ticket.ticketNumber and
-//     RequesterUser.email.
+//     User.email (renamed from RequesterUser in Lab 3, specification.md
+//     §7.4 item 1).
 //
 // This file runs against the dedicated test database only (never the dev
 // database) — see tests/setup/global-setup.ts and tests/setup/load-test-env.ts.
@@ -39,16 +40,19 @@ describe("seed data (specification.md §7.6)", () => {
   });
 
   it("seeds at least 4 active Development Requesters", async () => {
-    const activeRequesters = await prisma.requesterUser.findMany({
-      where: { isActive: true },
+    // Lab 3 renames RequesterUser to User and adds other roles to the same
+    // table (specification.md §7.4 item 1, §7.5); the role filter keeps
+    // this counting Requesters specifically.
+    const activeRequesters = await prisma.user.findMany({
+      where: { isActive: true, role: "REQUESTER" },
     });
 
     expect(activeRequesters.length).toBeGreaterThanOrEqual(4);
   });
 
   it("seeds exactly one inactive Requester: Robert Wilson", async () => {
-    const inactiveRequesters = await prisma.requesterUser.findMany({
-      where: { isActive: false },
+    const inactiveRequesters = await prisma.user.findMany({
+      where: { isActive: false, role: "REQUESTER" },
     });
 
     expect(inactiveRequesters).toHaveLength(1);
@@ -63,12 +67,12 @@ describe("seed data (specification.md §7.6)", () => {
     const countAll = async () => ({
       categories: await prisma.category.count(),
       relatedSystems: await prisma.relatedSystem.count(),
-      requesters: await prisma.requesterUser.count(),
-      activeRequesters: await prisma.requesterUser.count({
-        where: { isActive: true },
+      requesters: await prisma.user.count({ where: { role: "REQUESTER" } }),
+      activeRequesters: await prisma.user.count({
+        where: { isActive: true, role: "REQUESTER" },
       }),
-      inactiveRequesters: await prisma.requesterUser.count({
-        where: { isActive: false },
+      inactiveRequesters: await prisma.user.count({
+        where: { isActive: false, role: "REQUESTER" },
       }),
     });
 
@@ -91,19 +95,26 @@ describe("seed data (specification.md §7.6)", () => {
 });
 
 describe("schema constraints (specification.md §7.5)", () => {
-  it("rejects a duplicate RequesterUser.email", async () => {
-    const existing = await prisma.requesterUser.findFirstOrThrow();
+  it("rejects a duplicate User.email", async () => {
+    // Renamed from RequesterUser (specification.md §7.4 item 1). email is
+    // no longer a plain @unique column (a case-insensitive unique index on
+    // lower(email) replaces it, §7.4 item 6, asserted by
+    // server/tests/lab-03/migration.test.ts MIG-04) — an exact-same-case
+    // duplicate still violates it, so this still exercises a real DB-level
+    // rejection. passwordHash is a required column with no default, so a
+    // throwaway value is supplied purely to isolate the email assertion.
+    const existing = await prisma.user.findFirstOrThrow();
 
     await expect(
-      prisma.requesterUser.create({
-        data: { name: "Duplicate Person", email: existing.email },
+      prisma.user.create({
+        data: { name: "Duplicate Person", email: existing.email, passwordHash: "not-a-real-hash" },
       })
     ).rejects.toMatchObject({ code: "P2002" });
   });
 
   it("rejects a duplicate Ticket.ticketNumber", async () => {
-    const requester = await prisma.requesterUser.findFirstOrThrow({
-      where: { isActive: true },
+    const requester = await prisma.user.findFirstOrThrow({
+      where: { isActive: true, role: "REQUESTER" },
     });
     const category = await prisma.category.findFirstOrThrow();
     const relatedSystem = await prisma.relatedSystem.findFirstOrThrow();
@@ -116,6 +127,10 @@ describe("schema constraints (specification.md §7.5)", () => {
       summary: "Duplicate ticket number test",
       description: "Used only to exercise the unique constraint on ticketNumber.",
       requestedPriority: "MEDIUM" as const,
+      // itPriority is a required column with no default (specification.md
+      // §7.1); mirrors requestedPriority per BR-22, which is what
+      // createTicket.ts does on the real creation path.
+      itPriority: "MEDIUM" as const,
     };
 
     await prisma.ticket.create({ data: ticketData });

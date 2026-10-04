@@ -2,9 +2,10 @@
 // specification.md BR-07, BR-31, BR-32, A-08).
 //
 // Field validation (validation/attachmentRemoval.ts) and the caller's
-// identity (requesterContext) happen before this is ever called — the
-// router (src/routes/attachments.ts) wires those together and maps the
-// errors thrown here onto HTTP status codes.
+// identity (session auth, via `authenticate`/`requireRole('REQUESTER')`)
+// happen before this is ever called — the router
+// (src/routes/attachments.ts) wires those together and maps the errors
+// thrown here onto HTTP status codes.
 
 import { prisma } from '../lib/prisma.ts';
 import { AttachmentNotFoundError, getOwnedAttachment } from './attachmentAccess.ts';

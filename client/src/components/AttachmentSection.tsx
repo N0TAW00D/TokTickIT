@@ -74,7 +74,6 @@ function uploadErrorMessage(error: unknown, fileName: string): string {
 
 export interface AttachmentSectionProps {
   attachments: TicketAttachment[];
-  requesterId: number;
   /** The parent ticket's id — needed to upload a new attachment (api-spec.md §4.1). */
   ticketId: number;
   /**
@@ -100,7 +99,7 @@ export interface AttachmentSectionProps {
  * C-17..C-21):
  *
  * - **Download** (`onDownload`): fetches the bytes via `downloadAttachment`
- *   (api-spec.md §4.3, with the `X-Requester-Id` header) and saves them
+ *   (api-spec.md §4.3, with the session cookie) and saves them
  *   through a transient `<a download>`. A `410` (soft-removed between page
  *   load and click) surfaces a non-blocking `role="alert"` rather than
  *   crashing (BR-33, AC-34).
@@ -120,7 +119,6 @@ export interface AttachmentSectionProps {
  */
 export function AttachmentSection({
   attachments,
-  requesterId,
   ticketId,
   onAttachmentRemoved,
   onAttachmentAdded,
@@ -166,11 +164,7 @@ export function AttachmentSection({
     setDialog({ attachment, busy: true });
 
     try {
-      const updated = await removeAttachment(
-        requesterId,
-        attachment.id,
-        reason,
-      );
+      const updated = await removeAttachment(attachment.id, reason);
       onAttachmentRemoved(updated);
       setDialog(null);
       triggerRef.current = null;
@@ -201,10 +195,7 @@ export function AttachmentSection({
   async function handleDownload(attachment: TicketAttachment) {
     setDownloadError(null);
     try {
-      const { blob, filename } = await downloadAttachment(
-        requesterId,
-        attachment.id,
-      );
+      const { blob, filename } = await downloadAttachment(attachment.id);
       saveBlob(blob, filename ?? attachment.originalFilename);
     } catch (error) {
       if (error instanceof AttachmentRemovedError) {
@@ -244,11 +235,7 @@ export function AttachmentSection({
     try {
       for (const item of next) {
         try {
-          const added = await uploadAttachment(
-            requesterId,
-            ticketId,
-            item.file,
-          );
+          const added = await uploadAttachment(ticketId, item.file);
           onAttachmentAdded?.(added);
         } catch (error) {
           // Give the failed file its own "Upload failed — retry" row
@@ -291,7 +278,7 @@ export function AttachmentSection({
     );
 
     try {
-      const added = await uploadAttachment(requesterId, ticketId, target.file);
+      const added = await uploadAttachment(ticketId, target.file);
       onAttachmentAdded?.(added);
       setFailedUploads((current) => current.filter((item) => item.id !== id));
     } catch (error) {
@@ -398,11 +385,7 @@ export function AttachmentSection({
       )}
 
       {preview && IMAGE_MIME_TYPES.has(preview.mimeType) && (
-        <ImagePreviewDialog
-          attachment={preview}
-          requesterId={requesterId}
-          onClose={handlePreviewClose}
-        />
+        <ImagePreviewDialog attachment={preview} onClose={handlePreviewClose} />
       )}
 
       {toast && (

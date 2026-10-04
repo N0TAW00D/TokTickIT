@@ -1,0 +1,217 @@
+/*
+ * Administrator User Management screen (ui-spec.md §11, §12) — list mode
+ * only. Structure and naming mirror StaffTicketQueueScreen.css, simplified:
+ * no sort toggles, no loading skeleton (LoadingState is reused instead,
+ * same as MyTicketsScreen.css), and a simple `≥ 768px` table / `< 768px`
+ * card split with no tablet-specific column dropping (ui-spec.md §12 gives
+ * this screen no tablet requirement, unlike the Queue).
+ */
+
+.zen-user-mgmt__intro {
+  color: var(--zen-text-muted);
+  margin: 0 0 var(--zen-space-group-gap);
+}
+
+/* ---- Header row: title + Clear filters + New user (ui-spec.md §11) ---- */
+
+.zen-user-mgmt__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-field-gap);
+  flex-wrap: wrap;
+}
+
+.zen-user-mgmt__header h1 {
+  margin: 0;
+}
+
+.zen-user-mgmt__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--zen-space-unit);
+  flex-shrink: 0;
+}
+
+/* ---- Controls bar: search + Role filter (ui-spec.md §11) ---- */
+
+.zen-user-mgmt__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--zen-space-field-gap);
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  padding: var(--zen-space-field-gap);
+  margin-bottom: var(--zen-space-group-gap);
+}
+
+.zen-user-mgmt__search-field {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.zen-user-mgmt__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zen-space-field-gap);
+  flex: 2 1 200px;
+}
+
+.zen-user-mgmt__filters > * {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .zen-user-mgmt__filters > * {
+    flex: 0 1 auto;
+    min-width: max-content;
+  }
+
+  .zen-user-mgmt__filters {
+    min-width: max-content;
+  }
+}
+
+/* Mobile: controls wrap to full-width stacked fields (ui-spec.md §12 — no
+   horizontal page scroll at any viewport; matches StaffTicketQueueScreen.css). */
+@media (max-width: 767px) {
+  .zen-user-mgmt__search-field,
+  .zen-user-mgmt__filters,
+  .zen-user-mgmt__filters > * {
+    flex-basis: 100%;
+  }
+
+  .zen-user-mgmt__header-actions {
+    width: 100%;
+  }
+
+  .zen-user-mgmt__header-actions .zen-btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* Visually hidden but screen-reader reachable (ui-spec.md §13). */
+.zen-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* ---- Desktop table (`≥ 768px`, ui-spec.md §12: "User Management table full width") ---- */
+
+.zen-user-mgmt__table-scroll {
+  position: relative;
+  overflow-x: auto;
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+}
+
+.zen-user-mgmt__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--zen-font-size-body);
+}
+
+.zen-user-mgmt__table th,
+.zen-user-mgmt__table td {
+  text-align: left;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--zen-border);
+  white-space: nowrap;
+}
+
+.zen-user-mgmt__table th {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+  color: var(--zen-text-muted);
+}
+
+.zen-user-mgmt__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.zen-user-mgmt__table tbody tr:hover {
+  background: var(--zen-pale);
+}
+
+/* Long emails truncate with an ellipsis, never silently clip (ui-spec.md
+   §12) — the `title` attribute on the cell carries the full text. */
+.zen-user-mgmt__truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+/* ---- Active/Inactive status badge (ui-spec.md §11) ----
+   No dedicated shared badge component exists for this single two-state
+   label (see UserManagementScreen.tsx's ActiveStatusBadge), so this reuses
+   the shared `.zen-badge` shell (Badge.css) with two screen-local variants. */
+.zen-user-mgmt__badge--active {
+  background: var(--zen-status-open-bg, var(--zen-pale));
+  color: var(--zen-status-open-text, var(--zen-secondary));
+}
+
+.zen-user-mgmt__badge--inactive {
+  background: var(--zen-readonly-bg);
+  color: var(--zen-text-muted);
+}
+
+/* ---- Mobile cards (`< 768px`, ui-spec.md §12: "User list become cards") ---- */
+
+.zen-user-mgmt__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-field-gap);
+}
+
+.zen-user-mgmt__card {
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-mobile);
+}
+
+.zen-user-mgmt__card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-user-mgmt__card-name {
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-user-mgmt__card-email {
+  margin: 0 0 var(--zen-space-unit);
+  color: var(--zen-text-muted);
+  max-width: 100%;
+}
+
+.zen-user-mgmt__card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--zen-space-unit);
+  margin-bottom: var(--zen-space-unit);
+}
+
+.zen-user-mgmt__card-edit {
+  width: 100%;
+}
