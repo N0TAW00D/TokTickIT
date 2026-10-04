@@ -4,17 +4,16 @@ Part 1 deliverable (`specification.md` §14 Part 1). Every Lab 3 change reaches 
 through a peer-reviewed pull request, and `lab3-staging` reaches `main` through one peer-reviewed
 release PR — there are no direct commits to `main` or `lab3-staging`.
 
-Current through PR #84 (Issue #74). Release PR #85 (`lab3-staging` → `main`) was opened and then
-closed unmerged on 2026-09-27, before review; a new release PR is pending and will be opened once
-this and any further fix PRs land on `lab3-staging`. Its row and any review findings on it will be
-appended once that review completes, the same way Lab 2's `reviewer.md` (PR #57) was itself revised
-after its own review.
+Current through release PR #89 (Issue #74). Release PR #85 (`lab3-staging` → `main`) was opened and
+then closed unmerged on 2026-09-27, before review; #89 replaced it. #89's first review is recorded
+below; its approval will be appended once that review completes, the same way Lab 2's `reviewer.md`
+(PR #57) was itself revised after its own review.
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#84). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 3 pull request (#75–#89). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed and merged every Lab 3 pull request. Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Not a reviewer on Lab 3, matching Lab 2 (see `docs/lab-02/reviewer.md`). |
 
@@ -38,10 +37,13 @@ Lab 2's record uses.
 | [#83](https://github.com/N0TAW00D/TokTickIT/pull/83) | E2E, responsive/visual inspection & release integration (#74) | **Changes requested** ×2 → approved | 3 |
 | [#84](https://github.com/N0TAW00D/TokTickIT/pull/84) | Finish Staff Ticket Detail clipping and record PR #83's review (#74) | **Changes requested** → approved | 2 |
 | [#85](https://github.com/N0TAW00D/TokTickIT/pull/85) | `lab3-staging` → `main` release integration (#74) | closed unmerged, before review | — |
-| release PR | `lab3-staging` → `main` | _pending_ | — |
+| [#86](https://github.com/N0TAW00D/TokTickIT/pull/86) | Fix Lab 3 traceability and reviewer-log gaps found in the completeness audit (#74) | **Changes requested** ×2 → approved | 3 |
+| [#87](https://github.com/N0TAW00D/TokTickIT/pull/87) | axe accessibility e2e, A-01..A-09 (#74) | **Changes requested** ×4 → approved | 5 |
+| [#88](https://github.com/N0TAW00D/TokTickIT/pull/88) | Part 5–8 submission evidence + Requester detail wrap fix (#74) | **Changes requested** ×4 → approved | 5 |
+| [#89](https://github.com/N0TAW00D/TokTickIT/pull/89) | `lab3-staging` → `main` release integration (#74) | Commented (3 findings) → _re-review pending_ | 1 so far |
 
 Notes:
-- Every Lab 3 feature PR (#75–#84) was approved and merged by `Palapluem`. #85, the first attempt at
+- Every Lab 3 feature PR (#75–#88) was approved and merged by `Palapluem`. #85, the first attempt at
   the `lab3-staging` → `main` release PR, was closed unmerged on 2026-09-27 before any review — it
   is listed for the record, not counted as a reviewed-and-merged PR, similar in kind (if not cause)
   to Lab 2's #45/#55.
@@ -302,6 +304,19 @@ reviewed changes. … Approved Natthawat, LGTM!" The review also noted, without 
 finding: "GitHub reports no status checks, so these are the test results recorded by the author
 rather than hosted CI checks."
 
+### #89 — Commented: MIG-06 timeout and stale release notes
+
+`Palapluem` ran the suites independently and reported: "The standard server test command is not
+green: it reports 590/591, with MIG-06 in server/tests/lab-03/migration.test.ts timing out at the
+default 5-second limit," reproduced alone and passing at a 20-second timeout; plus stale release
+notes — `reviewer.md` still said the release PR was pending and `tests.md` reported 154/154 E2E in
+one place against 210/210 elsewhere.
+
+**Author's response:** all three accepted. MIG-06 now checks every text column in one query instead
+of one per column, and carries an explicit 30 s timeout because its remaining cost is one real
+bcrypt compare per seeded user; the full server suite was re-run (27 files, 591/591). `tests.md`
+no longer states 154/154 as a current total, and this file now covers #86–#89.
+
 ## 4. Corrections issued by the author
 
 No claim made to the reviewer during Lab 3 has needed retraction so far (unlike Lab 2's #32/#33/#44
@@ -310,7 +325,7 @@ PR.
 
 ## 5. Direction of review
 
-Every Lab 3 pull request (#75–#84, #85, and the pending release PR once opened) is authored by
+Every Lab 3 pull request (#75–#89) is authored by
 `N0TAW00D` and reviewed by `Palapluem`. Review within Lab 3 therefore flows in one direction, the
 same as Lab 2 (see `docs/lab-02/reviewer.md` §5): this record holds the comments the author
 **received** and the author's **responses**, not comments given by the author on a teammate's PR.
