@@ -419,8 +419,8 @@ by the submission-evidence work).
 
 `npm run test:server`: 591/591 passing (27 files, unchanged by this work). `npm run test:client`:
 349/349 passing (19 files, unchanged by this work). `npm run test:e2e`: **210/210 passing**
-(lab-02 regression suite + all lab-03 specs, run to completion with zero failures). `lab3-staging`
-currently records 154/154; the jump to 210 is 56 individual `test()` cases:
+(lab-02 regression suite + all lab-03 specs, run to completion with zero failures). The 210
+includes 56 `test()` cases added by the final evidence and responsive work (up from 154 before it):
 
 - **+24** from `e2e/lab-03/submission-evidence.spec.ts` (EV-01..EV-04: Part 5: 3, Part 6: 10,
   Part 7: 4, Part 8: 7).
