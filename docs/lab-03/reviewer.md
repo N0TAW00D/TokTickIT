@@ -4,10 +4,9 @@ Part 1 deliverable (`specification.md` §14 Part 1). Every Lab 3 change reaches 
 through a peer-reviewed pull request, and `lab3-staging` reaches `main` through one peer-reviewed
 release PR — there are no direct commits to `main` or `lab3-staging`.
 
-Current through release PR #89 (Issue #74). Release PR #85 (`lab3-staging` → `main`) was opened and
-then closed unmerged on 2026-09-27, before review; #89 replaced it. #89's first review is recorded
-below; its approval will be appended once that review completes, the same way Lab 2's `reviewer.md`
-(PR #57) was itself revised after its own review.
+Complete through release PR #89 (Issue #74), approved and merged into `main`. Release PR #85
+(`lab3-staging` → `main`) was opened and then closed unmerged on 2026-09-27, before review; #89
+replaced it.
 
 ## 1. Reviewer identity
 
@@ -40,7 +39,7 @@ Lab 2's record uses.
 | [#86](https://github.com/N0TAW00D/TokTickIT/pull/86) | Fix Lab 3 traceability and reviewer-log gaps found in the completeness audit (#74) | **Changes requested** ×2 → approved | 3 |
 | [#87](https://github.com/N0TAW00D/TokTickIT/pull/87) | axe accessibility e2e, A-01..A-09 (#74) | **Changes requested** ×4 → approved | 5 |
 | [#88](https://github.com/N0TAW00D/TokTickIT/pull/88) | Part 5–8 submission evidence + Requester detail wrap fix (#74) | **Changes requested** ×4 → approved | 5 |
-| [#89](https://github.com/N0TAW00D/TokTickIT/pull/89) | `lab3-staging` → `main` release integration (#74) | Commented (3 findings) → _re-review pending_ | 1 so far |
+| [#89](https://github.com/N0TAW00D/TokTickIT/pull/89) | `lab3-staging` → `main` release integration (#74) | Commented (3 findings) → approved | 2 |
 
 Notes:
 - Every Lab 3 feature PR (#75–#88) was approved and merged by `Palapluem`. #85, the first attempt at
@@ -304,7 +303,7 @@ reviewed changes. … Approved Natthawat, LGTM!" The review also noted, without 
 finding: "GitHub reports no status checks, so these are the test results recorded by the author
 rather than hosted CI checks."
 
-### #89 — Commented: MIG-06 timeout and stale release notes
+### #89 — Commented, then approved: MIG-06 timeout and stale release notes
 
 `Palapluem` ran the suites independently and reported: "The standard server test command is not
 green: it reports 590/591, with MIG-06 in server/tests/lab-03/migration.test.ts timing out at the
@@ -316,6 +315,10 @@ one place against 210/210 elsewhere.
 of one per column, and carries an explicit 30 s timeout because its remaining cost is one real
 bcrypt compare per seeded user; the full server suite was re-run (27 files, 591/591). `tests.md`
 no longer states 154/154 as a current total, and this file now covers #86–#89.
+
+**Approval (2026-10-04, head `7398208`):** "I independently ran the standard server suite: 27 files,
+591/591 passing. The test results and release record are also consistent now. I found no remaining
+blocking issues and approve this PR." `Palapluem` merged #89 into `main` as `6d66399`.
 
 ## 4. Corrections issued by the author
 
