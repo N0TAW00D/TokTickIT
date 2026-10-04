@@ -49,9 +49,6 @@
     numbering: none,
   )
 }
-#let todo(body) = block(width: 100%, fill: rgb("#fff4e5"), stroke: 1pt + rgb("#c77700"), inset: 8pt, radius: 3pt)[
-  #text(weight: "bold", fill: rgb("#8a5a00"))[TODO-AFTER-MERGE] — #body
-]
 #let tbl(cols, aligns: auto, ..cells) = table(
   columns: cols, inset: 4pt, stroke: 0.4pt + luma(200),
   align: if aligns == auto { left + horizon } else { aligns }, ..cells)
@@ -70,9 +67,6 @@
   ]
 ]
 #v(1fr)
-#todo[Items marked like this can only be produced after the release PR (#pr(89), `lab3-staging` → `main`)
-is merged: the Git graph of `main`, the all-Done Kanban board, the PR #86–#89 reviewer record and the
-final test output run on `main`. Everything else in this document is taken from the repository as it stands on `lab3-staging`.]
 
 = Answer Part 1
 
@@ -138,10 +132,10 @@ Primsirikunawut); reviewer `Palapluem` (Wisit Suwannao), who reviewed and merged
   [#pr(86)], [Traceability and reviewer-log audit fixes (#74)], [Changes requested ×2 → approved], [3],
   [#pr(87)], [axe accessibility e2e, A-01..A-09 (#74)], [Changes requested ×4 → approved], [5],
   [#pr(88)], [Part 5–8 submission evidence + Requester detail wrap fix (#74)], [Changes requested ×4 → approved], [5],
-  [#pr(89)], [`lab3-staging` → `main` release PR], [Commented (3 findings), fixed; re-review pending], [1 so far],
+  [#pr(89)], [`lab3-staging` → `main` release PR], [Commented (3 findings), fixed → approved], [2],
 )
 
-#todo[`reviewer.md` records #pr(75)–#pr(89). Once the release review of #pr(89) completes, append its approval row and re-check the rendered record.]
+#pr(89) was approved on 2026-10-04 ("I found no remaining blocking issues and approve this PR") and merged into `main` as `6d66399`; `reviewer.md` records #pr(75)–#pr(89).
 
 *Representative review findings and resolutions* (full quotes and replies in `reviewer.md` §3):
 
@@ -295,10 +289,15 @@ planned IDs: 134 / 134 Pass
 
 The visual checklist V-01…V-14 is reproduced in Answer Part 9.
 
-#todo[Replace the recorded counts above with the *complete passing test output run on `main`* after #pr(89)
-merges: `git rev-parse --short HEAD` followed by `npm run test:all` (unit, API/integration, UI component, UI style,
-authorization, regression/migration, accessibility, E2E), pasted as text and/or screenshots, and confirm they match
-`tests.md` §6 (591 server / 349 client / 210 e2e at the time of writing).]
+*Run on `main`* (`6d66399`, merge of #pr(89)), `npm run test:all` after `npm install --prefix e2e`:
+
+```
+npm run test:server   27 files   591 / 591 passed
+npm run test:client   19 files   349 / 349 passed
+npm run test:e2e                 210 / 210 passed (3.5 min)
+```
+
+These match the totals recorded in `tests.md` §6.
 
 = Answer Part 4
 
