@@ -6,6 +6,8 @@
 
 ## 1. Conventions
 
+`GET /api/health` (`server/src/app.ts`) is unchanged: unauthenticated, `200 {"status":"ok","service":"TokTickIT API"}` (AC-51).
+
 Base URL, JSON/UTF-8, ISO 8601 UTC timestamps, the `toktickit.sid` session cookie, the
 `PASSWORD_CHANGE_REQUIRED` gate, the `415` content-type rule and the status-code meanings are exactly
 those of Lab 3 §1.1–§1.7 and are not repeated.
@@ -191,8 +193,10 @@ Requester never sees `itPriority`.
 
   `reasons` lists every failed condition (BR-17), in this order; a requester-resolved indication
   satisfies none of them (BR-18).
+- **Closing:** `RESOLVED → CLOSED` with any `PLANNED`/`IN_PROGRESS` Action → `409 RESOLUTION_BLOCKED` with `reasons: [{ "code": "OPEN_ACTIONS_REMAIN", … }]` only (BR-40; message "This ticket can't be closed yet.").
+- **Cancelling:** a successful transition to `CANCELLED` also cancels every non-terminal Action of the Ticket in the same transaction (`status`, `version`, `lastUpdatedBy` = caller; BR-41). The response is the Ticket; clients re-read `…/actions-taken`.
 - **404**, **401**, **403**, **415**, **500**.
-- **Traceability:** FR-09, FR-10, FR-11, FR-12, FR-13; BR-16–BR-19, BR-33, BR-34; AC-18–AC-23, AC-25.
+- **Traceability:** FR-09, FR-10, FR-11, FR-12, FR-13; BR-16–BR-19, BR-33, BR-34, BR-39–BR-41; AC-18–AC-23, AC-25, AC-48–AC-50.
 
 ### 3.3 `PATCH /api/tickets/:id/owner` and `/it-priority`
 
@@ -385,9 +389,9 @@ Everything else — auth, comments, notes, attachments, user administration — 
 | Endpoint | FR | Key BRs | ACs |
 |---|---|---|---|
 | `GET …/actions-taken` | 02, 06 | 13, 14 | 12, 14, 39 |
-| `POST …/actions-taken` | 01, 05, 07, 08 | 01–08, 12, 15, 35 | 01, 03–08, 11, 13, 15, 16 |
+| `POST …/actions-taken` | 01, 05, 07, 08 | 01–08, 12, 15, 35, 39 | 01, 03–08, 11, 13, 15, 16 |
 | `PATCH …/actions-taken/:actionId` | 03, 04, 05, 12 | 03, 09–12, 33, 34 | 03, 08–10, 13, 17 |
-| `PATCH …/status` | 09–13 | 16–19, 33, 34 | 18–23, 25 |
+| `PATCH …/status` | 09–13 | 16–19, 33, 34, 39–41 | 18–23, 25, 48–50 |
 | `PATCH …/owner`, `…/it-priority` | 12 | 33 | 25 |
 | `GET …/status-history` | 06, 11 | 13, 14, 19 | 24, 39 |
 | `GET /api/dashboard/requester` | 14, 17 | 20–24, 30, 31 | 02, 27, 30, 32–34 |
@@ -408,6 +412,6 @@ Lab 3 §8 codes are reused unchanged (`UNAUTHENTICATED`, `FORBIDDEN`, `PASSWORD_
 | `ACTION_LOCKED` | 409 | Update of a `COMPLETED` or `CANCELLED` Action (BR-10). |
 | `INVALID_ACTION_TRANSITION` | 409 | Action status pair not permitted, incl. no-op (BR-09). |
 | `STALE_UPDATE` | 409 | Outdated `version` on a guarded write; carries `current` (BR-33). |
-| `RESOLUTION_BLOCKED` | 409 | Resolved requested while the gate fails; carries `reasons` (BR-17). |
+| `RESOLUTION_BLOCKED` | 409 | Resolved requested while the gate fails, or Closed while Actions are open; carries `reasons` (BR-17, BR-40). |
 
 `reasons[].code` values: `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`.

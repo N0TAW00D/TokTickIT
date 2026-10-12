@@ -173,6 +173,8 @@ writes.
 | BR-16 | A status change is permitted only if the pair is in the §5.1 matrix and the caller is IT Staff. L3-BR-24 (owner required for In Progress) and L3-BR-05/25 (Requester cannot set Resolved/Closed) stand. |
 | BR-17 | **Resolution gate.** A transition to `RESOLVED` requires (a) a Ticket Owner, (b) at least one `COMPLETED` Action Taken, and (c) no Action Taken in `PLANNED` or `IN_PROGRESS`. Otherwise `RESOLUTION_BLOCKED`, listing every failed condition. Enforced by the backend for any client. |
 | BR-18 | "Problem Appears Resolved" records the Requester's indication only (L3-BR-26). It satisfies no part of BR-17 and changes no status. |
+| BR-40 | **Closing gate.** A transition `RESOLVED → CLOSED` is refused with `RESOLUTION_BLOCKED` (single reason `OPEN_ACTIONS_REMAIN`, with `count`) while any Action is `PLANNED` or `IN_PROGRESS`; this catches Actions logged after the Resolve (BR-12). |
+| BR-41 | **Cancel cascade.** A transition to `CANCELLED` sets every non-terminal Action of the Ticket to `CANCELLED` in the same transaction (under the BR-39 lock), incrementing each Action's `version` and setting `lastUpdatedBy` to the canceller; `COMPLETED` Actions are untouched. |
 | BR-19 | Every successful status change inserts exactly one status-history row (from, to, changedBy, changedAt) in the same transaction as the update. History is append-only: no edit, no delete, no endpoint to write it directly. |
 
 ### 5.1 Status transition matrix
@@ -187,13 +189,14 @@ row that arrives at Resolved.
 | Open | In Progress, Waiting for Requester, Resolved, Cancelled | Resolved needs BR-17. |
 | In Progress | Waiting for Requester, Resolved, Cancelled | Resolved needs BR-17. |
 | Waiting for Requester | In Progress, Resolved, Cancelled | In Progress needs an owner; Resolved needs BR-17. |
-| Resolved | Closed, Reopened | Closing and reopening are confirmed in the UI. |
+| Resolved | Closed, Reopened | Closing and reopening are confirmed in the UI; Closed needs BR-40. |
 | Closed | Reopened | Terminal for work: no Action writes (BR-12). |
 | Reopened | In Progress, Waiting for Requester, Resolved, Cancelled | Resolved needs BR-17 (counts all Actions on the Ticket, D-17). |
 | Cancelled | — | Terminal; confirmed in the UI; no Action writes (BR-12). |
 
 A pair not listed, including a no-op, is rejected (`INVALID_TRANSITION`). No row of the Lab 3 matrix
-changed.
+changed. Every row that arrives at Cancelled also triggers BR-41.
+
 
 ### Dashboard calculations
 
@@ -406,6 +409,9 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-23 | Given a Requester who indicated the problem appears resolved, or who calls any status route, when Resolved is considered, then the status is unchanged and the gate is unaffected. |
 | AC-24 | Given each successful status change, when history is read by IT Staff, Administrator or the owning Requester, then one entry per change exists with from, to, who and when in stable order, no route can edit or delete it, and another Requester's Ticket returns `404`. |
 | AC-25 | Given a status, owner or IT Priority write with an outdated `version`, when processed, then it is rejected with `STALE_UPDATE` carrying the current Ticket; given a missing `version`, then `VALIDATION_FAILED`. |
+| AC-48 | Given a Resolved Ticket with a `PLANNED` or `IN_PROGRESS` Action, when Closed is requested, then it is rejected with `RESOLUTION_BLOCKED` (`OPEN_ACTIONS_REMAIN`); given none open, then Closed succeeds. |
+| AC-49 | Given a Ticket with non-terminal and `COMPLETED` Actions, when it is Cancelled, then the non-terminal Actions become `CANCELLED` with `lastUpdatedBy` = the canceller and incremented `version`, `COMPLETED` Actions are unchanged, and a status-history row exists. |
+| AC-50 | Given an Action create racing a Resolve for the same Ticket, when both run, then a Resolve never succeeds while an earlier-committed open Action exists (BR-39). |
 | AC-26 | Given the Staff Ticket Detail status control, when it renders, then it offers only permitted transitions for the current status and, after a successful change, the Ticket summary status and history refresh without a reload. |
 
 ### Dashboards
@@ -442,6 +448,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-44 | Given the Dashboard, Staff Ticket Detail (Actions Taken) and Requester Ticket Detail, when scanned with axe-core and driven by keyboard only, then there are no serious or critical violations, focus is visible, and every Lab 4 flow is completable without a mouse. |
 | AC-45 | Given an unexpected server error on any Lab 4 endpoint, when returned, then the body is the generic `INTERNAL` body with no stack, SQL or path, the UI shows a safe failure with Retry, and the main journeys log no console errors and show no placeholder text or broken link. |
 | AC-46 | Given the seeded database at 1,000 Tickets and 3,000 Actions, when each dashboard and the Actions list are requested 20 times, then the median response is under 500 ms. |
+| AC-51 | Given the running server, when `GET /api/health` is called, then it still returns `200 {"status":"ok","service":"TokTickIT API"}` without authentication. |
 | AC-47 | Given the running server, when its routes are enumerated, then every Lab 4 route is listed in `api-spec.md` and no route exists for deleting an Action, writing history, uploading Action files, exporting, or any other §3.2 exclusion. |
 
 ### FR → AC coverage
@@ -454,12 +461,12 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | FR-04 | 09, 10 | FR-16 | 31 |
 | FR-05 | 01, 08 | FR-17 | 34 |
 | FR-06 | 14, 39 | FR-18 | 35 |
-| FR-07 | 16 | FR-19 | 42 |
+| FR-07 | 16 | FR-19 | 42, 51 |
 | FR-08 | 15 | FR-20 | 40 |
-| FR-09 | 18, 19, 26 | FR-21 | 41 |
-| FR-10 | 20, 21, 22 | FR-22 | 36, 38, 45 |
+| FR-09 | 18, 19, 26, 48, 49 | FR-21 | 41 |
+| FR-10 | 20, 21, 22, 48 | FR-22 | 36, 38, 45 |
 | FR-11 | 24 | FR-23 | 43, 44, 45, 47 |
-| FR-12 | 17, 25 | | |
+| FR-12 | 17, 25, 50 | | |
 
 ## 10. Definition of Done
 
@@ -529,4 +536,5 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-21 | No pagination on Actions Taken or status history. | Tens of rows per Ticket; handout asks for none; avoids pagination edge cases in a sprint-limited UI. |
 | D-22 | Action-based dashboard cards count Actions but link to the Ticket list containing them, with the Ticket count in the sub-label (BR-31). | Keeps "My Open Actions" meaningful (handout Part 5: current-user Actions Taken) without adding a new Actions list screen. |
 | D-24 | Row-lock the Ticket (BR-39) for status changes and Action writes, in addition to `version`. | `Ticket.version` guards stale clients, not a race between an Action write and the gate read; because D-15 keeps Action writes off `version`, only a shared lock closes the window without false conflicts. |
+| D-25 | Closing is refused while any Action is open (BR-40); cancelling a Ticket auto-cancels its non-terminal Actions (BR-41). | Actions can legitimately be logged on a Resolved Ticket (D-05), so closure is where leftovers must be caught; a Cancelled Ticket's pending work is moot, and leaving it `PLANNED` forever would be misleading and un-editable (BR-12). |
 | D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |

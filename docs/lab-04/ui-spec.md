@@ -200,6 +200,7 @@ never appear. IT Priority stays hidden (Lab 3 §7).
 
 On Staff Ticket Detail (IT Staff only; Administrator sees status as read-only text).
 
+- **Cancel confirm dialog** adds: "Open actions on this ticket will be cancelled." (BR-41); after success the Actions list reloads.
 - **Status control** (Lab 3 §10 select): lists only the transitions `specification.md` §5.1 permits
   from the current status; Resolved, Closed, Reopened and Cancelled keep their confirm dialogs. A
   transition the matrix forbids is never offered.
@@ -207,7 +208,7 @@ On Staff Ticket Detail (IT Staff only; Administrator sees status as read-only te
   control — "✓ / ✗ Ticket has an owner", "✓ / ✗ At least one action is completed", "✓ / ✗ No action is
   planned or in progress (N remaining)" — computed from the loaded data. It is guidance only; the
   button stays enabled so the backend remains the authority.
-- **`RESOLUTION_BLOCKED`** → `role="alert"` callout "This ticket can't be resolved yet." listing the
+- **`RESOLUTION_BLOCKED`** → `role="alert"` callout "This ticket can't be resolved yet." ("…closed yet." when closing) listing the
   returned `reasons` in plain language, with a link that scrolls to Actions Taken; status unchanged.
 - **Success:** the summary `StatusBadge`, `version`, status-history card and the permitted-transition
   list refresh without a page reload; inline success tick + "Status changed to *X*."
