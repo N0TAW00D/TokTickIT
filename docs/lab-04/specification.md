@@ -141,7 +141,7 @@ the backend; hiding a control is never authorization.
 Reasons for the only changed Lab 3 row: handout §4.3 says the Administrator "performs IT Staff
 behavior" for Actions Taken and §4.6 lets the Administrator "reuse the IT Staff dashboard". Both need
 a way to reach a Ticket, so the queue and Staff Ticket Detail open to the Administrator read-only
-(D-13). Lab 3's AC-68 remains true: an Administrator is still refused status, claim/assign and note
+(D-13). Lab 3's L3-AC-68 remains true: an Administrator is still refused status, claim/assign and note
 writes.
 
 ## 5. Business Rules
@@ -365,7 +365,7 @@ Shapes, validation, examples and error bodies are in [`api-spec.md`](./api-spec.
 | `GET /api/tickets` · `GET /api/staff/tickets` | Lists, extended filters for drill-down | as Lab 3 (+ Admin on staff queue) | as Lab 3 |
 
 New error codes: `INVALID_ASSIGNEE`, `TICKET_CLOSED`, `ACTION_LOCKED`, `INVALID_ACTION_TRANSITION`,
-`STALE_UPDATE`, `RESOLUTION_BLOCKED` (all 409). Every other code is a Lab 2/3 code reused unchanged.
+`STALE_UPDATE`, `RESOLUTION_BLOCKED` (all 409); the latter carries `reasons` with codes `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`. Every other code is a Lab 2/3 code reused unchanged.
 
 ## 9. Acceptance Criteria
 
