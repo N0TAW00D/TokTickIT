@@ -1,6 +1,6 @@
 # Lab 4 UI Specification — TokTickIT (Zen Green)
 
-> Status: draft — Issue #92. Extends `docs/lab-03/ui-spec.md`. Contract:
+> Status: proposed — PR #101 (Issue #92). Extends `docs/lab-03/ui-spec.md`. Contract:
 > [`specification.md`](./specification.md); API: [`api-spec.md`](./api-spec.md); tests:
 > [`tests.md`](./tests.md).
 

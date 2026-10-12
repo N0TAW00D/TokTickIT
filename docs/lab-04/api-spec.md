@@ -1,6 +1,6 @@
 # Lab 4 API Specification — TokTickIT
 
-> Status: draft — Issue #92. All Lab 2 and Lab 3 endpoints in `docs/lab-03/api-spec.md` remain in force
+> Status: proposed — PR #101 (Issue #92). All Lab 2 and Lab 3 endpoints in `docs/lab-03/api-spec.md` remain in force
 > unless changed here (§7). Contract: [`specification.md`](./specification.md) §8; tests:
 > [`tests.md`](./tests.md).
 

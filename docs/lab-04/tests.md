@@ -1,6 +1,6 @@
 # Lab 4 Test Plan and Traceability — TokTickIT
 
-> Status: draft — Issue #92. Written **before** implementation, alongside
+> Status: proposed — PR #101 (Issue #92). Written **before** implementation, alongside
 > [`specification.md`](./specification.md), [`api-spec.md`](./api-spec.md) and
 > [`ui-spec.md`](./ui-spec.md). Every row's Final column is `Planned` until a real run on `main`
 > replaces it with `Pass`/`Fail` and §5 holds the verbatim output.
@@ -73,11 +73,10 @@ npm run test:all                  # everything, from the repository root
 | UNIT-08 | Unit | AC-27, BR-23 | Resolution-time rule | Latest history row to RESOLVED/CLOSED supplies the resolution time; a Ticket with no history is excluded even if `updatedAt` is recent | `server/tests/lab-04/dashboard-window.test.ts` | Planned |
 | UNIT-09 | Unit | AC-25, BR-33 | `version` validator | Missing, `0`, negative, `1.5`, string rejected with field `version`; positive integer accepted | `server/tests/lab-04/action-rules.test.ts` | Planned |
 | UNIT-10 | Unit | AC-16, BR-35 | `clientRequestId` validator and body hash | UUID accepted; malformed rejected; omitted accepted; hash equal for bodies differing only in whitespace/defaults/server-owned fields, different for any real field change | `server/tests/lab-04/action-rules.test.ts` | Planned |
-| UNIT-12 | Unit | AC-52, BR-05 | Result-required-to-complete rule | Result absent/blank accepted for PLANNED and IN_PROGRESS; create-as-COMPLETED and transition to COMPLETED with no request result and none stored rejected; stored result satisfies completion without resending | `server/tests/lab-04/action-rules.test.ts` | Planned |
 | UNIT-11 | Unit | AC-34 | Drill-down query parsers | `scope`, `myActions`, `followUp`, extended `status` parse; `myActions=false`, unknown `scope`, `status=BOGUS` each give an `INVALID_QUERY` field entry | `server/tests/lab-04/dashboard-window.test.ts` | Planned |
+| UNIT-12 | Unit | AC-52, BR-05 | Result-required-to-complete rule | Result absent/blank accepted for PLANNED and IN_PROGRESS; create-as-COMPLETED and transition to COMPLETED with no request result and none stored rejected; stored result satisfies completion without resending | `server/tests/lab-04/action-rules.test.ts` | Planned |
 | API-01 | API | AC-01, FR-01, FR-05 | Create a valid Action Taken | `201`; saved under the correct Ticket; `performedBy` and `lastUpdatedBy` = caller; assignee stored; `version` 1; Ticket `updatedAt` touched, Ticket `version` unchanged | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-02 | API | AC-03, BR-03 | Server-owned fields ignored; second editor | Client `performedBy`/`createdAt`/`lastUpdatedBy` ignored on create and update; edit by a second IT Staff keeps `performedBy`, sets `lastUpdatedBy` to the editor | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
-| API-32 | API | AC-52, BR-05 | Result optional until completion | POST PLANNED without result `201` (`result: null`); POST COMPLETED without result `400` on `result`; PATCH to COMPLETED with no result `400` and Action unchanged; with result in the request `200`; with a stored result and none resent `200` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-03 | API | AC-04, BR-05 | Description/result validation over HTTP | Empty, whitespace-only, 2001-char description and 2001-char result each `400 VALIDATION_FAILED` with the field named; no row written | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-04 | API | AC-05, BR-04 | Action date rules over HTTP | Future date `400` for IN_PROGRESS/COMPLETED, `201` for PLANNED; pre-creation dates `400`; omitted defaults to now; PATCH of a future PLANNED Action to COMPLETED `400` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-05 | API | AC-06, BR-06 | Follow-up rules over HTTP | Flag + no note `400`; note + no flag `400`; PATCH flag off clears stored note | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
@@ -89,7 +88,6 @@ npm run test:all                  # everything, from the repository root
 | API-11 | API | AC-12, BR-14 | Stable ordering | Equal and differing `actionAt` values: order is `actionAt` asc, `id` asc, identical across repeated calls and after an edit | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-12 | API | AC-13, BR-12 | Closed Tickets | Create/update on CLOSED and CANCELLED `409 TICKET_CLOSED`; on RESOLVED `201`/`200` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-13 | API | AC-16, BR-35, FR-07 | Idempotent create | Same `clientRequestId` twice → first `201`, second `200` with the same `id`; exactly one row; omitting the key creates two rows; concurrent duplicates still yield one row | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
-| API-33 | API | AC-16, BR-35 | Idempotency key reuse with a different body | Same `clientRequestId`, changed description/status/assignee → `409 IDEMPOTENCY_CONFLICT`, no new row, stored Action unchanged; identical retry after the Action was edited still `200` with the edited row | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-14 | API | AC-17, BR-33 | Stale Action update | Second writer with the old `version` `409 STALE_UPDATE`, body `current` equals the stored Action, first writer's change intact | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-15 | API | AC-14, FR-06 | Requester reads own Actions | Own Ticket: all Actions returned in order with every field incl. follow-up note and attachment notes | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-16 | API | AC-24, BR-14 | Status history read | Entries in `changedAt` asc, `id` asc with from/to/changedBy; `[]` for a never-changed Ticket | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
@@ -105,9 +103,11 @@ npm run test:all                  # everything, from the repository root
 | API-26 | API | AC-31, BR-32 | User counts | Administrator response has `userCounts` (3 roles, active/inactive correct); IT Staff response has no such key | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-27 | API | AC-32, BR-30 | Staff dashboard empty | Emma Fischer: `ownedByMe` 0, `myOpenActions` `{actions:0,tickets:0,items:[]}`; all-zero maps keep their keys | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-28 | API | AC-34, BR-31 | Staff drill-down equals count | Queue with `owner=unassigned&scope=open`, `owner=me&scope=open`, `status=X`, `itPriority=X&scope=open`, `itPriority=HIGH&scope=open`, `myActions=true`, `followUp=true`, `scope=recent` has `totalItems` (or distinct Ticket count) equal to the card | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
-| API-31 | API | AC-34, BR-32 | User-count drill-down | Each `userCounts` role `active + inactive` equals the length of `GET /api/users?role=<ROLE>` | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-29 | API | AC-34 | New list parameters validated | `myActions=false`, `scope=bogus`, `followUp=1` each `400 INVALID_QUERY` with `fields`; never ignored, never `500` | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-30 | API | AC-47 | Route inventory | Enumerating the Express router yields exactly the `api-spec.md` Lab 4 routes; no DELETE for Actions, no history write route, no Action file upload, no export route | `server/tests/lab-04/route-inventory.test.ts` | Planned |
+| API-31 | API | AC-34, BR-32 | User-count drill-down | Each `userCounts` role `active + inactive` equals the length of `GET /api/users?role=<ROLE>` | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
+| API-32 | API | AC-52, BR-05 | Result optional until completion | POST PLANNED without result `201` (`result: null`); POST COMPLETED without result `400` on `result`; PATCH to COMPLETED with no result `400` and Action unchanged; with result in the request `200`; with a stored result and none resent `200` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
+| API-33 | API | AC-16, BR-35 | Idempotency key reuse with a different body | Same `clientRequestId`, changed description/status/assignee → `409 IDEMPOTENCY_CONFLICT`, no new row, stored Action unchanged; identical retry after the Action was edited still `200` with the edited row | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | WF-01 | Workflow | AC-18, FR-09 | Every permitted transition succeeds | Each §5.1 pair given its preconditions → `200`, new status and incremented `version` | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-02 | Workflow | AC-19 | Forbidden transitions and owner rule | Every pair absent from §5.1 and every no-op `409 INVALID_TRANSITION`; `IN_PROGRESS` with no owner `409 OWNER_REQUIRED` from each source | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-03 | Workflow | AC-20, BR-17 | Gate: no completed Action | Resolved via direct PATCH with an Owner but no COMPLETED Action → `409 RESOLUTION_BLOCKED`, `reasons` includes `NO_COMPLETED_ACTION`; status unchanged; no history row | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
@@ -120,10 +120,10 @@ npm run test:all                  # everything, from the repository root
 | WF-10 | Workflow | AC-25, BR-33 | Stale Ticket writes | Status, owner and IT Priority PATCH with an outdated `version` each `409 STALE_UPDATE` with `current` Ticket; nothing written | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-11 | Workflow | AC-25, BR-33 | Missing or invalid `version` | Absent/non-integer → `400 VALIDATION_FAILED` field `version` on all three routes | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-12 | Workflow | AC-25, AC-17, BR-33 | Concurrent writers | Two simultaneous PATCHes with the same `version` → exactly one `200`, one `409 STALE_UPDATE`; `version` incremented once | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
+| WF-13 | Workflow | AC-25, BR-34 | Check order | A `text/plain` body with no session returns `415` before `401`; stale + invalid transition returns `STALE_UPDATE` first; fresh + invalid returns `INVALID_TRANSITION`; malformed body on another Requester's Ticket returns `400` before `404` exactly as Lab 3; unknown Ticket + valid body `404` | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
+| WF-14 | Workflow | AC-50, BR-39 | Action write racing a Resolve | With a test hook that pauses each transaction after it takes the Ticket lock, concurrent "create PLANNED Action" vs "PATCH status RESOLVED" in both orders: if the Action commits first the Resolve is `409 RESOLUTION_BLOCKED`; if the Resolve commits first the Action is created afterwards on a RESOLVED Ticket; a Resolve is never `200` while an earlier-committed open Action exists. Sabotage check: without the row lock the first order fails | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-15 | Workflow | AC-48, BR-40 | Closing gate | Resolved→Closed with a PLANNED or IN_PROGRESS Action `409 RESOLUTION_BLOCKED` with only `OPEN_ACTIONS_REMAIN` and `count`; succeeds once they are completed/cancelled; Action logged on a RESOLVED Ticket then blocks Close | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-16 | Workflow | AC-49, BR-41 | Cancel cascade | Cancelling a Ticket with PLANNED, IN_PROGRESS and COMPLETED Actions: the first two become CANCELLED with `lastUpdatedBy` = canceller and `version`+1, COMPLETED untouched, one history row, all in one transaction (forced failure rolls back all) | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
-| WF-14 | Workflow | AC-50, BR-39 | Action write racing a Resolve | With a test hook that pauses each transaction after it takes the Ticket lock, concurrent "create PLANNED Action" vs "PATCH status RESOLVED" in both orders: if the Action commits first the Resolve is `409 RESOLUTION_BLOCKED`; if the Resolve commits first the Action is created afterwards on a RESOLVED Ticket; a Resolve is never `200` while an earlier-committed open Action exists. Sabotage check: without the row lock the first order fails | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
-| WF-13 | Workflow | AC-25, BR-34 | Check order | A `text/plain` body with no session returns `415` before `401`; stale + invalid transition returns `STALE_UPDATE` first; fresh + invalid returns `INVALID_TRANSITION`; malformed body on another Requester's Ticket returns `400` before `404` exactly as Lab 3; unknown Ticket + valid body `404` | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | SEC-01 | Authorization | AC-14, BR-13 | Requester cannot write Actions | Own Ticket POST/PATCH `403`; another Requester's Ticket (read, write, history) `404` byte-identical to a nonexistent Ticket; nothing written | `server/tests/lab-04/authorization.api.test.ts` | Planned |
 | SEC-02 | Authorization | AC-15, FR-08 | Administrator Actions access and retained limits | Administrator POST/PATCH Actions `201`/`200`, can read the staff queue; status change, owner change and note creation still `403` | `server/tests/lab-04/authorization.api.test.ts` | Planned |
 | SEC-03 | Authorization | AC-30 | Dashboard role matrix | Requester→staff dashboard `403`; IT Staff and Administrator→requester dashboard `403` before any lookup; permitted pairs `200` | `server/tests/lab-04/authorization.api.test.ts` | Planned |
@@ -137,10 +137,10 @@ npm run test:all                  # everything, from the repository root
 | MIG-03 | Migration | AC-40, D-20 | Hand-written constraint and indexes | The follow-up `CHECK` rejects invalid pairs at the database; unique `(ticketId, clientRequestId)` exists; the Lab 3 `lower(email)` unique index still exists | `server/tests/lab-04/migration.test.ts` | Planned |
 | MIG-04 | Migration | AC-40, FR-20 | Recovery script | `lab-04-down.sql` returns the schema to the Lab 3 shape with all Lab 3 data intact | `server/tests/lab-04/migration.test.ts` | Planned |
 | MIG-05 | Migration | AC-40 | Re-run is a no-op | Applying migrations twice changes nothing and raises no error | `server/tests/lab-04/migration.test.ts` | Planned |
-| MIG-09 | Migration | AC-40, FR-20 | Recovery by dump/restore | `pg_dump` a Lab 3-shaped database, apply the Lab 4 migration and write Lab 4 rows, restore the dump: row counts and ids of every Lab 3 table equal the originals and no Lab 4 table or `Ticket.version` remains | `server/tests/lab-04/migration.test.ts` | Planned |
 | MIG-06 | Migration | AC-41, FR-21 | Seed is idempotent | Running the seed twice leaves identical row counts for every table, including Actions and history | `server/tests/lab-04/seed.test.ts` | Planned |
 | MIG-07 | Migration | AC-41 | Seed coverage | All eight statuses and three IT Priorities; assigned and unassigned; Tickets with 0, 1 and 4+ Actions; one Ticket with three different performers; all four Action statuses; follow-ups; one gate-passing and one gate-blocked Resolved candidate | `server/tests/lab-04/seed.test.ts` | Planned |
 | MIG-08 | Migration | AC-41, §7.5 | Seeded zero and non-zero metrics | Priya Natarajan and Jennifer Anderson non-zero on every metric (Recently Resolved from seeded history rows); Emma Fischer `ownedByMe` and `myOpenActions` = 0; David Lee Open, Waiting, Recently Updated, Recently Resolved = 0 | `server/tests/lab-04/seed.test.ts` | Planned |
+| MIG-09 | Migration | AC-40, FR-20 | Recovery by dump/restore | `pg_dump` a Lab 3-shaped database, apply the Lab 4 migration and write Lab 4 rows, restore the dump: row counts and ids of every Lab 3 table equal the originals and no Lab 4 table or `Ticket.version` remains | `server/tests/lab-04/migration.test.ts` | Planned |
 | PERF-01 | Performance-smoke | AC-46 | Dashboards at volume | Seeded 1,000 Tickets / 3,000 Actions: each dashboard endpoint median < 500 ms over 20 calls | `server/tests/lab-04/performance-smoke.api.test.ts` | Planned |
 | PERF-02 | Performance-smoke | AC-46 | Actions list and queue drill-down | `…/actions-taken` for a 200-Action Ticket and `GET /api/staff/tickets?myActions=true` median < 500 ms over 20 calls | `server/tests/lab-04/performance-smoke.api.test.ts` | Planned |
 | C-01 | UI component | AC-35, FR-18 | Navigation per role | Requester: Dashboard, My Tickets, Create Ticket; IT Staff: Dashboard, Ticket Queue; Administrator: Dashboard, Ticket Queue, User Management; Dashboard first; `aria-current="page"` on `/dashboard`; wordmark → `/dashboard` | `client/tests/lab-04/AppShellNav.test.tsx` | Planned |
@@ -154,8 +154,6 @@ npm run test:all                  # everything, from the repository root
 | C-09 | UI component | AC-32, AC-34, AC-36 | Requester dashboard links and states | Hrefs per `api-spec.md` §4; empty messages; loading; failure with Retry; a `403` from the endpoint renders the forbidden state | `client/tests/lab-04/RequesterDashboard.test.tsx` | Planned |
 | C-10 | UI component | AC-37 | Actions list rendering | Table with caption and columns on wide layout; card list on narrow layout; empty state with Add action; Edit only on non-terminal rows; header shows "Visible to the requester" | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-11 | UI component | AC-37, AC-01 | Create form | All fields present; Performed by is static text; date defaults to now; status offers Planned/In progress/Completed; required fields marked; Result becomes required (`aria-required`, `*`) only when Completed is selected | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
-| C-29 | UI component | AC-52 | Result required only for Completed | Selecting Completed with an empty Result shows the message below the field and keeps values; Planned/In progress save without a result; the `*` toggles with the Status select | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
-| C-30 | UI component | AC-38, AC-45 | Actions Taken not-found and forbidden callouts | A `404` on save shows "This action or ticket no longer exists." with the Ticket Queue link; a `403` shows the permission callout; entered values stay visible in both | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-12 | UI component | AC-04, AC-05, AC-07 | Form validation placement | Empty description, over-long result, future date on a non-planned Action, over-length fields show messages directly below the field with `aria-invalid`; focus moves to first invalid; counters present | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-13 | UI component | AC-06 | Follow-up note behavior | Note field appears only when the checkbox is on, is required then, and is hidden and cleared when switched off | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-14 | UI component | AC-38 | Entered data survives failures | After a validation (400), stale (409) or network failure the typed values remain and the failure shows beside them | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
@@ -173,6 +171,8 @@ npm run test:all                  # everything, from the repository root
 | C-26 | UI component | AC-24 | Status history card | Oldest first with from→to text and `StatusBadge`s; empty message for no history | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
 | C-27 | UI component | AC-39, FR-06 | Requester Ticket Detail | Actions Taken (all fields) and status history visible; no Add/Edit/status controls; no Internal Note content; no IT Priority | `client/tests/lab-04/RequesterActionsView.test.tsx` | Planned |
 | C-28 | UI component | AC-45 | Safe failure | A failing Actions list/dashboard shows `ErrorState` with Retry and no raw error text | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
+| C-29 | UI component | AC-52 | Result required only for Completed | Selecting Completed with an empty Result shows the message below the field and keeps values; Planned/In progress save without a result; the `*` toggles with the Status select | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
+| C-30 | UI component | AC-38, AC-45 | Actions Taken not-found and forbidden callouts | A `404` on save shows "This action or ticket no longer exists." with the Ticket Queue link; a `403` shows the permission callout; entered values stay visible in both | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | S-01 | UI style | AC-43, V-01 | Token discipline | No hard-coded hex in Lab 4 component CSS; new tokens exist in `theme.css` | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-02 | UI style | AC-43, V-08 | Action badge distinct | `ActionStatusBadge` renders its text label with a non-pill radius class; Ticket `StatusBadge` unchanged | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-03 | UI style | AC-36, V-04 | Needs-attention variant | The accent class is always accompanied by sub-label text | `client/tests/lab-04/ui-style.test.tsx` | Planned |
@@ -238,7 +238,7 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-13 | API-12, C-20 |
 | AC-14 | API-15, SEC-01, SEC-05, SEC-08 |
 | AC-15 | SEC-02, SEC-08, C-21, E2E-13 |
-| AC-16 | UNIT-10, API-13, E2E-06 |
+| AC-16 | UNIT-10, API-13, API-33, E2E-06 |
 | AC-17 | API-14, WF-12, C-15, E2E-05 |
 | AC-18 | UNIT-05, WF-01 |
 | AC-19 | UNIT-05, WF-02 |
@@ -256,24 +256,25 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-31 | API-26, C-07, E2E-13 |
 | AC-32 | API-20, API-27, C-06, C-09, E2E-14 |
 | AC-33 | UNIT-07, API-21 |
-| AC-34 | UNIT-11, API-22, API-28, API-31, API-29, C-05, C-09, E2E-11, E2E-12 |
+| AC-34 | UNIT-11, API-22, API-28, API-29, API-31, C-05, C-09, E2E-11, E2E-12 |
 | AC-35 | C-01, C-02, E2E-15 |
 | AC-36 | C-03, C-06, C-08, C-09, S-03, A11Y-06, E2E-16 |
-| AC-37 | C-10, C-11, S-05, R-03, E2E-01 |
-| AC-38 | C-14, C-15, C-16, E2E-05, E2E-06 |
-| AC-39 | C-27, R-04, A11Y-04, E2E-09 |
+| AC-37 | C-10, C-11, S-05, S-06, R-03, E2E-01 |
+| AC-38 | C-14, C-15, C-16, C-30, E2E-05, E2E-06 |
+| AC-39 | C-27, S-06, R-04, A11Y-04, E2E-09 |
 | AC-40 | MIG-01, MIG-02, MIG-03, MIG-04, MIG-05, MIG-09 |
 | AC-41 | MIG-06, MIG-07, MIG-08 |
 | AC-42 | E2E-18, REG-01, REG-02, REG-03, REG-04, REG-05, REG-06 |
 | AC-43 | S-01, S-02, S-04, R-01, R-02, R-03, R-04, R-05, E2E-19 |
 | AC-44 | A11Y-01, A11Y-02, A11Y-03, A11Y-04, A11Y-05, A11Y-06 |
-| AC-45 | SEC-06, SEC-07, C-28, E2E-16, E2E-17 |
+| AC-45 | SEC-06, SEC-07, C-28, C-30, E2E-16, E2E-17 |
 | AC-46 | PERF-01, PERF-02 |
 | AC-47 | API-30 |
 | AC-48 | WF-15, C-24, E2E-07 |
 | AC-49 | WF-16, C-22 |
 | AC-50 | WF-14 |
 | AC-51 | REG-07 |
+| AC-52 | UNIT-12, API-32, C-29 |
 
 ## 4. Labs 1–3 regression
 

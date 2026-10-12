@@ -1,6 +1,6 @@
 # Lab 4 Sprint Engineering Specification — TokTickIT Actions Taken, Dashboards and Final Regression
 
-> Status: draft — Issue #92. Extends `docs/lab-03/specification.md`; Lab 3 rules are referenced as
+> Status: proposed — PR #101 (Issue #92). Extends `docs/lab-03/specification.md`; Lab 3 rules are referenced as
 > `L3-BR-nn` / `L3-AC-nn`. Lab 4 numbering restarts at BR-01, FR-01, AC-01, D-01.
 
 Companion documents: [`api-spec.md`](./api-spec.md), [`ui-spec.md`](./ui-spec.md),
@@ -173,9 +173,9 @@ writes.
 | BR-16 | A status change is permitted only if the pair is in the §5.1 matrix and the caller is IT Staff. L3-BR-24 (owner required for In Progress) and L3-BR-05/25 (Requester cannot set Resolved/Closed) stand. |
 | BR-17 | **Resolution gate.** A transition to `RESOLVED` requires (a) a Ticket Owner, (b) at least one `COMPLETED` Action Taken, and (c) no Action Taken in `PLANNED` or `IN_PROGRESS`. Otherwise `RESOLUTION_BLOCKED`, listing every failed condition. Enforced by the backend for any client. |
 | BR-18 | "Problem Appears Resolved" records the Requester's indication only (L3-BR-26). It satisfies no part of BR-17 and changes no status. |
+| BR-19 | Every successful status change inserts exactly one status-history row (from, to, changedBy, changedAt) in the same transaction as the update. History is append-only: no edit, no delete, no endpoint to write it directly. |
 | BR-40 | **Closing gate.** A transition `RESOLVED → CLOSED` is refused with `RESOLUTION_BLOCKED` (single reason `OPEN_ACTIONS_REMAIN`, with `count`) while any Action is `PLANNED` or `IN_PROGRESS`; this catches Actions logged after the Resolve (BR-12). |
 | BR-41 | **Cancel cascade.** A transition to `CANCELLED` sets every non-terminal Action of the Ticket to `CANCELLED` in the same transaction (under the BR-39 lock), incrementing each Action's `version` and setting `lastUpdatedBy` to the canceller; `COMPLETED` Actions are untouched. |
-| BR-19 | Every successful status change inserts exactly one status-history row (from, to, changedBy, changedAt) in the same transaction as the update. History is append-only: no edit, no delete, no endpoint to write it directly. |
 
 ### 5.1 Status transition matrix
 
@@ -228,8 +228,8 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 | BR-35 | Action create accepts an optional `clientRequestId` (UUID), unique per Ticket. A repeat with an identical request returns the existing Action with `200`, not a second row; the same key with a different request is rejected (`IDEMPOTENCY_CONFLICT`). "Identical" means the same SHA-256 of the canonicalised create body (trimmed text, defaults applied), stored as `clientRequestHash`, so later edits to the Action do not turn a genuine retry into a conflict. |
 | BR-36 | After a validation, stale or network failure the UI keeps the user's unsaved input and shows the failure beside it; submit controls are disabled while a request is pending. |
 | BR-37 | L3-BR-34 (field-level errors, no partial write), L3-BR-35, L3-BR-36 (safe `INTERNAL`) and L3-BR-40 (JSON content type, `415`) apply to every new endpoint. |
-| BR-39 | **Serialization.** Every status change and every Action create/update runs inside one database transaction that first locks the Ticket row (`SELECT … FOR UPDATE` in a Prisma `$transaction`). The order is always lock → read → compare `version` → domain checks (BR-17, BR-40, Ticket status) → write (the `UPDATE … WHERE version` stays as belt-and-braces); an Action write follows the same order under the same lock, so an Action created or edited concurrently with a Resolve either lands before it (and blocks it) or waits and then sees the new status. A Ticket can therefore never become Resolved while an open Action already committed exists; an Action logged after the Resolve commits is legitimate follow-up work (BR-12) and is dealt with at closing (BR-40). The `version` check cannot cover this, because Action writes do not bump `Ticket.version` (D-15). |
 | BR-38 | Legacy Tickets (from Labs 2–3) have `version = 1`, zero Actions and empty status history after migration, and are treated as ordinary records by every dashboard rule. |
+| BR-39 | **Serialization.** Every status change and every Action create/update runs inside one database transaction that first locks the Ticket row (`SELECT … FOR UPDATE` in a Prisma `$transaction`). The order is always lock → read → compare `version` → domain checks (BR-17, BR-40, Ticket status) → write (the `UPDATE … WHERE version` stays as belt-and-braces); an Action write follows the same order under the same lock, so an Action created or edited concurrently with a Resolve either lands before it (and blocks it) or waits and then sees the new status. A Ticket can therefore never become Resolved while an open Action already committed exists; an Action logged after the Resolve commits is legitimate follow-up work (BR-12) and is dealt with at closing (BR-40). The `version` check cannot cover this, because Action writes do not bump `Ticket.version` (D-15). |
 
 ## 6. UI Specification Summary
 
@@ -382,10 +382,8 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | ID | Criterion |
 |---|---|
 | AC-01 | Given a permitted IT Staff user and valid data, when an Action Taken is created, then it is saved under the correct Ticket with the authenticated creator as performer and the approved assignee. |
-| AC-02 | Given an authenticated Requester, when dashboard data is retrieved, then only metrics and recent Tickets owned by that Requester are returned. |
 | AC-03 | Given a create or update request carrying a client-supplied performer, creation time or last-updated-by, when it is processed, then those values are ignored; and given a second IT Staff user editing the Action, then `performedBy` is unchanged and `lastUpdatedBy` is the editor. |
 | AC-04 | Given an empty, whitespace-only, or over-2000-character description, or a result over 2000 characters, when it is submitted, then it is rejected with a field-level message and nothing is written. |
-| AC-52 | Given a `PLANNED` or `IN_PROGRESS` Action without a result, when it is created or updated, then it is accepted; given a create as `COMPLETED`, or a transition to `COMPLETED`, with no result in the request and none stored, then it is rejected with a field-level message on `result` and stays unchanged; given a stored result, then completing without resending it succeeds. |
 | AC-05 | Given an action date earlier than the Ticket's creation, or in the future for an `IN_PROGRESS`/`COMPLETED` Action, when it is submitted, then it is rejected; given a future date on a `PLANNED` Action, a valid past date, or none, then it is accepted (none defaults to now). |
 | AC-06 | Given follow-up required with no note, or a note with follow-up not required, when submitted, then it is rejected; given follow-up switched off on update, then the stored note is cleared. |
 | AC-07 | Given attachment notes over 500 characters, when submitted, then it is rejected; given valid notes, then they are stored and rendered as plain text, and no upload route exists for Actions Taken. |
@@ -399,6 +397,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-15 | Given an Administrator, when they create or update an Action, then it succeeds; when they attempt a status change, claim/assign or Internal Note, then each is still refused (L3-AC-68). |
 | AC-16 | Given the same create request sent twice with one `clientRequestId`, when processed, then exactly one Action exists and the second response returns it with `200`; given the same key with a different body, then it is rejected with `IDEMPOTENCY_CONFLICT` and nothing changes. |
 | AC-17 | Given an Action update carrying an outdated `version`, when processed, then it is rejected with `STALE_UPDATE`, the body contains the current Action, and the other user's change is not overwritten. |
+| AC-52 | Given a `PLANNED` or `IN_PROGRESS` Action without a result, when it is created or updated, then it is accepted; given a create as `COMPLETED`, or a transition to `COMPLETED`, with no result in the request and none stored, then it is rejected with a field-level message on `result` and stays unchanged; given a stored result, then completing without resending it succeeds. |
 
 ### Ticket workflow
 
@@ -412,15 +411,16 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-23 | Given a Requester who indicated the problem appears resolved, or who calls any status route, when Resolved is considered, then the status is unchanged and the gate is unaffected. |
 | AC-24 | Given each successful status change, when history is read by IT Staff, Administrator or the owning Requester, then one entry per change exists with from, to, who and when in stable order, no route can edit or delete it, and another Requester's Ticket returns `404`. |
 | AC-25 | Given a status, owner or IT Priority write with an outdated `version`, when processed, then it is rejected with `STALE_UPDATE` carrying the current Ticket; given a missing `version`, then `VALIDATION_FAILED`. |
+| AC-26 | Given the Staff Ticket Detail status control, when it renders, then it offers only permitted transitions for the current status and, after a successful change, the Ticket summary status and history refresh without a reload. |
 | AC-48 | Given a Resolved Ticket with a `PLANNED` or `IN_PROGRESS` Action, when Closed is requested, then it is rejected with `RESOLUTION_BLOCKED` (`OPEN_ACTIONS_REMAIN`); given none open, then Closed succeeds. |
 | AC-49 | Given a Ticket with non-terminal and `COMPLETED` Actions, when it is Cancelled, then the non-terminal Actions become `CANCELLED` with `lastUpdatedBy` = the canceller and incremented `version`, `COMPLETED` Actions are unchanged, and a status-history row exists. |
 | AC-50 | Given an Action create racing a Resolve for the same Ticket, when both run, then a Resolve never succeeds while an earlier-committed open Action exists (BR-39). |
-| AC-26 | Given the Staff Ticket Detail status control, when it renders, then it offers only permitted transitions for the current status and, after a successful change, the Ticket summary status and history refresh without a reload. |
 
 ### Dashboards
 
 | ID | Criterion |
 |---|---|
+| AC-02 | Given an authenticated Requester, when dashboard data is retrieved, then only metrics and recent Tickets owned by that Requester are returned. |
 | AC-27 | Given seeded Tickets for a Requester, when the Requester dashboard is retrieved, then Open, Waiting for Me, Recently Updated and Recently Resolved equal the values recomputed directly from the database (BR-21–BR-24). |
 | AC-28 | Given seeded Tickets, when the IT Staff dashboard is retrieved, then Unassigned, Owned by Me, by-status (all eight, zeros included) and by-IT-Priority (open only) equal the database values. |
 | AC-29 | Given seeded Actions, when the IT Staff dashboard is retrieved, then My Open Actions, Follow-ups Required, Urgent and Recently Updated equal the database values per BR-25–BR-27. |
@@ -451,8 +451,8 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-44 | Given the Dashboard, Staff Ticket Detail (Actions Taken) and Requester Ticket Detail, when scanned with axe-core and driven by keyboard only, then there are no serious or critical violations, focus is visible, and every Lab 4 flow is completable without a mouse. |
 | AC-45 | Given an unexpected server error on any Lab 4 endpoint, when returned, then the body is the generic `INTERNAL` body with no stack, SQL or path, the UI shows a safe failure with Retry, and the main journeys log no console errors and show no placeholder text or broken link. |
 | AC-46 | Given the seeded database at 1,000 Tickets and 3,000 Actions, when each dashboard and the Actions list are requested 20 times, then the median response is under 500 ms. |
-| AC-51 | Given the running server, when `GET /api/health` is called, then it still returns `200 {"status":"ok","service":"TokTickIT API"}` without authentication. |
 | AC-47 | Given the running server, when its routes are enumerated, then every Lab 4 route is listed in `api-spec.md` and no route exists for deleting an Action, writing history, uploading Action files, exporting, or any other §3.2 exclusion. |
+| AC-51 | Given the running server, when `GET /api/health` is called, then it still returns `200 {"status":"ok","service":"TokTickIT API"}` without authentication. |
 
 ### FR → AC coverage
 
@@ -538,8 +538,8 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-20 | Follow-up consistency also enforced by a DB `CHECK`. | Justified in §7.6. |
 | D-21 | No pagination on Actions Taken or status history. | Tens of rows per Ticket; handout asks for none; avoids pagination edge cases in a sprint-limited UI. |
 | D-22 | Action-based dashboard cards count Actions but link to the Ticket list containing them, with the Ticket count in the sub-label (BR-31). | Keeps "My Open Actions" meaningful (handout Part 5: current-user Actions Taken) without adding a new Actions list screen. |
+| D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |
 | D-24 | Row-lock the Ticket (BR-39) for status changes and Action writes, in addition to `version`. | `Ticket.version` guards stale clients, not a race between an Action write and the gate read; because D-15 keeps Action writes off `version`, only a shared lock closes the window without false conflicts. |
 | D-25 | Closing is refused while any Action is open (BR-40); cancelling a Ticket auto-cancels its non-terminal Actions (BR-41). | Actions can legitimately be logged on a Resolved Ticket (D-05), so closure is where leftovers must be caught; a Cancelled Ticket's pending work is moot, and leaving it `PLANNED` forever would be misleading and un-editable (BR-12). |
 | D-26 | `actionAt` means when the work was or will be done (future allowed only for PLANNED); the record's `createdAt` is shown in View mode as "Logged at". | Handout §3 says "Action Date/Time" and §8.3 says "Action create date/time"; keeping both fields satisfies each reading, and a planned Action needs a schedulable time while a performed one cannot be in the future. |
 | D-27 | **Consequence of the gate (D-06).** Resolution now needs a `COMPLETED` Action, which Lab 3 did not, so every earlier test or helper that moves a Ticket into Resolved (and then Closed) must first seed one `COMPLETED` Action on that Ticket. The stricter gate is kept; no earlier test is allowed to bypass it. The exact edits are listed in `tests.md` §4.2. | The handout's resolution rule (§4.5) is the point of Lab 4; weakening BR-17(b) to keep Lab 3 tests untouched would defeat it, and the edit is mechanical (one seeded row). |
-| D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |
