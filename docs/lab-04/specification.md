@@ -153,7 +153,7 @@ writes.
 | BR-01 | An Action Taken belongs to exactly one Ticket, fixed at creation. |
 | BR-02 | The Ticket Owner coordinates the Ticket, but an Action Taken may be performed by a different IT Staff member; no Ticket Owner is required to create or edit one. |
 | BR-03 | `performedBy` is set by the backend from the authenticated user at creation and never changes; a client-supplied performer, `createdAt` or `lastUpdatedBy` is ignored. Each update records `lastUpdatedBy` and `updatedAt`. |
-| BR-04 | `actionAt` is entered by the user (the UI defaults it to now). It may not be in the future (server clock) and may not precede the Ticket's `createdAt`. |
+| BR-04 | `actionAt` is when the work was performed or, for a `PLANNED` Action, when it is scheduled. It is user-entered (the UI defaults it to now), may not precede the Ticket's `createdAt`, and may be in the future **only while the status is `PLANNED`**; `IN_PROGRESS` and `COMPLETED` require `actionAt <=` server now (also when an update moves a future-dated Action into those states). `createdAt` is the separate, server-set time the line was logged. |
 | BR-05 | `description` and `result` are required, 1–2000 characters after trimming, stored and rendered as plain text (L3-BR-18). |
 | BR-06 | `followUpRequired` defaults to `false`. `followUpNote` is required (1–1000 trimmed) when it is `true` and must be absent/null when `false`; switching the flag off clears the stored note. |
 | BR-07 | `attachmentNotes` is optional free text (≤ 500) saying which existing Ticket Attachment or file to look at. It is text only; no file is uploaded or linked through it. |
@@ -208,7 +208,7 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 | BR-20 | Metrics come from authoritative tables, never from client input. A Requester's metrics see only `Ticket.requesterId = caller`. |
 | BR-21 | **Open** Ticket = status not in `RESOLVED`, `CLOSED`, `CANCELLED`. |
 | BR-22 | **Recent window**: time zone `Asia/Bangkok` (UTC+7, no DST). `windowStart` = 00:00 Bangkok on the day six days before today, so the window is today plus the six previous Bangkok calendar days. "Updated recently" = `Ticket.updatedAt >= windowStart`. |
-| BR-23 | **Recently Resolved** (Requester) = Tickets with status `RESOLVED` or `CLOSED` whose resolution time is `>= windowStart`. Resolution time = `changedAt` of the latest history row with `toStatus` in (`RESOLVED`,`CLOSED`), else `Ticket.updatedAt` (legacy Tickets have no history, D-10). |
+| BR-23 | **Recently Resolved** (Requester) = Tickets whose status is `RESOLVED` or `CLOSED` and whose latest status-history row with `toStatus` in (`RESOLVED`,`CLOSED`) has `changedAt >= windowStart`. That `changedAt` is the resolution time. Tickets with no history (legacy, D-10) are excluded; `updatedAt` is never used, because later edits bump it. |
 | BR-24 | Every list is capped at 5, ordered `updatedAt` descending then `id` descending, and returns its uncapped `total` beside the items. |
 | BR-25 | **My Open Actions** = Actions with status `PLANNED`/`IN_PROGRESS`, on an Open Ticket, where `assigneeId = caller`, or `assigneeId IS NULL AND performedById = caller`. Reported as an action count and the number of distinct Tickets. List order: `actionAt` ascending, then `id`. |
 | BR-26 | **Follow-ups Required** = distinct Open Tickets having at least one Action with `followUpRequired = true` and status ≠ `CANCELLED`. |
@@ -216,7 +216,7 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 | BR-28 | **By status** counts all Tickets for all eight statuses, zeros included. **By IT Priority** counts Open Tickets only, three keys, zeros included. |
 | BR-29 | **Unassigned** = Open Tickets with `ownerId IS NULL`. **Owned by Me** = Open Tickets with `ownerId = caller`. |
 | BR-30 | No matching data is `0` or an empty list with HTTP 200, never an error; the UI shows an explicit empty message (ui-spec §3–4). |
-| BR-31 | A card's count and the list its drill-down opens share one predicate, so they are equal for the same data (AC-35). For action-based cards the count is of Actions and the sub-label states the Ticket count that the list shows. |
+| BR-31 | A card's count and the list its drill-down opens share one predicate, so they are equal for the same data (AC-34). For action-based cards the count is of Actions and the sub-label states the Ticket count that the list shows. |
 | BR-32 | The Administrator additionally receives `userCounts`: active and inactive users per role. The IT Staff dashboard omits it. |
 
 ### Concurrency and safe failure
@@ -224,7 +224,7 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 | ID | Rule |
 |---|---|
 | BR-33 | `Ticket` and `ActionTaken` carry an integer `version` starting at 1. Ticket status/owner/IT-Priority writes and Action updates must send the `version` last read; the server updates `WHERE id AND version` atomically and increments it. A mismatch is `STALE_UPDATE` with the current resource in the body. A missing or non-integer `version` is `VALIDATION_FAILED`. |
-| BR-34 | Check order for a write: authentication → role (403) → record lookup/read path (404) → body validation (400) → `STALE_UPDATE` → ticket-closed / locked → domain conflicts (`INVALID_TRANSITION`, `OWNER_REQUIRED`, `RESOLUTION_BLOCKED`, `INVALID_ASSIGNEE`, `INVALID_ACTION_TRANSITION`). |
+| BR-34 | Check order for a write, matching the Lab 3 code (body shape is validated before the access lookup): `401` unauthenticated → `403 PASSWORD_CHANGE_REQUIRED` → malformed path id `404` → request-body shape `400` (types, lengths, enums, missing `version`; nothing that needs the record) → access lookup (`404` nonexistent or no read path; `403` readable but role may not write; role-gated collections such as the dashboards answer `403` right after the gate) → record-dependent `400` (e.g. `actionAt` before the Ticket's `createdAt`) → `STALE_UPDATE` → business conflicts (`TICKET_CLOSED`, `ACTION_LOCKED`, `INVALID_ACTION_TRANSITION`, `INVALID_ASSIGNEE`, `INVALID_TRANSITION`, `OWNER_REQUIRED`, `RESOLUTION_BLOCKED`). |
 | BR-35 | Action create accepts an optional `clientRequestId` (UUID), unique per Ticket. A repeat returns the existing Action with `200`, not a second row. |
 | BR-36 | After a validation, stale or network failure the UI keeps the user's unsaved input and shows the failure beside it; submit controls are disabled while a request is pending. |
 | BR-37 | L3-BR-34 (field-level errors, no partial write), L3-BR-35, L3-BR-36 (safe `INTERNAL`) and L3-BR-40 (JSON content type, `415`) apply to every new endpoint. |
@@ -316,14 +316,14 @@ breakpoints and Lab 2 §12 accessibility rules apply unchanged.
    and asserted by the migration test (MIG-03).
 3. **Backfill / legacy behavior (D-10).** Every existing Ticket becomes `version = 1` (column default),
    has zero Actions Taken and an **empty** status history. Dashboards treat such a Ticket normally: it
-   counts in Open/by-status metrics by its status, appears in Recently Updated by `updatedAt`, and its
-   resolution time for Recently Resolved falls back to `updatedAt` (BR-23). A legacy Ticket sitting in
+   counts in Open/by-status metrics by its status, appears in Recently Updated by `updatedAt`, and is
+   excluded from Recently Resolved because it has no history (BR-23, D-10). A legacy Ticket sitting in
    Resolved can be closed or reopened; the gate only applies on the way *into* Resolved.
 4. **Recovery.** Prisma has no down-migrations. Recovery is (a) take `pg_dump` before `migrate deploy`
    and restore it, or (b) run `server/prisma/recovery/lab-04-down.sql`, which drops `TicketStatusChange`,
    `ActionTaken`, the `Ticket.version` column and `ActionStatus`, then deletes the
    `_prisma_migrations` row for this migration. (b) discards Lab 4 data by design and leaves Lab 3 data
-   untouched. Both paths are documented in `README.md` and exercised by MIG-04/MIG-05.
+   untouched. Both paths are documented in `README.md` and exercised by MIG-04 (script) and MIG-09 (dump/restore).
 5. The migration is verified against a database holding Lab 3-shaped data (`db:test:lab3-fixture`)
    before merge; row counts and ids of all Lab 3 tables must be identical before and after.
 
@@ -341,7 +341,8 @@ from the matrix) and keeps Lab 3's invariants (In Progress rows carry an owner).
 | Actions Taken counts | Tickets with 0, 1 and 4+ Actions; at least one Ticket with Actions by three different IT Staff (including one by an Administrator); all four action statuses; two follow-ups; one Resolved Ticket satisfying the gate and one blocked by a `PLANNED` Action. |
 | Non-zero metrics | Priya Natarajan (IT Staff): Owned by Me, My Open Actions, Follow-ups, Urgent, Recently Updated all > 0. Jennifer Anderson (Requester): Open, Waiting for Me, Recently Updated, Recently Resolved all > 0. |
 | Zero metrics | Emma Fischer (IT Staff): Owned by Me = 0 and My Open Actions = 0 (she owns no Ticket and has no open Action). David Lee (Requester): Open = 0, Waiting for Me = 0, Recently Updated empty, Recently Resolved = 0 (his only Tickets were resolved 10+ days ago). |
-| Legacy shape | A few Tickets deliberately without history to exercise D-10. |
+| Status history | Every seeded Ticket not in `NEW` has history rows consistent with its status, so history-based metrics are non-zero: Jennifer Anderson's recently resolved Ticket has a `RESOLVED` row inside the window, David Lee's older ones have rows outside it. |
+| Legacy shape | A few Tickets deliberately without history to exercise D-10 (excluded from Recently Resolved). |
 
 ### 7.6 Design decisions (justified)
 
@@ -351,7 +352,7 @@ from the matrix) and keeps Lab 3's invariants (In Progress rows carry an owner).
 | **D-03** Separate append-only `TicketStatusChange` table instead of deriving history from `updatedAt` or a JSON column. | A status change is a fact with a who and a when that outlives later edits; deriving it is impossible, a JSON column cannot be indexed for Recently Resolved (BR-23), and a table with no update/delete path makes "append-only" structural (BR-19), which Part 7 of the handout asks to demonstrate. |
 | **D-20** Follow-up consistency as a database `CHECK` as well as service validation. | The rule is cross-field (BR-06). Application validation covers the API; the constraint covers seeds, scripts and future code paths that bypass it, so an invalid pair can never be stored. |
 | **D-01/D-02** `status` as a Postgres enum with an explicit lifecycle, `assigneeId` as a nullable FK. | An enum keeps the four values closed and orderable in indexes (My Open Actions); an FK to `User` gives referential integrity and lets BR-08 be checked against real roles. |
-| **D-10** Empty history for legacy Tickets rather than fabricated "initial" rows. | A fabricated row would invent a `changedBy` and `changedAt` that never happened and would poison BR-23; absence is honest and the `updatedAt` fallback is explicit. |
+| **D-10** Empty history for legacy Tickets rather than fabricated "initial" rows. | A fabricated row would invent a `changedBy` and `changedAt` that never happened and would poison BR-23; absence is honest and the exclusion rule is explicit. |
 
 ## 8. API Contract Summary
 
@@ -383,7 +384,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-02 | Given an authenticated Requester, when dashboard data is retrieved, then only metrics and recent Tickets owned by that Requester are returned. |
 | AC-03 | Given a create or update request carrying a client-supplied performer, creation time or last-updated-by, when it is processed, then those values are ignored; and given a second IT Staff user editing the Action, then `performedBy` is unchanged and `lastUpdatedBy` is the editor. |
 | AC-04 | Given an empty, whitespace-only, or over-2000-character description or result, when it is submitted, then it is rejected with a field-level message and nothing is written. |
-| AC-05 | Given an action date in the future or earlier than the Ticket's creation, when it is submitted, then it is rejected; given a valid date or none, then it is accepted (none defaults to now). |
+| AC-05 | Given an action date earlier than the Ticket's creation, or in the future for an `IN_PROGRESS`/`COMPLETED` Action, when it is submitted, then it is rejected; given a future date on a `PLANNED` Action, a valid past date, or none, then it is accepted (none defaults to now). |
 | AC-06 | Given follow-up required with no note, or a note with follow-up not required, when submitted, then it is rejected; given follow-up switched off on update, then the stored note is cleared. |
 | AC-07 | Given attachment notes over 500 characters, when submitted, then it is rejected; given valid notes, then they are stored and rendered as plain text, and no upload route exists for Actions Taken. |
 | AC-08 | Given an inactive user, a Requester or a nonexistent user as assignee, when an Action is created or updated, then it is rejected with `INVALID_ASSIGNEE` and nothing changes. |
@@ -522,7 +523,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-07 | `version Int` on Ticket and ActionTaken; compare-and-set; `STALE_UPDATE` returns the current resource. | Justified in §7.6; satisfies handout §6.1. |
 | D-08 | `clientRequestId` UUID unique per Ticket for idempotent Action create; UI also disables submit while pending. | Handout §8.5 requires duplicate-click and network-retry safety; a key is the only approach safe against retries. |
 | D-09 | Dashboards: backend-calculated, concise (counts + lists capped at 5), Asia/Bangkok, 7-day window; endpoints `/api/dashboard/requester` and `/api/dashboard/staff`; definitions BR-20–BR-32. | Handout §4.6, §6.2. Two role-checked endpoints keep each payload minimal and ownership checks simple. |
-| D-10 | Legacy Tickets: version 1, zero Actions, **empty** status history (no fabricated rows); Recently Resolved falls back to `updatedAt`. | Fabricated rows would invent who/when (§7.6); the fallback is explicit and tested. |
+| D-10 | Legacy Tickets: version 1, zero Actions, **empty** status history (no fabricated rows); Recently Resolved is computed from history only, so legacy Resolved/Closed Tickets never appear in it. | Fabricated rows would invent who/when (§7.6) and an `updatedAt` fallback drifts whenever the Ticket is touched. Known limitation: a legacy Ticket resolved last week is not shown as recently resolved. |
 | D-11 | Seed extended, idempotent, with timestamps re-anchored to run time; named zero/non-zero users in §7.5. | Handout §5.3; re-anchoring keeps the 7-day metrics meaningful on demo day. |
 | D-12 | Dashboard is first nav item and landing route for every role (`/dashboard`); wordmark and `/` redirect go there. This **changes** Lab 3's `RoleLandingRedirect` (first nav item was My Tickets / Ticket Queue / User Management), the forbidden state's link target, and L3-AC-17 nav expectations. | Handout §7 and §8.1/§8.2. The Lab 3 AppShell, nav and landing tests are re-pointed, not deleted. |
 | D-13 | Administrator may read the IT Staff queue, open Staff Ticket Detail and use `GET /api/staff/assignable-users`, create/update Actions Taken, and use the staff dashboard; Lab 3's other limits (status, claim, notes, comments) stand. This **changes** Lab 3 matrix row "IT Staff Ticket Queue" and Lab 3's "no Administrator ticket screen" note. | Handout §4.3 (Administrator performs IT Staff behavior) and §4.6 (reuses the dashboard) need a path to the Ticket; granting only that keeps Lab 3's separation of duties. |
@@ -537,4 +538,5 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-22 | Action-based dashboard cards count Actions but link to the Ticket list containing them, with the Ticket count in the sub-label (BR-31). | Keeps "My Open Actions" meaningful (handout Part 5: current-user Actions Taken) without adding a new Actions list screen. |
 | D-24 | Row-lock the Ticket (BR-39) for status changes and Action writes, in addition to `version`. | `Ticket.version` guards stale clients, not a race between an Action write and the gate read; because D-15 keeps Action writes off `version`, only a shared lock closes the window without false conflicts. |
 | D-25 | Closing is refused while any Action is open (BR-40); cancelling a Ticket auto-cancels its non-terminal Actions (BR-41). | Actions can legitimately be logged on a Resolved Ticket (D-05), so closure is where leftovers must be caught; a Cancelled Ticket's pending work is moot, and leaving it `PLANNED` forever would be misleading and un-editable (BR-12). |
+| D-26 | `actionAt` means when the work was or will be done (future allowed only for PLANNED); the record's `createdAt` is shown in View mode as "Logged at". | Handout §3 says "Action Date/Time" and §8.3 says "Action create date/time"; keeping both fields satisfies each reading, and a planned Action needs a schedulable time while a performed one cannot be in the future. |
 | D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |
