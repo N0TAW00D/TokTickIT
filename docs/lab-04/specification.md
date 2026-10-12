@@ -101,7 +101,7 @@ From handout §4.2; none of it is built or stubbed:
 
 | ID | Requirement |
 |---|---|
-| FR-19 | Every Lab 1–3 function, screen, role rule and test keeps working; changed contracts are listed in §11 (D-12, D-18) and re-pointed, not removed. |
+| FR-19 | Every Lab 1–3 function, screen, role rule and test keeps working; changed contracts are listed in §11 (D-12, D-13, D-18) and re-pointed, not removed. |
 | FR-20 | The migration preserves all existing data, has a documented and tested recovery path, and treats legacy Tickets as valid. |
 | FR-21 | The seed is idempotent and demonstrates every status, priority, ownership state, 0/1/many Actions Taken, and zero and non-zero metrics. |
 | FR-22 | Loading, validation, success, empty, forbidden, conflict (stale), not-found and safe-failure feedback is consistent on every Lab 4 screen; forms keep entered data after recoverable failures; repeated clicks cannot duplicate writes. |
@@ -436,7 +436,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 |---|---|
 | AC-40 | Given a database holding Lab 3-shaped data, when the migration is applied, then row counts and ids of all Lab 3 tables are unchanged, every Ticket has `version = 1`, zero Actions and empty history, the CHECK constraint exists, and the recovery script restores the Lab 3 shape. |
 | AC-41 | Given the seed run twice, when row counts are compared, then they are identical, and the seeded data meets every coverage row of §7.5, including documented zero and non-zero metrics. |
-| AC-42 | Given the Lab 1, Lab 2 and Lab 3 server, client and E2E suites, when run on the Lab 4 codebase, then they pass; the only edits to them are the re-pointings listed in D-12 and D-18. |
+| AC-42 | Given the Lab 1, Lab 2 and Lab 3 server, client and E2E suites, when run on the Lab 4 codebase, then they pass; the only edits to them are the re-pointings listed in D-12, D-13 and D-18. |
 | AC-43 | Given every major Lab 4 screen at desktop, tablet and mobile widths, when measured, then `scrollWidth <= clientWidth` holds and the `ui-spec.md` §10 checklist passes for clipping, overlap and focus. |
 | AC-44 | Given the Dashboard, Staff Ticket Detail (Actions Taken) and Requester Ticket Detail, when scanned with axe-core and driven by keyboard only, then there are no serious or critical violations, focus is visible, and every Lab 4 flow is completable without a mouse. |
 | AC-45 | Given an unexpected server error on any Lab 4 endpoint, when returned, then the body is the generic `INTERNAL` body with no stack, SQL or path, the UI shows a safe failure with Retry, and the main journeys log no console errors and show no placeholder text or broken link. |
