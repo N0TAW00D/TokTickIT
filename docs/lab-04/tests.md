@@ -204,10 +204,10 @@ npm run test:all                  # everything, from the repository root
 | REG-01 | Regression | AC-42, FR-19 | Lab 1 server suite | All pass unchanged | `server/tests/lab-01/*.test.ts` | Planned |
 | REG-02 | Regression | AC-42, FR-19 | Lab 2 server suite | All pass unchanged | `server/tests/lab-02/*.test.ts` | Planned |
 | REG-03 | Regression | AC-42, FR-19 | Lab 3 server suite | All pass; only edit is sending `version` on status/owner/it-priority calls (D-18) | `server/tests/lab-03/*.test.ts` | Planned |
-| REG-04 | Regression | AC-42, FR-19 | Lab 1–3 client suites | All pass; only edits are the nav/landing expectations of D-12 in `AppShell.test.tsx` and `RoleLandingRedirect` cases | `client/tests/lab-01/*.test.tsx, client/tests/lab-02/*.test.tsx, client/tests/lab-03/*.test.tsx` | Planned |
-| REG-05 | Regression | AC-42, FR-19 | Lab 2 E2E suite | All pass unchanged | `e2e/lab-02/*.spec.ts` | Planned |
+| REG-04 | Regression | AC-42, FR-19 | Lab 1–3 client suites | All pass, unchanged except the nav and forbidden-link edits of D-12 (§4.2) | `client/tests/lab-01/*.test.tsx, client/tests/lab-02/*.test.tsx, client/tests/lab-03/*.test.tsx` | Planned |
+| REG-05 | Regression | AC-42, FR-19 | Lab 2 E2E suite | All pass, unchanged except the landing-URL edits of D-12 (§4.2) | `e2e/lab-02/*.spec.ts` | Planned |
+| REG-06 | Regression | AC-42, FR-19 | Lab 3 E2E suite | All pass, unchanged except the landing-URL and forbidden-link edits of D-12 and `version` use (D-18) (§4.2) | `e2e/lab-03/*.spec.ts` | Planned |
 | REG-07 | Regression | AC-51, FR-19 | Health endpoint unchanged | `GET /api/health` unauthenticated → `200 {"status":"ok","service":"TokTickIT API"}` | `server/tests/lab-01/app.test.ts` | Planned |
-| REG-06 | Regression | AC-42, FR-19 | Lab 3 E2E suite | All pass; only edits are the landing route and nav of D-12 and `version` use (D-18) | `e2e/lab-03/*.spec.ts` | Planned |
 
 ## 3. Acceptance Criterion → test matrix
 
@@ -274,13 +274,21 @@ the staff queue, Internal Notes and Administrator user management, as handout §
 
 ### 4.2 Permitted edits to earlier tests (the full list)
 
+D-12 moves the post-login landing route (and the forbidden state's "go home" link) to `/dashboard`, so
+every assertion of the old landing changes. Found with `grep -rnE 'tickets\$' e2e client/tests server/tests`
+and a search for the forbidden-state links.
+
 | Change | Reason | Tests touched |
 |---|---|---|
+| `toHaveURL(/\/tickets$/)` after login becomes `/\/dashboard$/` | D-12 | `e2e/lab-02/requester-ticket-flow.spec.ts:96,116`; `e2e/lab-02/submission-evidence.spec.ts:533`; `e2e/lab-02/responsive.spec.ts:122,198`; `e2e/lab-03/authentication.spec.ts:89,153,206`; `e2e/lab-03/accessibility.spec.ts:157,301`; `e2e/lab-03/user-administration.spec.ts:500`; `e2e/lab-03/submission-evidence.spec.ts:143,232,1199` |
+| Forbidden state links to the Dashboard ("Go to Dashboard", `href="/dashboard"`) instead of the role's first list | D-12 | `client/tests/lab-03/RequireRole.test.tsx:136-150` (both link cases); `e2e/lab-03/user-administration.spec.ts:526-528` |
+| Nav gains Dashboard first; `RoleLandingRedirect` target | D-12 | `client/tests/lab-03/AppShell.test.tsx` nav assertions |
 | Send `version` on `PATCH …/status`, `/owner`, `/it-priority` | D-18 | `server/tests/lab-03/ticket-status.api.test.ts`, `ticket-owner.api.test.ts`, `ticket-it-priority.api.test.ts`, and any E2E helper that calls them |
-| Dashboard first in nav; landing `/dashboard` | D-12 | `client/tests/lab-03/AppShell.test.tsx`, any landing-redirect assertion, `e2e/lab-03/authentication.spec.ts` landing assertions |
-| Administrator may read the staff queue | D-13 | `server/tests/lab-03/staff-queue.api.test.ts` and `staff-assignable-users.api.test.ts` Administrator `403` cases become `200` |
+| Administrator may read the staff queue | D-13 | `server/tests/lab-03/staff-queue.api.test.ts`, `staff-assignable-users.api.test.ts` Administrator `403` cases become `200` |
 
-Any other failing earlier test is a regression to fix in code, not a test to edit.
+Everything else asserting `/tickets` (`page.goto`, breadcrumb and "Back to My Tickets" links, route
+stubs in client tests) is the My Tickets screen itself and is unchanged. Any other failing earlier test
+is a regression to fix in code, not a test to edit.
 
 ## 5. Final test output
 

@@ -53,7 +53,8 @@ Changes Lab 3 §4.2 and the `RoleLandingRedirect` behavior (`specification.md` D
   "My Tickets" and "Ticket Queue" stay active on their own list only, as in Lab 2/3.
 - Routes: `/dashboard` wrapped in `RequireAuth` (renders the role's variant); `/staff/tickets` and
   `/staff/tickets/:id` allow `IT_STAFF` and `ADMINISTRATOR`; Requester routes unchanged. A role on a
-  route it may not use gets the Lab 3 forbidden state with no protected request issued (L3-AC-18).
+  route it may not use gets the Lab 3 forbidden state with no protected request issued (L3-AC-18);
+  its link now reads "Go to Dashboard" and targets `/dashboard`.
 - Lists read drill-down parameters from the URL (`scope`, `status`, `owner`, `itPriority`, `myActions`,
   `followUp`, `sort`, `order`/`direction`) so a dashboard link and a browser Back both restore the
   filter state; a filter shown as a chip row makes the active drill-down visible and clearable
