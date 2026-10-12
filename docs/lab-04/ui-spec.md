@@ -268,27 +268,27 @@ Lab 2 §12 and Lab 3 §13 apply. Lab 4 additions:
 
 ## 10. Visual and accessibility checklist
 
-Executed in [`tests.md`](./tests.md) §4; every row is checked at desktop, tablet and mobile.
+Every row is proven by the tests and/or screenshots named in its Evidence column (IDs in [`tests.md`](./tests.md) §2; screenshots per §11) and is checked at desktop, tablet and mobile.
 
-| # | Check |
-|---|---|
-| V-01 | Every colour comes from a token; no hard-coded hex outside `theme.css`. |
-| V-02 | Dashboard, Actions Taken and history are visually of a piece with Labs 2–3 (card, spacing, type scale). |
-| V-03 | Dashboard is first in every role's nav, active state shown, and no unauthorized destination rendered. |
-| V-04 | Metric cards: label, value, sub-label and link affordance all visible; zero cards are still readable; needs-attention is conveyed by text, not colour alone. |
-| V-05 | Dashboard lists ≤ 5 rows, with a "View all (N)" link, and empty lists show their message. |
-| V-06 | Editable vs read-only is unmistakable in the Action form and View mode (surface vs `--zen-readonly-bg`; Performed by is static text). |
-| V-07 | Validation messages sit directly below their field; the stale and blocked callouts keep user input visible. |
-| V-08 | `ActionStatusBadge` is distinct from `StatusBadge`; Ticket status, IT Priority and Requested Priority badges stay consistent everywhere. |
-| V-09 | The status control offers only permitted transitions; the resolution checklist matches the data. |
-| V-10 | Visible focus on every interactive element, including metric cards, row buttons and the conditional follow-up note; logical tab order. |
-| V-11 | No clipping, no overlap, no hidden primary action; long text clamps with a `title`. |
-| V-12 | No horizontal page scroll at 320, 768, 992 and 1440 px. |
-| V-13 | Loading, empty, no-results, forbidden, not-found, stale, blocked and failure states each render distinctly. |
-| V-14 | Dialogs usable at mobile width and restore focus on close. |
-| V-15 | Requester Ticket Detail shows Actions Taken and history read-only with no write controls and no Internal Notes. |
-| V-16 | No console errors, broken links, placeholder or lorem text, or unfinished controls on any main journey. |
-| V-17 | Private vs shared content is distinguishable at a glance and without colour: Internal Notes keep the private surface, border and "Private" badge; Actions Taken, status history and Public Comments carry no private styling, and the Actions Taken header states "Visible to the requester". |
+| # | Check | Evidence (test ID / screenshot) |
+|---|---|---|
+| V-01 | Every colour comes from a token; no hard-coded hex outside `theme.css`. | S-01 |
+| V-02 | Dashboard, Actions Taken and history are visually of a piece with Labs 2–3 (card, spacing, type scale). | E2E-19; `artifacts/lab-04/screenshots/{staff-dashboard,requester-dashboard,actions-taken}/` |
+| V-03 | Dashboard is first in every role's nav, active state shown, and no unauthorized destination rendered. | C-01, E2E-15 |
+| V-04 | Metric cards: label, value, sub-label and link affordance all visible; zero cards are still readable; needs-attention is conveyed by text, not colour alone. | C-03, C-08, S-03; `staff-dashboard/loaded-*.png`, `staff-dashboard/loaded-zero-*.png` |
+| V-05 | Dashboard lists ≤ 5 rows, with a "View all (N)" link, and empty lists show their message. | C-04, C-06, C-09; `requester-dashboard/loaded-zero-*.png` |
+| V-06 | Editable vs read-only is unmistakable in the Action form and View mode (surface vs `--zen-readonly-bg`; Performed by is static text). | C-11, C-17, S-05; `actions-taken/create-form-*.png`, `actions-taken/view-*.png` |
+| V-07 | Validation messages sit directly below their field; the stale and blocked callouts keep user input visible. | C-12, C-14, C-15, C-24; `actions-taken/validation-*.png`, `actions-taken/stale-conflict-*.png` |
+| V-08 | `ActionStatusBadge` is distinct from `StatusBadge`; Ticket status, IT Priority and Requested Priority badges stay consistent everywhere. | S-02; `actions-taken/list-*.png` |
+| V-09 | The status control offers only permitted transitions; the resolution checklist matches the data. | C-22, C-24, E2E-07; `ticket-workflow/status-options-*.png` |
+| V-10 | Visible focus on every interactive element, including metric cards, row buttons and the conditional follow-up note; logical tab order. | A11Y-05, A11Y-06 |
+| V-11 | No clipping, no overlap, no hidden primary action; long text clamps with a `title`. | R-01, R-02, R-03, R-04; `actions-taken/list-mobile.png` |
+| V-12 | No horizontal page scroll at 320, 768, 992 and 1440 px. | R-01, R-02, R-03, R-04 |
+| V-13 | Loading, empty, no-results, forbidden, not-found, stale, blocked and failure states each render distinctly. | C-06, C-09, C-14, C-15, C-24, C-28, C-30; `staff-dashboard/{loading,failure}-*.png`, `actions-taken/{empty,stale-conflict,closed-readonly}-*.png`, `ticket-workflow/resolution-blocked-*.png` |
+| V-14 | Dialogs usable at mobile width and restore focus on close. | R-05, C-18 |
+| V-15 | Requester Ticket Detail shows Actions Taken and history read-only with no write controls and no Internal Notes. | C-27, R-04, A11Y-04; `actions-taken/requester-readonly-*.png` |
+| V-16 | No console errors, broken links, placeholder or lorem text, or unfinished controls on any main journey. | E2E-17 |
+| V-17 | Private vs shared content is distinguishable at a glance and without colour: Internal Notes keep the private surface, border and "Private" badge; Actions Taken, status history and Public Comments carry no private styling, and the Actions Taken header states "Visible to the requester". | S-06, C-27; `actions-taken/list-*.png` |
 
 ## 11. Screenshot paths
 
