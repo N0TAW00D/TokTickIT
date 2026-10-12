@@ -130,6 +130,49 @@ This always drops and recreates a dedicated `toktickit_test_lab2fixture` databas
 hand-seeds it with representative Lab 2-era rows — never the Lab 3 migration, which is exactly
 what the test then applies and asserts against.
 
+#### Lab 3-shaped fixture database and Lab 4 migration recovery
+
+`server/tests/lab-04/migration.test.ts` applies the Lab 4 migration (`*_lab_04_actions_taken`) to a
+database holding *only* Lab 3-shaped data, so it can prove no Lab 3 row changes. It provisions that
+database itself, and the same step is available on its own:
+
+```bash
+npm run db:test:lab3-fixture
+```
+
+This drops and recreates `toktickit_test_lab3fixture` (derived from `server/.env.test`, same safety
+checks), applies every migration except the Lab 4 one and seeds Lab 3-shaped rows. `npm run
+db:test:reset` provisions `toktickit_test` through the normal `prisma migrate deploy`, so it includes
+the Lab 4 migration.
+
+##### Lab 4 migration recovery
+
+Prisma has no down-migrations, so there are two ways back to the Lab 3 schema:
+
+1. **Restore a dump (preferred).** Take a dump before deploying, and restore it into a fresh database
+   if you need to go back. This discards everything written since the dump.
+
+   ```bash
+   pg_dump -Fc -U postgres -d toktickit -f toktickit-before-lab-04.dump   # before migrate deploy
+   # to recover: create an empty database, then
+   pg_restore --no-owner -U postgres -d toktickit_restored toktickit-before-lab-04.dump
+   ```
+
+   Without host Postgres tools, run the same commands through the container, e.g.
+   `docker exec local-postgres pg_dump -Fc -U postgres -d toktickit > toktickit-before-lab-04.dump`.
+
+2. **Run the recovery script.** `server/prisma/recovery/lab-04-down.sql` drops `TicketStatusChange`,
+   `ActionTaken`, the `Ticket.version` column and the `ActionStatus` enum, then deletes the migration's
+   `_prisma_migrations` row so it can be applied again. It discards all Lab 4 data by design and leaves
+   Lab 3 data untouched.
+
+   ```bash
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/prisma/recovery/lab-04-down.sql
+   # or: docker exec -i local-postgres psql -U postgres -d toktickit -v ON_ERROR_STOP=1 < server/prisma/recovery/lab-04-down.sql
+   ```
+
+Both paths are exercised by tests: the script by MIG-04, dump/restore by MIG-09.
+
 ### 3. Client
 
 ```bash
