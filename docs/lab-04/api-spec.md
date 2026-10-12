@@ -26,6 +26,8 @@ The Lab 3 §1.4 precedence applies:
 
 The Administrator now has a read path to the staff queue and Ticket Detail (`specification.md` D-13).
 
+**Order of checks** (`specification.md` BR-34, same as the Lab 3 code): 401 → password-change gate 403 → malformed path id 404 → request-body shape 400 → access lookup (404 / 403 as in the table) → record-dependent 400 → `409 STALE_UPDATE` → business 409s. Role-gated collections (the dashboards) answer 403 immediately after the gate.
+
 ### 1.2 Error envelope and status codes
 
 Same envelope as Lab 3 §1.3 (`error`, `message`, optional `fields`). Lab 4 adds two optional members,
@@ -43,7 +45,7 @@ each present **only** with its code and absent otherwise:
 `Ticket` and `ActionTaken` each have an integer `version` (starts at 1) returned in every read and write
 response. A guarded write must send the `version` it last read.
 
-1. Body validation first (`version` missing or not a positive integer → `400 VALIDATION_FAILED`, field
+1. Body-shape validation and the access lookup first (`version` missing or not a positive integer → `400 VALIDATION_FAILED`, field
    `version`).
 2. The server runs `UPDATE … WHERE id = :id AND version = :version` and increments `version` in the same
    statement, inside the transaction that also writes any `TicketStatusChange` row. Zero rows updated
@@ -119,7 +121,7 @@ nothing, even if the repeated body differs. Without a key there is no deduplicat
 |---|---|---|
 | `description` | yes | string, 1–2000 after trim (BR-05) |
 | `result` | yes | string, 1–2000 after trim (BR-05) |
-| `actionAt` | no | ISO 8601 with offset; default server now; not in the future; not before the Ticket's `createdAt` (BR-04) |
+| `actionAt` | no | ISO 8601 with offset; default server now; not before the Ticket's `createdAt`; in the future only when `status` is `PLANNED` (BR-04) |
 | `status` | no | `PLANNED` (default) \| `IN_PROGRESS` \| `COMPLETED`; `CANCELLED` is not a valid initial value (BR-09) |
 | `assigneeId` | no | integer or `null`; active IT Staff/Administrator (BR-08) |
 | `followUpRequired` | no | boolean, default `false` |
@@ -174,7 +176,7 @@ Requester never sees `itPriority`.
 - **Body:** `{ "status": <one of the eight>, "version": integer }` — `version` is now required (D-18).
 - **200:** the updated Ticket (Lab 3 shape plus `version`), after the transaction wrote the Ticket and
   one `TicketStatusChange` row.
-- Check order (BR-34): 400 → **409 `STALE_UPDATE`** → **409 `INVALID_TRANSITION`** (pair absent from
+- Check order (BR-34): shape 400 → access 404/403 → **409 `STALE_UPDATE`** → **409 `INVALID_TRANSITION`** (pair absent from
   `specification.md` §5.1, incl. no-op) → **409 `OWNER_REQUIRED`** (target `IN_PROGRESS`, no owner) →
   **409 `RESOLUTION_BLOCKED`** (target `RESOLVED` and the gate fails).
 - **409 `RESOLUTION_BLOCKED`** body:
@@ -266,7 +268,7 @@ Ticket `version`. `INVALID_OWNER` (owner route) is unchanged.
 | `metrics.openTickets` — "Open Tickets" | `count(Ticket where requesterId = me AND status NOT IN (RESOLVED, CLOSED, CANCELLED))` | `0` | `/tickets?scope=open` → `GET /api/tickets?scope=open` |
 | `metrics.waitingForMe` — "Waiting for Me" | `count(Ticket where requesterId = me AND status = WAITING_FOR_REQUESTER)` | `0` | `/tickets?status=WAITING_FOR_REQUESTER` |
 | `recentlyUpdated` — "Recently Updated" | `Ticket where requesterId = me AND updatedAt >= windowStart`, `total` = full count, `items` = first 5 by `updatedAt desc, id desc` | `total: 0, items: []` | `/tickets?scope=recent&sort=updatedAt&order=desc` |
-| `recentlyResolved` — "Recently Resolved" | `Ticket where requesterId = me AND status IN (RESOLVED, CLOSED) AND resolutionTime >= windowStart` (BR-23); `resolvedAt` = that resolution time | `total: 0, items: []` | `/tickets?scope=recently-resolved` |
+| `recentlyResolved` — "Recently Resolved" | `Ticket where requesterId = me AND status IN (RESOLVED, CLOSED) AND` latest `TicketStatusChange.toStatus IN (RESOLVED, CLOSED)` has `changedAt >= windowStart` (BR-23); `resolvedAt` = that `changedAt`; Tickets with no history are excluded | `total: 0, items: []` | `/tickets?scope=recently-resolved` |
 
 Each list item's own link is `/tickets/:id`. Items never carry `itPriority`, owner, or Internal data
 (L3-BR-04). `windowStart` is 00:00 Asia/Bangkok on the day six days before today, as a UTC instant
@@ -331,7 +333,7 @@ Each list item's own link is `/tickets/:id`. Items never carry `itPriority`, own
 | `metrics.followUpsRequired` — "Follow-ups Required" | `count(distinct ticketId)` of Actions with `followUpRequired = true AND status <> CANCELLED` on an open Ticket (BR-26) | `0` | `/staff/tickets?followUp=true&scope=open` |
 | `metrics.urgent`, `urgentTickets` — "Urgent" | open Tickets with `itPriority = HIGH` (BR-27); `total` = `metrics.urgent`; items by `updatedAt desc, id desc` | `0`, `total: 0, items: []` | `/staff/tickets?itPriority=HIGH&scope=open` |
 | `recentlyUpdated` — "Recently Updated" | all Tickets with `updatedAt >= windowStart` (any status); `total` + first 5 | `total: 0, items: []` | `/staff/tickets?scope=recent&sort=updatedAt&direction=desc` |
-| `userCounts` — "Users" (Administrator) | `groupBy(role, isActive)` counts; all three roles always listed | `active: 0, inactive: 0` | `/admin/users?role=<ROLE>` |
+| `userCounts` — "Users" (Administrator) | `groupBy(role, isActive)` counts; all three roles always listed; the linked value is the **total** `active + inactive` | `active: 0, inactive: 0` | `/admin/users?role=<ROLE>` → `GET /api/users?role=<ROLE>`, which lists active and inactive users, so rows = total |
 
 Metrics other than `myOpenActions` and `userCounts` cover the whole shared queue, not only the caller's
 work. `byStatus` counts every status including closed ones; `byItPriority` is open Tickets only.
