@@ -225,7 +225,7 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 |---|---|
 | BR-33 | `Ticket` and `ActionTaken` carry an integer `version` starting at 1. Ticket status/owner/IT-Priority writes and Action updates must send the `version` last read; the server updates `WHERE id AND version` atomically and increments it. A mismatch is `STALE_UPDATE` with the current resource in the body. A missing or non-integer `version` is `VALIDATION_FAILED`. |
 | BR-34 | Check order for a write, matching the Lab 3 code (non-JSON content type is refused before authentication; body shape is validated before the access lookup): `415` non-JSON `Content-Type` (before authentication, L3-BR-40) → `401` unauthenticated → `403 PASSWORD_CHANGE_REQUIRED` → malformed path id `404` → request-body shape `400` (types, lengths, enums, missing `version`; nothing that needs the record) → access lookup (`404` nonexistent or no read path; `403` readable but role may not write; role-gated collections such as the dashboards answer `403` right after the gate) → record-dependent `400` (e.g. `actionAt` before the Ticket's `createdAt`) → `STALE_UPDATE` → business conflicts (`TICKET_CLOSED`, `ACTION_LOCKED`, `INVALID_ACTION_TRANSITION`, `INVALID_ASSIGNEE`, `INVALID_TRANSITION`, `OWNER_REQUIRED`, `RESOLUTION_BLOCKED`). |
-| BR-35 | Action create accepts an optional `clientRequestId` (UUID), unique per Ticket. A repeat returns the existing Action with `200`, not a second row. |
+| BR-35 | Action create accepts an optional `clientRequestId` (UUID), unique per Ticket. A repeat with an identical request returns the existing Action with `200`, not a second row; the same key with a different request is rejected (`IDEMPOTENCY_CONFLICT`). "Identical" means the same SHA-256 of the canonicalised create body (trimmed text, defaults applied), stored as `clientRequestHash`, so later edits to the Action do not turn a genuine retry into a conflict. |
 | BR-36 | After a validation, stale or network failure the UI keeps the user's unsaved input and shows the failure beside it; submit controls are disabled while a request is pending. |
 | BR-37 | L3-BR-34 (field-level errors, no partial write), L3-BR-35, L3-BR-36 (safe `INTERNAL`) and L3-BR-40 (JSON content type, `415`) apply to every new endpoint. |
 | BR-39 | **Serialization.** Every status change and every Action create/update runs inside one database transaction that first locks the Ticket row (`SELECT … FOR UPDATE` in a Prisma `$transaction`). The order is always lock → read → compare `version` → domain checks (BR-17, BR-40, Ticket status) → write (the `UPDATE … WHERE version` stays as belt-and-braces); an Action write follows the same order under the same lock, so an Action created or edited concurrently with a Resolve either lands before it (and blocks it) or waits and then sees the new status. A Ticket can therefore never become Resolved while an open Action already committed exists; an Action logged after the Resolve commits is legitimate follow-up work (BR-12) and is dealt with at closing (BR-40). The `version` check cannot cover this, because Action writes do not bump `Ticket.version` (D-15). |
@@ -265,6 +265,7 @@ breakpoints and Lab 2 §12 accessibility rules apply unchanged.
 | `attachmentNotes` | `String?` | ≤ 500 (BR-07). |
 | `lastUpdatedById` | `Int` FK → `User` | `Restrict`; equals `performedById` on create. |
 | `clientRequestId` | `String?` (UUID) | Idempotency key (BR-35). |
+| `clientRequestHash` | `String?` | SHA-256 of the canonicalised create body; set with the key (BR-35). |
 | `version` | `Int` default `1` | BR-33. |
 | `createdAt` / `updatedAt` | `DateTime` | |
 
@@ -370,7 +371,7 @@ Shapes, validation, examples and error bodies are in [`api-spec.md`](./api-spec.
 | `GET /api/tickets` · `GET /api/staff/tickets` | Lists, extended filters for drill-down | as Lab 3 (+ Admin on staff queue) | as Lab 3 |
 
 New error codes: `INVALID_ASSIGNEE`, `TICKET_CLOSED`, `ACTION_LOCKED`, `INVALID_ACTION_TRANSITION`,
-`STALE_UPDATE`, `RESOLUTION_BLOCKED` (all 409); the latter carries `reasons` with codes `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`. Every other code is a Lab 2/3 code reused unchanged.
+`STALE_UPDATE`, `RESOLUTION_BLOCKED`, `IDEMPOTENCY_CONFLICT` (all 409); the latter carries `reasons` with codes `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`. Every other code is a Lab 2/3 code reused unchanged.
 
 ## 9. Acceptance Criteria
 
@@ -396,7 +397,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-13 | Given a Ticket in `CLOSED` or `CANCELLED`, when an Action is created or edited, then it is rejected with `TICKET_CLOSED`; given a `RESOLVED` Ticket, then it is accepted. |
 | AC-14 | Given a Requester, when they list Actions on their own Ticket, then all are returned read-only; when they attempt create or update, then `403`; when they address another Requester's Ticket, then the response is identical to a nonexistent Ticket. |
 | AC-15 | Given an Administrator, when they create or update an Action, then it succeeds; when they attempt a status change, claim/assign or Internal Note, then each is still refused (L3-AC-68). |
-| AC-16 | Given the same create request sent twice with one `clientRequestId`, when processed, then exactly one Action exists and the second response returns it with `200`. |
+| AC-16 | Given the same create request sent twice with one `clientRequestId`, when processed, then exactly one Action exists and the second response returns it with `200`; given the same key with a different body, then it is rejected with `IDEMPOTENCY_CONFLICT` and nothing changes. |
 | AC-17 | Given an Action update carrying an outdated `version`, when processed, then it is rejected with `STALE_UPDATE`, the body contains the current Action, and the other user's change is not overwritten. |
 
 ### Ticket workflow
@@ -522,7 +523,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-05 | Writes on `CLOSED`/`CANCELLED` Tickets → `409 TICKET_CLOSED`; `RESOLVED` still accepts. | Closed work must not change; Resolved may still need follow-up logging before closure. |
 | D-06 | Resolution gate = Owner + ≥ 1 COMPLETED + no PLANNED/IN_PROGRESS, error `RESOLUTION_BLOCKED` with reasons. The Lab 3 matrix is kept unchanged (§5.1); only the gate is added. | Handout §4.5 requires a backend-enforced resolution rule; no reason to alter the proven matrix. |
 | D-07 | `version Int` on Ticket and ActionTaken; compare-and-set; `STALE_UPDATE` returns the current resource. | Justified in §7.6; satisfies handout §6.1. |
-| D-08 | `clientRequestId` UUID unique per Ticket for idempotent Action create; UI also disables submit while pending. | Handout §8.5 requires duplicate-click and network-retry safety; a key is the only approach safe against retries. |
+| D-08 | `clientRequestId` UUID unique per Ticket for idempotent Action create (identical retry → `200` existing row, different body → `409 IDEMPOTENCY_CONFLICT`); UI also disables submit while pending. | Handout §8.5 requires duplicate-click and network-retry safety; a key is the only approach safe against retries. |
 | D-09 | Dashboards: backend-calculated, concise (counts + lists capped at 5), Asia/Bangkok, 7-day window; endpoints `/api/dashboard/requester` and `/api/dashboard/staff`; definitions BR-20–BR-32. | Handout §4.6, §6.2. Two role-checked endpoints keep each payload minimal and ownership checks simple. |
 | D-10 | Legacy Tickets: version 1, zero Actions, **empty** status history (no fabricated rows); Recently Resolved is computed from history only, so legacy Resolved/Closed Tickets never appear in it. | Fabricated rows would invent who/when (§7.6) and an `updatedAt` fallback drifts whenever the Ticket is touched. Known limitation: a legacy Ticket resolved last week is not shown as recently resolved. |
 | D-11 | Seed extended, idempotent, with timestamps re-anchored to run time; named zero/non-zero users in §7.5. | Handout §5.3; re-anchoring keeps the 7-day metrics meaningful on demo day. |

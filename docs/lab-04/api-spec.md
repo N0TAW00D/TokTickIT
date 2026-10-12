@@ -77,9 +77,11 @@ notes, `requester-resolved`, Action create.
 ### 1.4 Idempotent create
 
 `POST …/actions-taken` accepts an optional `clientRequestId` (UUID v4 string). The pair
-`(ticketId, clientRequestId)` is unique: a repeat returns the **existing** Action with `200` and writes
-nothing, even if the repeated body differs. Without a key there is no deduplication. A malformed key is
-`400 VALIDATION_FAILED`.
+`(ticketId, clientRequestId)` is unique: a repeat with an **identical** body returns the existing Action with `200`
+and writes nothing; the same key with a **different** body is `409 IDEMPOTENCY_CONFLICT` and writes
+nothing. "Identical" is the SHA-256 of the canonicalised create body (text trimmed, defaults applied,
+server-owned fields ignored), stored with the row, so a later edit of the Action does not make a genuine
+retry conflict. Without a key there is no deduplication. A malformed key is `400 VALIDATION_FAILED`.
 
 ---
 
@@ -138,7 +140,8 @@ nothing, even if the repeated body differs. Without a key there is no deduplicat
 
 - **201:** the created Action (§2.1), `version` 1, `performedBy = lastUpdatedBy = caller`. The Ticket's
   `updatedAt` is set to now; its `version` is unchanged (BR-15).
-- **200:** the existing Action when `clientRequestId` repeats (§1.4).
+- **200:** the existing Action when `clientRequestId` repeats with an identical body (§1.4).
+- **409 `IDEMPOTENCY_CONFLICT`** — `clientRequestId` already used on this Ticket with a different body.
 - **400 `VALIDATION_FAILED`** with `fields` for every rule above; nothing is written.
 - **409 `INVALID_ASSIGNEE`** — assignee is inactive, a Requester, or nonexistent; one message for all three.
 - **409 `TICKET_CLOSED`** — Ticket is `CLOSED` or `CANCELLED` (BR-12).
@@ -419,6 +422,7 @@ Lab 3 §8 codes are reused unchanged (`UNAUTHENTICATED`, `FORBIDDEN`, `PASSWORD_
 | `ACTION_LOCKED` | 409 | Update of a `COMPLETED` or `CANCELLED` Action (BR-10). |
 | `INVALID_ACTION_TRANSITION` | 409 | Action status pair not permitted, incl. no-op (BR-09). |
 | `STALE_UPDATE` | 409 | Outdated `version` on a guarded write; carries `current` (BR-33). |
+| `IDEMPOTENCY_CONFLICT` | 409 | Action create reusing a `clientRequestId` with a different body (§1.4). |
 | `RESOLUTION_BLOCKED` | 409 | Resolved requested while the gate fails, or Closed while Actions are open; carries `reasons` (BR-17, BR-40). |
 
 `reasons[].code` values: `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`.
