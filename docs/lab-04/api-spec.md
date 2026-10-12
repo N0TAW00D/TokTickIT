@@ -45,17 +45,22 @@ each present **only** with its code and absent otherwise:
 `Ticket` and `ActionTaken` each have an integer `version` (starts at 1) returned in every read and write
 response. A guarded write must send the `version` it last read.
 
-1. Body-shape validation and the access lookup first (`version` missing or not a positive integer → `400 VALIDATION_FAILED`, field
-   `version`).
-2. The server runs `UPDATE … WHERE id = :id AND version = :version` and increments `version` in the same
-   statement, inside the transaction that also writes any `TicketStatusChange` row. Zero rows updated
-   → `409 STALE_UPDATE` with `current`.
-3. Domain checks (§3, §2) run **after** the stale check (`specification.md` BR-34) on the row that was
-   just compared.
-4. Status changes and Action create/update additionally take `SELECT … FOR UPDATE` on the Ticket row at
-   the start of their transaction, before reading the Ticket status or evaluating the resolution gate
-   (BR-39). Action writes do not bump `Ticket.version`, so the lock, not `version`, is what stops a
-   concurrent Action create from slipping past a Resolve.
+Every guarded write and every Action create runs this sequence inside one `$transaction` (BR-39):
+
+1. Before the transaction: body-shape validation (`version` missing or not a positive integer →
+   `400 VALIDATION_FAILED`, field `version`) and the access lookup (BR-34).
+2. **Lock** the Ticket row (`SELECT … FOR UPDATE`).
+3. **Read** the Ticket (and, for Action updates, the Action) under the lock.
+4. **Compare `version`**; a mismatch → `409 STALE_UPDATE` with `current`.
+5. **Domain checks** (§2, §3: Ticket status, locked Action, transitions, the resolution/closing gate,
+   assignee) on the rows just read.
+6. **Write**, including any `TicketStatusChange` row and the BR-41 cascade, with
+   `UPDATE … WHERE id = :id AND version = :version` and `version = version + 1` as belt-and-braces; zero
+   rows updated is also `409 STALE_UPDATE`.
+
+Nothing is written before the checks pass, so a rejected request leaves no partial change. Action
+writes do not bump `Ticket.version`, so the lock, not `version`, is what stops a concurrent Action
+create from slipping past a Resolve.
 
 ```json
 {
