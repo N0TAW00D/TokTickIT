@@ -101,7 +101,7 @@ From handout §4.2; none of it is built or stubbed:
 
 | ID | Requirement |
 |---|---|
-| FR-19 | Every Lab 1–3 function, screen, role rule and test keeps working; changed contracts are listed in §11 (D-12, D-13, D-18) and re-pointed, not removed. |
+| FR-19 | Every Lab 1–3 function, screen, role rule and test keeps working; changed contracts are listed in §11 (D-12, D-13, D-18, D-27) and re-pointed, not removed. |
 | FR-20 | The migration preserves all existing data, has a documented and tested recovery path, and treats legacy Tickets as valid. |
 | FR-21 | The seed is idempotent and demonstrates every status, priority, ownership state, 0/1/many Actions Taken, and zero and non-zero metrics. |
 | FR-22 | Loading, validation, success, empty, forbidden, conflict (stale), not-found and safe-failure feedback is consistent on every Lab 4 screen; forms keep entered data after recoverable failures; repeated clicks cannot duplicate writes. |
@@ -444,7 +444,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 |---|---|
 | AC-40 | Given a database holding Lab 3-shaped data, when the migration is applied, then row counts and ids of all Lab 3 tables are unchanged, every Ticket has `version = 1`, zero Actions and empty history, the CHECK constraint exists, and the recovery script restores the Lab 3 shape. |
 | AC-41 | Given the seed run twice, when row counts are compared, then they are identical, and the seeded data meets every coverage row of §7.5, including documented zero and non-zero metrics. |
-| AC-42 | Given the Lab 1, Lab 2 and Lab 3 server, client and E2E suites, when run on the Lab 4 codebase, then they pass; the only edits to them are the re-pointings listed in D-12, D-13 and D-18. |
+| AC-42 | Given the Lab 1, Lab 2 and Lab 3 server, client and E2E suites, when run on the Lab 4 codebase, then they pass; the only edits to them are the re-pointings listed in D-12, D-13, D-18 and D-27 (including seeding one `COMPLETED` Action before any transition into Resolved). |
 | AC-43 | Given every major Lab 4 screen at desktop, tablet and mobile widths, when measured, then `scrollWidth <= clientWidth` holds and the `ui-spec.md` §10 checklist passes for clipping, overlap and focus. |
 | AC-44 | Given the Dashboard, Staff Ticket Detail (Actions Taken) and Requester Ticket Detail, when scanned with axe-core and driven by keyboard only, then there are no serious or critical violations, focus is visible, and every Lab 4 flow is completable without a mouse. |
 | AC-45 | Given an unexpected server error on any Lab 4 endpoint, when returned, then the body is the generic `INTERNAL` body with no stack, SQL or path, the UI shows a safe failure with Retry, and the main journeys log no console errors and show no placeholder text or broken link. |
@@ -539,4 +539,5 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-24 | Row-lock the Ticket (BR-39) for status changes and Action writes, in addition to `version`. | `Ticket.version` guards stale clients, not a race between an Action write and the gate read; because D-15 keeps Action writes off `version`, only a shared lock closes the window without false conflicts. |
 | D-25 | Closing is refused while any Action is open (BR-40); cancelling a Ticket auto-cancels its non-terminal Actions (BR-41). | Actions can legitimately be logged on a Resolved Ticket (D-05), so closure is where leftovers must be caught; a Cancelled Ticket's pending work is moot, and leaving it `PLANNED` forever would be misleading and un-editable (BR-12). |
 | D-26 | `actionAt` means when the work was or will be done (future allowed only for PLANNED); the record's `createdAt` is shown in View mode as "Logged at". | Handout §3 says "Action Date/Time" and §8.3 says "Action create date/time"; keeping both fields satisfies each reading, and a planned Action needs a schedulable time while a performed one cannot be in the future. |
+| D-27 | **Consequence of the gate (D-06).** Resolution now needs a `COMPLETED` Action, which Lab 3 did not, so every earlier test or helper that moves a Ticket into Resolved (and then Closed) must first seed one `COMPLETED` Action on that Ticket. The stricter gate is kept; no earlier test is allowed to bypass it. The exact edits are listed in `tests.md` §4.2. | The handout's resolution rule (§4.5) is the point of Lab 4; weakening BR-17(b) to keep Lab 3 tests untouched would defeat it, and the edit is mechanical (one seeded row). |
 | D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |
