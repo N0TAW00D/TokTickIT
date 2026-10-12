@@ -26,7 +26,7 @@ The Lab 3 §1.4 precedence applies:
 
 The Administrator now has a read path to the staff queue and Ticket Detail (`specification.md` D-13).
 
-**Order of checks** (`specification.md` BR-34, same as the Lab 3 code): 401 → password-change gate 403 → malformed path id 404 → request-body shape 400 → access lookup (404 / 403 as in the table) → record-dependent 400 → `409 STALE_UPDATE` → business 409s. Role-gated collections (the dashboards) answer 403 immediately after the gate.
+**Order of checks** (`specification.md` BR-34, same as the Lab 3 code): 415 non-JSON `Content-Type` (before authentication, L3-BR-40) → 401 → password-change gate 403 → malformed path id 404 → request-body shape 400 → access lookup (404 / 403 as in the table) → record-dependent 400 → `409 STALE_UPDATE` → business 409s. Role-gated collections (the dashboards) answer 403 immediately after the gate.
 
 ### 1.2 Error envelope and status codes
 
