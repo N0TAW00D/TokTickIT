@@ -162,7 +162,7 @@ Edit button.
 | Performed by | read-only text, the signed-in user | "Recorded automatically." Not an input. |
 | Assignee | select: "Unassigned" + active IT Staff and Administrators | Edit only: unchanged if untouched. |
 | Description * | textarea, counter `x/2000` | |
-| Result * | textarea, counter `x/2000` | Helper: "For a planned action, the expected or pending outcome." |
+| Result (required when Status is Completed) | textarea, counter `x/2000` | Optional for Planned/In progress; the `*`/`aria-required` appear when Completed is selected. Helper: "What came of it. Required to complete the action." |
 | Status * | select | Create: Planned / In progress / Completed. Edit: current status plus **only** permitted next states (`specification.md` BR-09); Cancelled is confirmed in a dialog. |
 | Follow-up required? | checkbox | |
 | Follow-up note * | textarea `x/1000`, rendered only when the checkbox is on (`aria-controls`/`aria-expanded`); turning the box off hides and clears it | |

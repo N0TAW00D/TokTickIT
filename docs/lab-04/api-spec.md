@@ -102,7 +102,7 @@ nothing, even if the repeated body differs. Without a key there is no deduplicat
 }
 ```
 
-`assignee`, `followUpNote`, `attachmentNotes` are `null` when unset. `clientRequestId` is never returned.
+`result`, `assignee`, `followUpNote`, `attachmentNotes` are `null` when unset. `clientRequestId` is never returned.
 
 ### 2.2 `GET /api/tickets/:id/actions-taken`
 
@@ -120,7 +120,7 @@ nothing, even if the repeated body differs. Without a key there is no deduplicat
 | Field | Required | Rule |
 |---|---|---|
 | `description` | yes | string, 1–2000 after trim (BR-05) |
-| `result` | yes | string, 1–2000 after trim (BR-05) |
+| `result` | when `status` is `COMPLETED` | string, 1–2000 after trim; optional (absent/`null`/blank = none) for `PLANNED`/`IN_PROGRESS` (BR-05) |
 | `actionAt` | no | ISO 8601 with offset; default server now; not before the Ticket's `createdAt`; in the future only when `status` is `PLANNED` (BR-04) |
 | `status` | no | `PLANNED` (default) \| `IN_PROGRESS` \| `COMPLETED`; `CANCELLED` is not a valid initial value (BR-09) |
 | `assigneeId` | no | integer or `null`; active IT Staff/Administrator (BR-08) |
@@ -145,7 +145,7 @@ nothing, even if the repeated body differs. Without a key there is no deduplicat
 - **Auth:** IT Staff, Administrator, regardless of who created the Action or owns the Ticket (BR-11).
 - **Body:** `version` (required) plus any subset of `description`, `result`, `actionAt`, `status`,
   `assigneeId`, `followUpRequired`, `followUpNote`, `attachmentNotes`. Validation per §2.3, applied to
-  the **merged** result (e.g. `{"followUpRequired": false}` clears the stored note; supplying a note
+  the **merged** result (so a transition to `COMPLETED` needs a non-empty `result` in the request or already stored, BR-05) (e.g. `{"followUpRequired": false}` clears the stored note; supplying a note
   with `followUpRequired: false` is `400`). Server-owned fields are ignored. An empty change set (only
   `version`) is `400`.
 - **200:** the updated Action; `version` incremented; `lastUpdatedBy` = caller; `performedBy` unchanged;

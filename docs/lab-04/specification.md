@@ -154,7 +154,7 @@ writes.
 | BR-02 | The Ticket Owner coordinates the Ticket, but an Action Taken may be performed by a different IT Staff member; no Ticket Owner is required to create or edit one. |
 | BR-03 | `performedBy` is set by the backend from the authenticated user at creation and never changes; a client-supplied performer, `createdAt` or `lastUpdatedBy` is ignored. Each update records `lastUpdatedBy` and `updatedAt`. |
 | BR-04 | `actionAt` is when the work was performed or, for a `PLANNED` Action, when it is scheduled. It is user-entered (the UI defaults it to now), may not precede the Ticket's `createdAt`, and may be in the future **only while the status is `PLANNED`**; `IN_PROGRESS` and `COMPLETED` require `actionAt <=` server now (also when an update moves a future-dated Action into those states). `createdAt` is the separate, server-set time the line was logged. |
-| BR-05 | `description` and `result` are required, 1–2000 characters after trimming, stored and rendered as plain text (L3-BR-18). |
+| BR-05 | `description` is required, 1–2000 characters after trimming. `result` is optional while the Action is `PLANNED` or `IN_PROGRESS` (absent, `null` or blank = none) and, when given, is 1–2000 after trimming; it is **required** for `COMPLETED`: a create with status `COMPLETED` must carry one, and the request that moves an Action to `COMPLETED` must carry one unless a non-empty result is already stored. Both are stored and rendered as plain text (L3-BR-18). |
 | BR-06 | `followUpRequired` defaults to `false`. `followUpNote` is required (1–1000 trimmed) when it is `true` and must be absent/null when `false`; switching the flag off clears the stored note. |
 | BR-07 | `attachmentNotes` is optional free text (≤ 500) saying which existing Ticket Attachment or file to look at. It is text only; no file is uploaded or linked through it. |
 | BR-08 | `assignee` is optional. When set it must be an active IT Staff or Administrator user; an inactive user, a Requester or a nonexistent user is rejected (`INVALID_ASSIGNEE`). The check applies when the assignee is set or changed, not retroactively. |
@@ -256,7 +256,7 @@ breakpoints and Lab 2 §12 accessibility rules apply unchanged.
 | `ticketId` | `Int` FK → `Ticket` | `onDelete: Cascade`, as comments/notes. Immutable (BR-01). |
 | `actionAt` | `DateTime` | User-entered (BR-04). |
 | `description` | `String` | 1–2000 (BR-05). |
-| `result` | `String` | 1–2000 (BR-05). |
+| `result` | `String?` | 1–2000 when present; required to complete (BR-05). |
 | `status` | `ActionStatus` enum | `PLANNED` \| `IN_PROGRESS` \| `COMPLETED` \| `CANCELLED`, default `PLANNED`. |
 | `performedById` | `Int` FK → `User` | `Restrict`; set by backend, immutable (BR-03). |
 | `assigneeId` | `Int?` FK → `User` | `Restrict`; BR-08. |
@@ -383,7 +383,8 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | AC-01 | Given a permitted IT Staff user and valid data, when an Action Taken is created, then it is saved under the correct Ticket with the authenticated creator as performer and the approved assignee. |
 | AC-02 | Given an authenticated Requester, when dashboard data is retrieved, then only metrics and recent Tickets owned by that Requester are returned. |
 | AC-03 | Given a create or update request carrying a client-supplied performer, creation time or last-updated-by, when it is processed, then those values are ignored; and given a second IT Staff user editing the Action, then `performedBy` is unchanged and `lastUpdatedBy` is the editor. |
-| AC-04 | Given an empty, whitespace-only, or over-2000-character description or result, when it is submitted, then it is rejected with a field-level message and nothing is written. |
+| AC-04 | Given an empty, whitespace-only, or over-2000-character description, or a result over 2000 characters, when it is submitted, then it is rejected with a field-level message and nothing is written. |
+| AC-52 | Given a `PLANNED` or `IN_PROGRESS` Action without a result, when it is created or updated, then it is accepted; given a create as `COMPLETED`, or a transition to `COMPLETED`, with no result in the request and none stored, then it is rejected with a field-level message on `result` and stays unchanged; given a stored result, then completing without resending it succeeds. |
 | AC-05 | Given an action date earlier than the Ticket's creation, or in the future for an `IN_PROGRESS`/`COMPLETED` Action, when it is submitted, then it is rejected; given a future date on a `PLANNED` Action, a valid past date, or none, then it is accepted (none defaults to now). |
 | AC-06 | Given follow-up required with no note, or a note with follow-up not required, when submitted, then it is rejected; given follow-up switched off on update, then the stored note is cleared. |
 | AC-07 | Given attachment notes over 500 characters, when submitted, then it is rejected; given valid notes, then they are stored and rendered as plain text, and no upload route exists for Actions Taken. |
@@ -456,10 +457,10 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 
 | FR | AC | FR | AC |
 |---|---|---|---|
-| FR-01 | 01, 03, 04, 05, 06, 07, 13 | FR-13 | 23 |
+| FR-01 | 01, 03, 04, 05, 06, 07, 13, 52 | FR-13 | 23 |
 | FR-02 | 12, 37 | FR-14 | 02, 27, 32, 33, 46 |
 | FR-03 | 03, 10, 11, 17, 37 | FR-15 | 28, 29, 30, 46 |
-| FR-04 | 09, 10 | FR-16 | 31 |
+| FR-04 | 09, 10, 52 | FR-16 | 31 |
 | FR-05 | 01, 08 | FR-17 | 34 |
 | FR-06 | 14, 39 | FR-18 | 35 |
 | FR-07 | 16 | FR-19 | 42, 51 |
@@ -529,7 +530,7 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-13 | Administrator may read the IT Staff queue, open Staff Ticket Detail and use `GET /api/staff/assignable-users`, create/update Actions Taken, and use the staff dashboard; Lab 3's other limits (status, claim, notes, comments) stand. This **changes** Lab 3 matrix row "IT Staff Ticket Queue" and Lab 3's "no Administrator ticket screen" note. | Handout §4.3 (Administrator performs IT Staff behavior) and §4.6 (reuses the dashboard) need a path to the Ticket; granting only that keeps Lab 3's separation of duties. |
 | D-14 | "Recent" is calendar-based in Asia/Bangkok (today + 6 previous days) rather than a rolling 168 hours. | Handout §6.2 asks for time zone and date boundaries; calendar days are what a user means by "last 7 days" and are testable with a fixed clock. |
 | D-15 | Action create/update touches `Ticket.updatedAt` but not `Ticket.version`. | Recently Updated should reflect work; a version bump would falsely conflict a staff member who only changed status concurrently with someone logging an Action. |
-| D-16 | `result` is required even for a `PLANNED` Action (UI helper: "expected or pending outcome"). | Handout §3 lists Result without an exception; relaxing it for one status would add a conditional rule the handout does not ask for. |
+| D-16 | `result` is optional while an Action is `PLANNED`/`IN_PROGRESS` and required to be `COMPLETED` (BR-05). | A result only exists once work has an outcome; forcing text into a planned line produces filler ("TBD") that then masquerades as a recorded result, whereas requiring it at completion keeps handout §3's Result mandatory on every finished Action. |
 | D-17 | The resolution gate counts all Actions in the Ticket's lifetime, including those from before a reopen. | A per-reopen scope is a new rule with no handout basis; a reopened Ticket with new open Actions is still blocked by condition (c). |
 | D-18 | `version` is **required** on Lab 3's `PATCH /api/tickets/:id/{status,owner,it-priority}` and is returned by `GET /api/tickets/:id`. This changes the Lab 3 request contract; Lab 3 API and E2E tests that call those routes are re-pointed to send it. | Handout §6.1 requires stale detection on workflow writes; an optional version would leave the unguarded path open and defeat the guarantee. |
 | D-19 | Check order BR-34: stale check precedes domain conflicts. | A stale client's domain errors would describe state it no longer sees; returning the current resource first lets it re-evaluate. |
