@@ -56,7 +56,7 @@ Changes Lab 3 §4.2 and the `RoleLandingRedirect` behavior (`specification.md` D
   route it may not use gets the Lab 3 forbidden state with no protected request issued (L3-AC-18);
   its link now reads "Go to Dashboard" and targets `/dashboard`.
 - Lists read drill-down parameters from the URL (`scope`, `status`, `owner`, `itPriority`, `myActions`,
-  `followUp`, `sort`, `order`/`direction`) so a dashboard link and a browser Back both restore the
+  `followUp`, `sort`, `order`/`direction`; and `role` on User Management) so a dashboard link and a browser Back both restore the
   filter state; a filter shown as a chip row makes the active drill-down visible and clearable
   ("Clear filters", Lab 2 `NoResultsState` pattern).
 
@@ -75,7 +75,7 @@ strip.
 | Tickets by status | Eight compact count links, one per status, each with the `StatusBadge` text and the count. Zero shown as "0". |
 | Open by IT Priority | Three compact count links (Low/Medium/High) using the IT `PriorityBadge`. |
 | Lists (2-up) | **Urgent Tickets** and **Recently Updated**, each ≤ 5 rows: ticket number, summary, status, IT priority/owner, updated. Each row links to `/staff/tickets/:id`; header link "View all (N)". |
-| Users (Administrator only) | Three counts: role, "N active · M inactive", each linking to `/admin/users?role=…`. |
+| Users (Administrator only) | Three cards: role, **total** (active + inactive) as the value, sub-label "N active · M inactive", linking to `/admin/users?role=…`, whose list shows both active and inactive users (so rows = the value). |
 
 ### 3.2 `MetricCard`
 
@@ -102,7 +102,7 @@ View list →                ← visible affordance
 | Loading | `LoadingState` skeleton cards, `role="status"`; no stale numbers shown. |
 | Empty lists | Per list, plain text: "No urgent tickets.", "No tickets updated in the last 7 days.", "You have no open actions." |
 | All metrics zero | Page still renders every card with `0`; no global empty banner. |
-| Forbidden | Lab 3 forbidden state (a Requester never requests the staff endpoint; the Requester variant is shown instead). |
+| Forbidden | If the dashboard endpoint answers `403` (e.g. the role changed mid-session), the Lab 3 forbidden state replaces the dashboard; no numbers are shown. The role-matching variant is chosen from the session, so a normal user never triggers it. |
 | Failure | `ErrorState` `role="alert"`: "We couldn't load the dashboard." + **Retry**; no partial numbers. |
 | Refresh | Button shows busy state; previous data stays visible until the new payload arrives. |
 
@@ -129,7 +129,7 @@ Internal Notes. The Lab 3 operational panel stays (right column ≥ 992 px). For
 owner select, status control, comment composer and note composer are not rendered (they are
 IT-Staff-only, `specification.md` §4.1); IT Priority stays editable; Actions Taken is fully usable.
 
-**Header of the card:** "Actions Taken (N)" and a primary **Add action** button (hidden when the
+**Header of the card:** "Actions Taken (N)", the sub-label "Visible to the requester" (it is shared content, unlike Internal Notes), and a primary **Add action** button (hidden when the
 Ticket is `CLOSED`/`CANCELLED`, replaced by *"This ticket is closed. Actions Taken are read-only."*).
 
 **List mode, desktop/tablet (≥ 768 px) — table**, columns chosen for readability:
@@ -150,7 +150,7 @@ buttons ≥ 44 px. **Empty state:** "No actions recorded yet." with Add action.
 
 **View mode** (inline expansion beneath the row/card, or a full-width panel): all fields as read-only
 static text on `--zen-readonly-bg`: date, description, result, status, performed by, assignee,
-follow-up required, follow-up note, **attachment notes** ("Look for: …"), last updated by/at. Terminal
+follow-up required, follow-up note, **attachment notes** ("Look for: …"), **Logged at** (`createdAt`), last updated by/at. Terminal
 Actions show a note *"Completed actions are read-only."* / *"Cancelled actions are read-only."* and no
 Edit button.
 
@@ -158,7 +158,7 @@ Edit button.
 
 | Field | Control | Notes |
 |---|---|---|
-| Action date/time * | `datetime-local`, default now | Helper: "When the work was done. Can't be in the future." |
+| Action date/time * | `datetime-local`, default now | Helper: "When the work was done, or is planned for. A future time is allowed only for a planned action." |
 | Performed by | read-only text, the signed-in user | "Recorded automatically." Not an input. |
 | Assignee | select: "Unassigned" + active IT Staff and Administrators | Edit only: unchanged if untouched. |
 | Description * | textarea, counter `x/2000` | |
@@ -288,6 +288,7 @@ Executed in [`tests.md`](./tests.md) §4; every row is checked at desktop, table
 | V-14 | Dialogs usable at mobile width and restore focus on close. |
 | V-15 | Requester Ticket Detail shows Actions Taken and history read-only with no write controls and no Internal Notes. |
 | V-16 | No console errors, broken links, placeholder or lorem text, or unfinished controls on any main journey. |
+| V-17 | Private vs shared content is distinguishable at a glance and without colour: Internal Notes keep the private surface, border and "Private" badge; Actions Taken, status history and Public Comments carry no private styling, and the Actions Taken header states "Visible to the requester". |
 
 ## 11. Screenshot paths
 
@@ -301,4 +302,4 @@ Committed under `artifacts/lab-04/screenshots/`, one file per state per width, n
 | `actions-taken/` | `list`, `empty`, `create-form`, `validation`, `view`, `edit`, `stale-conflict`, `closed-readonly`, `requester-readonly` |
 | `ticket-workflow/` (extra) | `status-options`, `resolution-blocked`, `status-history` |
 
-Produced by `e2e/lab-04/screenshots.spec.ts` (`tests.md` E2E-12) against the seeded database.
+Produced by `e2e/lab-04/screenshots.spec.ts` (`tests.md` E2E-19) against the seeded database.
