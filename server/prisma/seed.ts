@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { hashPassword } from "../src/lib/password.js";
 import { LOCAL_DEV_PASSWORD } from "./seedConstants.js";
+import { seedLab4 } from "./seedLab4.js";
 
 // Reference and fixture data per docs/lab-03/specification.md §7.5 (Lab 2's
 // Categories/Related Systems/Requesters reference-data style is unchanged
@@ -148,6 +149,13 @@ interface SeedTicketSpec {
 // (that lands in #69/#71/#72) — but every IN_PROGRESS and
 // WAITING_FOR_REQUESTER row below carries an owner, in the spirit of BR-24.
 // itPriority mirrors requestedPriority (BR-22): nothing has changed it yet.
+//
+// Lab 4 (§7.5) widens this to two or more Tickets per status and reassigns
+// three Lab 3 rows so the named zero-metric users hold: Emma Fischer owns no
+// Ticket (900006 now belongs to Carlos Mendes) and David Lee's only Tickets
+// are the two resolved 10+ days ago (900004 and 900008 moved to Michael Brown
+// and Sarah Johnson). Timestamps, Actions and history for these rows live in
+// ./seedLab4.ts.
 const SEED_TICKETS: SeedTicketSpec[] = [
   {
     ticketNumber: "TKT-2026-900001",
@@ -184,7 +192,7 @@ const SEED_TICKETS: SeedTicketSpec[] = [
   },
   {
     ticketNumber: "TKT-2026-900004",
-    requesterEmail: "david.lee@example.edu",
+    requesterEmail: "michael.brown@example.edu",
     ownerEmail: "carlos.mendes@example.edu",
     categoryName: "Network",
     relatedSystemName: "VPN",
@@ -207,7 +215,7 @@ const SEED_TICKETS: SeedTicketSpec[] = [
   {
     ticketNumber: "TKT-2026-900006",
     requesterEmail: "michael.brown@example.edu",
-    ownerEmail: "emma.fischer@example.edu",
+    ownerEmail: "carlos.mendes@example.edu",
     categoryName: "Hardware",
     relatedSystemName: "Printer",
     summary: "Departmental printer jams on double-sided prints",
@@ -228,13 +236,134 @@ const SEED_TICKETS: SeedTicketSpec[] = [
   },
   {
     ticketNumber: "TKT-2026-900008",
-    requesterEmail: "david.lee@example.edu",
+    requesterEmail: "sarah.johnson@example.edu",
     ownerEmail: null,
     categoryName: "Software",
     relatedSystemName: "Email",
     summary: "Request to install an email client plugin",
     description: "Would like the calendar-sync plugin installed; withdrawing the request for now.",
     requestedPriority: "MEDIUM",
+    status: "CANCELLED",
+  },
+  {
+    ticketNumber: "TKT-2026-900009",
+    requesterEmail: "michael.brown@example.edu",
+    ownerEmail: null,
+    categoryName: "Hardware",
+    relatedSystemName: "Printer",
+    summary: "Printer shows offline for the whole department",
+    description: "The shared printer appears offline on every machine since this morning.",
+    requestedPriority: "MEDIUM",
+    status: "NEW",
+  },
+  {
+    ticketNumber: "TKT-2026-900010",
+    requesterEmail: "sarah.johnson@example.edu",
+    ownerEmail: null,
+    categoryName: "Network",
+    relatedSystemName: "VPN",
+    summary: "VPN disconnects during long video calls",
+    description: "The VPN tunnel drops after roughly 30 minutes of an active call.",
+    requestedPriority: "HIGH",
+    status: "OPEN",
+  },
+  {
+    ticketNumber: "TKT-2026-900011",
+    requesterEmail: "jennifer.anderson@example.edu",
+    ownerEmail: "priya.natarajan@example.edu",
+    categoryName: "Software",
+    relatedSystemName: "Email",
+    summary: "Shared mailbox is missing from my Outlook profile",
+    description: "I was granted access to the shared mailbox but it never shows up.",
+    requestedPriority: "MEDIUM",
+    status: "OPEN",
+  },
+  {
+    ticketNumber: "TKT-2026-900012",
+    requesterEmail: "michael.brown@example.edu",
+    ownerEmail: "carlos.mendes@example.edu",
+    categoryName: "Software",
+    relatedSystemName: "Grade Submission App",
+    summary: "Exported grade report has the wrong column order",
+    description: "The CSV export swaps the student id and name columns.",
+    requestedPriority: "MEDIUM",
+    status: "IN_PROGRESS",
+  },
+  {
+    ticketNumber: "TKT-2026-900013",
+    requesterEmail: "jennifer.anderson@example.edu",
+    ownerEmail: "priya.natarajan@example.edu",
+    categoryName: "Account and Access",
+    relatedSystemName: "LEB2 App",
+    summary: "Two-factor prompt never reaches my phone",
+    description: "The LEB2 App asks for a second factor but no code or push arrives.",
+    requestedPriority: "MEDIUM",
+    status: "WAITING_FOR_REQUESTER",
+  },
+  {
+    ticketNumber: "TKT-2026-900015",
+    requesterEmail: "david.lee@example.edu",
+    ownerEmail: "carlos.mendes@example.edu",
+    categoryName: "Hardware",
+    relatedSystemName: "Corporate Laptop",
+    summary: "Docking station does not detect the second monitor",
+    description: "The second monitor stays blank when the laptop is docked.",
+    requestedPriority: "LOW",
+    status: "RESOLVED",
+  },
+  {
+    ticketNumber: "TKT-2026-900016",
+    requesterEmail: "david.lee@example.edu",
+    ownerEmail: "priya.natarajan@example.edu",
+    categoryName: "Network",
+    relatedSystemName: "Campus Wi-Fi",
+    summary: "Cannot join the staff Wi-Fi network from the annex",
+    description: "Authentication fails every time in the annex building.",
+    requestedPriority: "MEDIUM",
+    status: "CLOSED",
+  },
+  {
+    ticketNumber: "TKT-2026-900017",
+    requesterEmail: "sarah.johnson@example.edu",
+    ownerEmail: "carlos.mendes@example.edu",
+    categoryName: "Software",
+    relatedSystemName: "Email",
+    summary: "Old mailbox quota warning after archive",
+    description: "Archived the old mail but the quota warning still appears.",
+    requestedPriority: "MEDIUM",
+    status: "CLOSED",
+  },
+  {
+    ticketNumber: "TKT-2026-900018",
+    requesterEmail: "michael.brown@example.edu",
+    ownerEmail: null,
+    categoryName: "Network",
+    relatedSystemName: "Campus Wi-Fi",
+    summary: "Guest Wi-Fi portal page loads blank",
+    description: "The captive portal page is blank in the lab on the second floor.",
+    requestedPriority: "LOW",
+    status: "OPEN",
+  },
+  {
+    ticketNumber: "TKT-2026-900019",
+    requesterEmail: "jennifer.anderson@example.edu",
+    ownerEmail: "priya.natarajan@example.edu",
+    categoryName: "Software",
+    relatedSystemName: "Grade Submission App",
+    summary: "Grades vanished after the save confirmation",
+    description: "The confirmation appeared, but the grade sheet is empty on reopening.",
+    requestedPriority: "HIGH",
+    status: "REOPENED",
+  },
+  {
+    ticketNumber: "TKT-2026-900020",
+    requesterEmail: "jennifer.anderson@example.edu",
+    ownerEmail: null,
+    categoryName: "Hardware",
+    relatedSystemName: "Corporate Laptop",
+    summary: "Request for a replacement laptop bag",
+    description: "Withdrawing this request; the bag turned up in the office.",
+    requestedPriority: "LOW",
     status: "CANCELLED",
   },
 ];
@@ -425,7 +554,12 @@ async function main() {
     userIdByEmail
   );
 
+  // Lab 4 (docs/lab-04/specification.md §7.5): Actions Taken, status history
+  // and timestamps re-anchored to now. Runs last, after Tickets and Users exist.
+  const lab4 = await seedLab4(prisma);
+
   console.log({
+    ...lab4,
     categories: categories.length,
     relatedSystems: relatedSystems.length,
     activeRequesters: activeRequesters.length,
