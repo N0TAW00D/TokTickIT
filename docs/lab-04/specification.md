@@ -164,7 +164,7 @@ writes.
 | BR-12 | Creating or editing an Action on a Ticket whose status is `CLOSED` or `CANCELLED` is rejected (`TICKET_CLOSED`). A `RESOLVED` Ticket still accepts Actions (follow-up work); the resolution gate is evaluated only at transition time. |
 | BR-13 | A Requester reads all Actions Taken and the status history of their own Tickets; for another Requester's Ticket the response is identical to a nonexistent Ticket (L3-BR-13). Internal Notes remain staff-only (L3-BR-04). |
 | BR-14 | Actions list order is `actionAt` ascending, then `id` ascending. Status history order is `changedAt` ascending, then `id` ascending. |
-| BR-15 | Creating or updating an Action sets the Ticket's `updatedAt` to now (so Recently Updated reflects work) but does not change the Ticket's `version`. |
+| BR-15 | Creating or updating an Action sets the Ticket's `updatedAt` to now (so Recently Updated reflects work) but does not change the Ticket's `version`; it does take the Ticket row lock (BR-39). |
 
 ### Ticket status and resolution
 
@@ -225,6 +225,7 @@ returned so a test can recompute them. Full response shapes are in `api-spec.md`
 | BR-35 | Action create accepts an optional `clientRequestId` (UUID), unique per Ticket. A repeat returns the existing Action with `200`, not a second row. |
 | BR-36 | After a validation, stale or network failure the UI keeps the user's unsaved input and shows the failure beside it; submit controls are disabled while a request is pending. |
 | BR-37 | L3-BR-34 (field-level errors, no partial write), L3-BR-35, L3-BR-36 (safe `INTERNAL`) and L3-BR-40 (JSON content type, `415`) apply to every new endpoint. |
+| BR-39 | **Serialization.** Every status change and every Action create/update runs inside one database transaction that first locks the Ticket row (`SELECT … FOR UPDATE` in a Prisma `$transaction`). A status change evaluates its gate (BR-17, BR-40) and writes only after the lock is held, and an Action write checks the Ticket status and writes only after the same lock, so an Action created or edited concurrently with a Resolve either lands before it (and blocks it) or waits and then sees the new status. A Ticket can therefore never become Resolved while an open Action already committed exists; an Action logged after the Resolve commits is legitimate follow-up work (BR-12) and is dealt with at closing (BR-40). The `version` check cannot cover this, because Action writes do not bump `Ticket.version` (D-15). |
 | BR-38 | Legacy Tickets (from Labs 2–3) have `version = 1`, zero Actions and empty status history after migration, and are treated as ordinary records by every dashboard rule. |
 
 ## 6. UI Specification Summary
@@ -527,4 +528,5 @@ Every criterion is observable and maps to at least one planned test in [`tests.m
 | D-20 | Follow-up consistency also enforced by a DB `CHECK`. | Justified in §7.6. |
 | D-21 | No pagination on Actions Taken or status history. | Tens of rows per Ticket; handout asks for none; avoids pagination edge cases in a sprint-limited UI. |
 | D-22 | Action-based dashboard cards count Actions but link to the Ticket list containing them, with the Ticket count in the sub-label (BR-31). | Keeps "My Open Actions" meaningful (handout Part 5: current-user Actions Taken) without adding a new Actions list screen. |
+| D-24 | Row-lock the Ticket (BR-39) for status changes and Action writes, in addition to `version`. | `Ticket.version` guards stale clients, not a race between an Action write and the gate read; because D-15 keeps Action writes off `version`, only a shared lock closes the window without false conflicts. |
 | D-23 | Drill-down is done with query parameters on the existing lists (`scope`, `myActions`, `followUp`, extended `status`), not new screens. | Handout §6.2/§8.1: dashboards link to existing detailed lists; the lists gain filters, specified in `api-spec.md` §6. |

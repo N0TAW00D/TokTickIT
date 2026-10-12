@@ -48,6 +48,10 @@ response. A guarded write must send the `version` it last read.
    → `409 STALE_UPDATE` with `current`.
 3. Domain checks (§3, §2) run **after** the stale check (`specification.md` BR-34) on the row that was
    just compared.
+4. Status changes and Action create/update additionally take `SELECT … FOR UPDATE` on the Ticket row at
+   the start of their transaction, before reading the Ticket status or evaluating the resolution gate
+   (BR-39). Action writes do not bump `Ticket.version`, so the lock, not `version`, is what stops a
+   concurrent Action create from slipping past a Resolve.
 
 ```json
 {
