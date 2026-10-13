@@ -3,6 +3,7 @@ import { authenticate, passwordChangeGate, requireRole } from '../middleware/aut
 import { parseStaffTicketQueueQuery, type OwnerFilter } from '../validation/staffTicketQueueQuery.ts';
 import type { FieldError } from '../validation/ticketFields.ts';
 import { prisma } from '../lib/prisma.ts';
+import { followUpTicketWhere, myActionsTicketWhere, openTicketWhere, recentTicketWhere } from '../services/ticketFilters.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
 // GET /api/staff/tickets — api-spec.md §4.1 (FR-19, BR-35, AC-26..AC-31,
@@ -33,18 +34,16 @@ function ownerWhere(owner: OwnerFilter, currentUserId: number): Prisma.TicketWhe
   }
 }
 
-// §1.4 case 1: a role-gated collection the caller's role may never reach is
-// `403` before any lookup. Unlike some other Lab 3 endpoints, this one is
-// IT-Staff-exclusive — `requireRole('IT_STAFF')` alone means an
-// Administrator gets the same before-any-lookup `403` a Requester does.
-staffRouter.get('/tickets', authenticate, passwordChangeGate, requireRole('IT_STAFF'), async (req: Request, res: Response) => {
+// Lab 4 api-spec.md §1.1/§6.2 (D-13): a role-gated collection. IT Staff and
+// Administrator may read the queue; a Requester gets `403` before any lookup.
+staffRouter.get('/tickets', authenticate, passwordChangeGate, requireRole('IT_STAFF', 'ADMINISTRATOR'), async (req: Request, res: Response) => {
   const parsed = parseStaffTicketQueueQuery(req.query as Record<string, unknown>);
   if (!parsed.ok) {
     invalidQuery(res, parsed.errors);
     return;
   }
 
-  const { search, status, itPriority, categoryId, owner, sort, direction, page, pageSize } = parsed.value;
+  const { search, status, itPriority, categoryId, owner, scope, myActions, followUp, sort, direction, page, pageSize } = parsed.value;
 
   try {
     const where: Prisma.TicketWhereInput = {
@@ -61,6 +60,15 @@ staffRouter.get('/tickets', authenticate, passwordChangeGate, requireRole('IT_ST
       ...(itPriority !== undefined ? { itPriority } : {}),
       ...(categoryId !== undefined ? { categoryId } : {}),
       ...(owner !== undefined ? ownerWhere(owner, req.authUser!.id) : {}),
+      // api-spec.md §6.2 drill-down filters (BR-21, BR-22, BR-25, BR-26,
+      // BR-31): the dashboard cards use these same predicates. In AND so
+      // they never overwrite a key set above.
+      AND: [
+        ...(scope === 'open' ? [openTicketWhere()] : []),
+        ...(scope === 'recent' ? [recentTicketWhere(new Date())] : []),
+        ...(myActions ? [myActionsTicketWhere(req.authUser!.id)] : []),
+        ...(followUp ? [followUpTicketWhere()] : []),
+      ],
     };
 
     // Default ordering is IT Priority descending, then created date
@@ -129,16 +137,13 @@ staffRouter.get('/tickets', authenticate, passwordChangeGate, requireRole('IT_ST
 // but GET /api/users (§6.1) is Administrator-only and gives an IT Staff
 // caller 403. This route is the minimal, IT-Staff-callable alternative.
 //
-// Auth: "IT Staff only" per §4.2 — matching the same
-// requireRole('IT_STAFF')-alone convention as /tickets above, an
-// Administrator gets the same before-any-lookup 403 a Requester does (§4.2's
-// parenthetical explains why they don't need this route — they have
-// GET /api/users — not that they're specially admitted here).
+// Auth: IT Staff and Administrator (Lab 4 api-spec.md §6.2, D-13: the Actions
+// Taken assignee picker needs it). A Requester gets 403 before any lookup.
 staffRouter.get(
   '/assignable-users',
   authenticate,
   passwordChangeGate,
-  requireRole('IT_STAFF'),
+  requireRole('IT_STAFF', 'ADMINISTRATOR'),
   async (_req: Request, res: Response) => {
     try {
       // Minimal shape by design (§4.2): no email, isActive or

@@ -13,6 +13,8 @@ import {
   uploadAttachment,
 } from '../services/uploadAttachment.ts';
 import { prisma } from '../lib/prisma.ts';
+import { openTicketWhere, recentTicketWhere, recentlyResolvedTicketWhere } from '../services/ticketFilters.ts';
+import type { TicketScope } from '../validation/ticketListQuery.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 // Imported as a value (not `import type`) here — unlike
 // staffTicketQueueQuery.ts's hand-rolled `STAFF_QUEUE_STATUSES`, PATCH
@@ -192,6 +194,17 @@ function invalidQuery(res: Response, fields: FieldError[]): void {
   });
 }
 
+function scopeWhere(scope: TicketScope, now: Date): Prisma.TicketWhereInput {
+  switch (scope) {
+    case 'open':
+      return openTicketWhere();
+    case 'recent':
+      return recentTicketWhere(now);
+    case 'recently-resolved':
+      return recentlyResolvedTicketWhere(now);
+  }
+}
+
 ticketsRouter.get('/', authenticate, passwordChangeGate, requireRole('REQUESTER'), async (req: Request, res: Response) => {
   // req.query values are always string | string[] | ParsedQs | ParsedQs[] |
   // undefined; parseTicketListQuery treats anything other than a single
@@ -203,7 +216,7 @@ ticketsRouter.get('/', authenticate, passwordChangeGate, requireRole('REQUESTER'
     return;
   }
 
-  const { search, categoryId, priority, status, sort, order, page, pageSize } = parsed.value;
+  const { search, categoryId, priority, status, scope, sort, order, page, pageSize } = parsed.value;
 
   try {
     // Ambiguity resolution (api-spec.md §3.2 vs §3.1): a categoryId that is
@@ -249,6 +262,10 @@ ticketsRouter.get('/', authenticate, passwordChangeGate, requireRole('REQUESTER'
       ...(categoryId !== undefined ? { categoryId } : {}),
       ...(priority !== undefined ? { requestedPriority: priority } : {}),
       ...(status !== undefined ? { status } : {}),
+      // api-spec.md §6.1 drill-down scope (BR-21..BR-23, BR-31): the same
+      // predicate the dashboard card counts with. Wrapped in AND so it can
+      // combine with the `status` key above instead of overwriting it.
+      ...(scope !== undefined ? { AND: [scopeWhere(scope, new Date())] } : {}),
     };
 
     // BR-18: secondary sort is always `id desc`, appended after whichever
