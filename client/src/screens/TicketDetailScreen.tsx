@@ -8,6 +8,8 @@ import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { AttachmentSection } from "../components/AttachmentSection";
+import { ActionsTakenCard } from "../components/ActionsTakenCard";
+import { StatusHistoryCard } from "../components/StatusHistoryCard";
 import { MessageThread } from "../components/MessageThread";
 import { ConfirmResolvedDialog } from "../components/ConfirmResolvedDialog";
 import {
@@ -20,6 +22,12 @@ import {
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
+import {
+  ActionsNotFoundError,
+  fetchActions,
+  type ActionTaken,
+} from "../tickets/actionsApi";
+import { fetchStatusHistory, type StatusChangeEntry } from "../tickets/workflowApi";
 import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./TicketDetailScreen.css";
 
@@ -139,6 +147,39 @@ export function TicketDetailScreen() {
   // comment posting (see routes/tickets.ts's own doc comment for the
   // judgment call this mirrors).
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+
+  // Read-only Actions Taken and Status history (ui-spec.md §5.3). Best-effort
+  // reads once the Ticket is known to be the Requester's own: a failure never
+  // breaks the rest of the screen.
+  const [actions, setActions] = useState<
+    ActionTaken[] | "loading" | "error" | "unavailable"
+  >("loading");
+  const [history, setHistory] = useState<
+    StatusChangeEntry[] | "loading" | "error"
+  >("loading");
+  const loadedTicketId = state.phase === "loaded" ? state.ticket.id : null;
+
+  function loadActions(ticketId: number) {
+    fetchActions(ticketId)
+      .then(setActions)
+      .catch((error: unknown) =>
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error"),
+      );
+  }
+
+  function loadHistory(ticketId: number) {
+    fetchStatusHistory(ticketId)
+      .then(setHistory)
+      .catch(() => setHistory("error"));
+  }
+
+  useEffect(() => {
+    if (loadedTicketId === null) return;
+    setActions("loading");
+    setHistory("loading");
+    loadActions(loadedTicketId);
+    loadHistory(loadedTicketId);
+  }, [loadedTicketId, reloadToken]);
 
   useEffect(() => {
     if (!validId) {
@@ -387,6 +428,26 @@ export function TicketDetailScreen() {
               onAttachmentAdded={handleAttachmentAdded}
             />
           </section>
+
+          {/* ui-spec.md §5.3: Actions Taken and Status history, read-only,
+              between Attachments and Public Comments. */}
+          <ActionsTakenCard
+            readOnly
+            ticketId={state.ticket.id}
+            ticketNumber={state.ticket.ticketNumber}
+            ticketStatus={state.ticket.status}
+            actions={actions}
+            onReload={() => loadActions(state.ticket.id)}
+          />
+
+          <StatusHistoryCard
+            history={history}
+            className="zen-ticket-detail__card"
+            onRetry={() => {
+              setHistory("loading");
+              loadHistory(state.ticket.id);
+            }}
+          />
 
           {/* ui-spec.md §7/§8: Public Comments thread, below Attachments. */}
           <MessageThread

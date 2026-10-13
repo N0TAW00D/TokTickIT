@@ -51,6 +51,7 @@ import {
   type TicketDetailResponse,
 } from "../tickets/api";
 import { fetchStatusHistory, type StatusChangeEntry } from "../tickets/workflowApi";
+import { StatusHistoryCard } from "../components/StatusHistoryCard";
 import { ActionsNotFoundError, fetchActions, type ActionTaken } from "../tickets/actionsApi";
 import { ActionsTakenCard } from "../components/ActionsTakenCard";
 import { saveBlob } from "../tickets/downloadFile";
@@ -1375,47 +1376,14 @@ export function StaffTicketDetailScreen() {
           />
 
 
-          <section
+          <StatusHistoryCard
+            history={history}
             className="zen-staff-detail__card"
-            aria-labelledby="staff-status-history-heading"
-          >
-            <h2 id="staff-status-history-heading">Status history</h2>
-            {history === "loading" && <p>Loading status history…</p>}
-            {history === "error" && (
-              <p>
-                Status history could not be loaded.{" "}
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setHistory("loading");
-                    loadHistory(state.ticket.id);
-                  }}
-                >
-                  Retry
-                </Button>
-              </p>
-            )}
-            {Array.isArray(history) && history.length === 0 && (
-              <p>No status changes yet.</p>
-            )}
-            {Array.isArray(history) && history.length > 0 && (
-              <ol className="zen-staff-detail__history">
-                {history.map((entry) => (
-                  <li key={entry.id}>
-                    {entry.fromStatus && (
-                      <>
-                        <StatusBadge value={entry.fromStatus} />{" "}
-                      </>
-                    )}
-                    <span aria-hidden="true">→</span>
-                    <span className="zen-staff-detail__sr-only"> to </span>{" "}
-                    <StatusBadge value={entry.toStatus} /> ·{" "}
-                    {entry.changedBy.name} · {formatDateTime(entry.changedAt)}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+            onRetry={() => {
+              setHistory("loading");
+              loadHistory(state.ticket.id);
+            }}
+          />
 
           {/* ui-spec.md §8/§10: Public Comments card, then Internal Notes
               card, in that order — "the internal card second." */}

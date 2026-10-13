@@ -20,15 +20,21 @@ export interface ActionsTakenCardProps {
   ticketId: number;
   ticketNumber: string;
   ticketStatus: string;
-  ticketCreatedAt: string;
+  /** Only the write form needs the dates, names and assignees below. */
+  ticketCreatedAt?: string;
+  /**
+   * Requester view (ui-spec.md §5.3): the same list and View mode with no
+   * Add / Edit controls, no form and no "Visible to the requester" line.
+   */
+  readOnly?: boolean;
   /** `"unavailable"`: the list answered 404, so there is nothing to show or add to. */
   actions: ActionTaken[] | "loading" | "error" | "unavailable";
-  assignableUsers: AssigneeOption[];
-  currentUserName: string;
+  assignableUsers?: AssigneeOption[];
+  currentUserName?: string;
   /** Re-read the list (after a write, a conflict or a Retry). */
   onReload: () => void;
   /** Re-read the Ticket (it was closed while a form was open). */
-  onTicketChanged: () => void;
+  onTicketChanged?: () => void;
 }
 
 function isTerminal(action: ActionTaken): boolean {
@@ -36,7 +42,13 @@ function isTerminal(action: ActionTaken): boolean {
 }
 
 /** Static, read-only detail of one Action (ui-spec.md §5.1 "View mode"). */
-function ActionDetails({ action }: { action: ActionTaken }) {
+function ActionDetails({
+  action,
+  readOnly,
+}: {
+  action: ActionTaken;
+  readOnly: boolean;
+}) {
   const rows: [string, ReactNode][] = [
     ["Action date/time", formatDateTimeWithYear(action.actionAt)],
     ["Description", action.description],
@@ -68,7 +80,7 @@ function ActionDetails({ action }: { action: ActionTaken }) {
           </div>
         ))}
       </dl>
-      {isTerminal(action) && (
+      {!readOnly && isTerminal(action) && (
         <p className="zen-actions__terminal-note">
           {action.status === "COMPLETED"
             ? "Completed actions are read-only."
@@ -107,12 +119,13 @@ export function ActionsTakenCard({
   ticketId,
   ticketNumber,
   ticketStatus,
-  ticketCreatedAt,
+  ticketCreatedAt = "",
+  readOnly = false,
   actions,
-  assignableUsers,
-  currentUserName,
+  assignableUsers = [],
+  currentUserName = "",
   onReload,
-  onTicketChanged,
+  onTicketChanged = () => {},
 }: ActionsTakenCardProps) {
   const wide = useMediaQuery("(min-width: 768px)");
   const [mode, setMode] = useState<Mode>({ kind: "none" });
@@ -180,7 +193,7 @@ export function ActionsTakenCard({
         >
           View
         </Button>
-        {!isTerminal(action) && !ticketClosed && (
+        {!readOnly && !isTerminal(action) && !ticketClosed && (
           <Button
             id={`action-edit-${action.id}`}
             variant="secondary"
@@ -204,7 +217,7 @@ export function ActionsTakenCard({
     <section
       id="actions-taken"
       tabIndex={-1}
-      className="zen-staff-detail__card zen-actions"
+      className={`${readOnly ? "zen-ticket-detail__card" : "zen-staff-detail__card"} zen-actions`}
       aria-labelledby="actions-taken-heading"
     >
       <div className="zen-actions__header">
@@ -212,9 +225,11 @@ export function ActionsTakenCard({
           <h2 id="actions-taken-heading">
             {loaded ? `Actions Taken (${actions.length})` : "Actions Taken"}
           </h2>
-          <p className="zen-actions__shared">Visible to the requester</p>
+          {!readOnly && (
+            <p className="zen-actions__shared">Visible to the requester</p>
+          )}
         </div>
-        {loaded && !ticketClosed && !formOpen && (
+        {!readOnly && loaded && !ticketClosed && !formOpen && (
           <Button
             id="actions-add"
             variant="primary"
@@ -225,7 +240,7 @@ export function ActionsTakenCard({
         )}
       </div>
 
-      {loaded && ticketClosed && (
+      {!readOnly && loaded && ticketClosed && (
         <p className="zen-actions__closed">
           This ticket is closed. Actions Taken are read-only.
         </p>
@@ -252,7 +267,7 @@ export function ActionsTakenCard({
         />
       )}
 
-      {mode.kind === "create" && (
+      {!readOnly && mode.kind === "create" && (
         <ActionTakenForm
           key="create"
           ticketId={ticketId}
@@ -266,7 +281,7 @@ export function ActionsTakenCard({
         />
       )}
 
-      {mode.kind === "edit" && editing && (
+      {!readOnly && mode.kind === "edit" && editing && (
         <ActionTakenForm
           key={`edit-${mode.id}`}
           ticketId={ticketId}
@@ -282,7 +297,13 @@ export function ActionsTakenCard({
       )}
 
       {loaded && actions.length === 0 && (
-        <EmptyState title="No actions recorded yet." />
+        <EmptyState
+          title={
+            readOnly
+              ? "No actions have been recorded yet."
+              : "No actions recorded yet."
+          }
+        />
       )}
 
       {loaded && actions.length > 0 && wide && (
@@ -337,7 +358,7 @@ export function ActionsTakenCard({
                   {viewing.has(action.id) && (
                     <tr className="zen-actions__detail-row">
                       <td colSpan={7}>
-                        <ActionDetails action={action} />
+                        <ActionDetails action={action} readOnly={readOnly} />
                       </td>
                     </tr>
                   )}
@@ -372,7 +393,9 @@ export function ActionsTakenCard({
               </div>
               {action.followUpRequired && <FollowUpTag />}
               {rowButtons(action)}
-              {viewing.has(action.id) && <ActionDetails action={action} />}
+              {viewing.has(action.id) && (
+                <ActionDetails action={action} readOnly={readOnly} />
+              )}
             </li>
           ))}
         </ul>
