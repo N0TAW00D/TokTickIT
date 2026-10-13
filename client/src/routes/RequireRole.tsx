@@ -4,6 +4,7 @@ import { RequireAuth } from "./RequireAuth";
 import { useAuth } from "../auth/AuthContext";
 import { EmptyState } from "../components/EmptyState";
 import type { Role } from "../auth/api";
+import { DASHBOARD_PATH } from "../shell/AppShell";
 
 export interface RequireRoleProps {
   /** Roles permitted to view the wrapped screen (specification.md §4.1). */
@@ -11,29 +12,21 @@ export interface RequireRoleProps {
   children: ReactNode;
 }
 
-/** Each role's own landing route and its nav label (ui-spec.md §4.2), shared with AppShell's nav below. */
-export const ROLE_LANDING: Record<Role, { path: string; label: string }> = {
-  REQUESTER: { path: "/tickets", label: "My Tickets" },
-  IT_STAFF: { path: "/staff/tickets", label: "Ticket Queue" },
-  ADMINISTRATOR: { path: "/admin/users", label: "User Management" },
-};
-
 /**
  * The forbidden state (ui-spec.md §4.3): heading, one line of explanation,
- * and a link back to the caller's own landing page. Rendered IN PLACE OF
+ * and a "Go to Dashboard" link (lab-04 D-12: every role lands on /dashboard). Rendered IN PLACE OF
  * the wrapped screen — never alongside it — so the wrapped screen's own
  * data-fetching effects never mount (AC-18: "no request to a protected
  * endpoint is issued").
  */
-function ForbiddenState({ role }: { role: Role }) {
-  const landing = ROLE_LANDING[role];
+function ForbiddenState() {
   return (
     <EmptyState
       title="You don't have access to this page"
       description="Your account's role doesn't include this destination."
       action={
-        <Link to={landing.path} className="zen-btn zen-btn--secondary">
-          Go to {landing.label}
+        <Link to={DASHBOARD_PATH} className="zen-btn zen-btn--secondary">
+          Go to Dashboard
         </Link>
       }
     />
@@ -55,7 +48,7 @@ function RoleGate({ allowedRoles, children }: RequireRoleProps) {
   }
 
   if (!allowedRoles.includes(user.role)) {
-    return <ForbiddenState role={user.role} />;
+    return <ForbiddenState />;
   }
 
   return <>{children}</>;

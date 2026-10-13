@@ -14,10 +14,17 @@ interface NavLink {
   label: string;
 }
 
-// Requester's nav destinations (ui-spec.md §4.2), also the fallback when no
-// authenticated user is known yet — see navLinksForRole's doc comment below
-// for why that fallback is Requester, not empty.
+/** The Lab 4 role landing route and first nav destination for every role (lab-04 ui-spec.md §2, D-12). */
+export const DASHBOARD_PATH = "/dashboard";
+
+const DASHBOARD_LINK: NavLink = { to: DASHBOARD_PATH, label: "Dashboard" };
+const TICKET_QUEUE_LINK: NavLink = { to: "/staff/tickets", label: "Ticket Queue" };
+
+// Requester's nav destinations (lab-04 ui-spec.md §2), also the fallback when
+// no authenticated user is known yet — see navLinksForRole's doc comment
+// below for why that fallback is Requester, not empty.
 const REQUESTER_NAV_LINKS: NavLink[] = [
+  DASHBOARD_LINK,
   { to: "/tickets", label: "My Tickets" },
   { to: "/tickets/new", label: "Create Ticket" },
 ];
@@ -30,15 +37,14 @@ const REQUESTER_NAV_LINKS: NavLink[] = [
 // independently enforced server-side (specification.md §2), and — for
 // Requester / IT Staff / Administrator — by `RequireRole` client-side once
 // each role's screens are wrapped with it.
-//
-// `/staff/tickets` and `/admin/users` deliberately do not resolve to a
-// built screen yet (#71, #73 build those) — a known, documented gap.
-// Getting the nav ITEM SET right per role is this issue's job; building the
-// screens behind IT Staff's and Administrator's links is not.
 const ROLE_NAV_LINKS: Record<Role, NavLink[]> = {
   REQUESTER: REQUESTER_NAV_LINKS,
-  IT_STAFF: [{ to: "/staff/tickets", label: "Ticket Queue" }],
-  ADMINISTRATOR: [{ to: "/admin/users", label: "User Management" }],
+  IT_STAFF: [DASHBOARD_LINK, TICKET_QUEUE_LINK],
+  ADMINISTRATOR: [
+    DASHBOARD_LINK,
+    TICKET_QUEUE_LINK,
+    { to: "/admin/users", label: "User Management" },
+  ],
 };
 
 /**
@@ -99,7 +105,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="zen-app-shell">
       <header className="zen-app-shell__header">
         <div className="zen-app-shell__header-inner">
-          <Link to="/tickets" className="zen-app-shell__wordmark">
+          <Link to={DASHBOARD_PATH} className="zen-app-shell__wordmark">
             ⌚ TokTickIT
           </Link>
 
