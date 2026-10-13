@@ -295,8 +295,12 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
         `Fixture ticket ${ASSIGNED_FIXTURE_TICKET_NUMBER} was not found via GET /api/staff/tickets.`,
       );
     }
+    // Lab 4 (D-18): guarded writes carry the Ticket's current `version`.
+    const assignedTicket: { version: number } = await (
+      await staffApi.get(`/api/tickets/${assignedTicketId}`)
+    ).json();
     const patchResponse = await staffApi.patch(`/api/tickets/${assignedTicketId}/owner`, {
-      data: { ownerId: me.id },
+      data: { ownerId: me.id, version: assignedTicket.version },
     });
     expect(patchResponse.status()).toBe(200);
     await staffApi.dispose();
@@ -666,6 +670,22 @@ test.describe("Part 7 — IT Staff Ticket Detail (EV-03)", () => {
     });
     await page.unroute("**/api/tickets/*/comments");
     await page.locator("#message-thread-public-body").fill("");
+
+    // Lab 4 (BR-17, D-06, D-27): Resolved needs an Owner (set above) and one
+    // COMPLETED Action. Seeded through the real API, as this staff session.
+    const actionApi = await playwrightRequest.newContext({
+      baseURL: SERVER_URL,
+      storageState: await page.context().storageState(),
+    });
+    const seededAction = await actionApi.post(`/api/tickets/${ticket.id}/actions-taken`, {
+      data: {
+        description: "Replaced the network cable.",
+        result: "Link restored.",
+        status: "COMPLETED",
+      },
+    });
+    expect(seededAction.status()).toBe(201);
+    await actionApi.dispose();
 
     // --- permitted status change (OPEN -> RESOLVED, no confirmation needed) --
     await expect(statusSelect).toHaveValue("OPEN");
