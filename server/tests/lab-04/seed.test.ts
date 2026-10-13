@@ -401,4 +401,70 @@ describe('Lab 4 seed', () => {
     );
   }, 120_000);
 
+  // Each kind of application activity is exercised alone (fresh seed from
+  // beforeEach), so each pristine-rule guard is proven on its own.
+  it.each(['attachment', 'public comment', 'internal note'] as const)(
+    'MIG-06c: reseeding keeps a %s added through the API on a seeded Ticket (updatedAt and content unchanged)',
+    async (kind) => {
+      const uploadsDir = mkdtempSync(path.join(os.tmpdir(), 'toktickit-seed-uploads-'));
+      const previousDir = process.env.ATTACHMENTS_DIR;
+      process.env.ATTACHMENTS_DIR = uploadsDir;
+      try {
+        const login = async (email: string) => {
+          const r = await request(testServer.server)
+            .post('/api/auth/login').set('Content-Type', 'application/json')
+            .send({ email, password: LOCAL_DEV_PASSWORD });
+          expect(r.status, `login ${email}`).toBe(200);
+          return (r.headers['set-cookie'] as unknown as string[])
+            .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))!.split(';')[0]!;
+        };
+        // TKT-2026-900015 belongs to David Lee; its seeded updatedAt is ~290 h old.
+        const ticket = await prisma.ticket.findUniqueOrThrow({
+          where: { ticketNumber: 'TKT-2026-900015' }, include: { requester: true },
+        });
+        if (kind === 'attachment') {
+          const cookie = await login(ticket.requester.email);
+          const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'binary'), Buffer.alloc(500, 0x41)]);
+          const up = await request(testServer.server)
+            .post(`/api/tickets/${ticket.id}/attachments`).set('Cookie', cookie)
+            .attach('file', pdf, { filename: 'note.pdf' });
+          expect(up.status, JSON.stringify(up.body)).toBe(201);
+        } else if (kind === 'public comment') {
+          const cookie = await login(ticket.requester.email);
+          const r = await request(testServer.server)
+            .post(`/api/tickets/${ticket.id}/comments`).set('Cookie', cookie)
+            .set('Content-Type', 'application/json').send({ body: 'Thanks, the monitor works.' });
+          expect(r.status, JSON.stringify(r.body)).toBe(201);
+        } else {
+          const cookie = await login('priya.natarajan@example.edu');
+          const r = await request(testServer.server)
+            .post(`/api/tickets/${ticket.id}/notes`).set('Cookie', cookie)
+            .set('Content-Type', 'application/json').send({ body: 'Follow up next term.' });
+          expect(r.status, JSON.stringify(r.body)).toBe(201);
+        }
+
+        const snap = async () => {
+          const tk = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+          return {
+            updatedAt: tk.updatedAt.toISOString(),
+            attachments: await prisma.attachment.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
+            comments: await prisma.publicComment.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
+            notes: await prisma.internalNote.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
+          };
+        };
+        const before = await snap();
+        const added = kind === 'attachment' ? before.attachments : kind === 'public comment' ? before.comments : before.notes;
+        expect(added).toHaveLength(1);
+
+        runSeed();
+        expect(await snap()).toEqual(before);
+      } finally {
+        if (previousDir === undefined) delete process.env.ATTACHMENTS_DIR;
+        else process.env.ATTACHMENTS_DIR = previousDir;
+        rmSync(uploadsDir, { recursive: true, force: true });
+      }
+    },
+    180_000
+  );
+
 });

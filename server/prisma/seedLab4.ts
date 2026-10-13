@@ -14,7 +14,9 @@ import { hashActionCreateBody } from "../src/services/actionRequestHash.js";
 // is pristine when it does not exist yet, or when its status and owner equal
 // the seeded values, version = 1, its history rows equal the seeded chain
 // exactly by content in order (from, to, changedBy) or are still empty, and
-// its Actions are only the seeded ones with version = 1. Only pristine
+// its Actions are only the seeded ones with version = 1, and it has no
+// Attachment and no Public Comment or Internal Note beyond the seeded ones
+// (compared by author and body). Only pristine
 // Tickets get created or re-anchored, together with their history, Actions
 // and timestamps. Any other Ticket and everything attached to it is left
 // completely untouched. History is matched by content, never by id position.
@@ -238,9 +240,16 @@ export interface SeedTicketState {
  * described in the header; a Ticket that does not exist yet counts. Call it
  * BEFORE the Lab 3 Ticket upserts run.
  */
+export interface SeededComment {
+  ticketNumber: string;
+  authorEmail: string;
+  body: string;
+}
+
 export async function findPristineSeedTickets(
   prisma: PrismaClient,
-  specs: readonly SeedTicketState[]
+  specs: readonly SeedTicketState[],
+  seededComments: { publicComments: readonly SeededComment[]; internalNotes: readonly SeededComment[] }
 ): Promise<Set<string>> {
   const users = await prisma.user.findMany({ select: { id: true, email: true } });
   const idOf = (email: string) => users.find((u) => u.email === email)?.id;
@@ -282,6 +291,22 @@ export async function findPristineSeedTickets(
     );
     const actions = await prisma.actionTaken.findMany({ where: { ticketId: t.id } });
     if (actions.some((a) => a.version !== 1 || !a.clientRequestId || !seededKeys.has(a.clientRequestId))) continue;
+
+    // Application activity the seed never creates: any Attachment (the seed
+    // has none), and any Public Comment or Internal Note that is not exactly
+    // one of the seeded ones for this Ticket (author and body).
+    if ((await prisma.attachment.count({ where: { ticketId: t.id } })) > 0) continue;
+    const isSeeded = (
+      list: readonly SeededComment[],
+      row: { authorId: number; body: string }
+    ) =>
+      list.some(
+        (c) => c.ticketNumber === spec.ticketNumber && idOf(c.authorEmail) === row.authorId && c.body === row.body
+      );
+    const comments = await prisma.publicComment.findMany({ where: { ticketId: t.id } });
+    if (comments.some((c) => !isSeeded(seededComments.publicComments, c))) continue;
+    const notes = await prisma.internalNote.findMany({ where: { ticketId: t.id } });
+    if (notes.some((n) => !isSeeded(seededComments.internalNotes, n))) continue;
 
     pristine.add(spec.ticketNumber);
   }

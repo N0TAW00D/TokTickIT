@@ -544,7 +544,10 @@ async function main() {
   // allocator entirely (fixed "900xxx" ticketNumbers, well outside the
   // sequential band real ticket creation uses), so they never collide with
   // it either.
-  const pristine = await findPristineSeedTickets(prisma, SEED_TICKETS);
+  const pristine = await findPristineSeedTickets(prisma, SEED_TICKETS, {
+    publicComments: SEED_PUBLIC_COMMENTS,
+    internalNotes: SEED_INTERNAL_NOTES,
+  });
   for (const spec of SEED_TICKETS) {
     if (!pristine.has(spec.ticketNumber)) {
       console.log(`Skipping ${spec.ticketNumber}: it has application activity since it was seeded.`);
