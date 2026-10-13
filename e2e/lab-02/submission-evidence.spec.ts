@@ -886,6 +886,7 @@ test.describe("Part 7 — My Tickets", () => {
     });
 
     await switchRequesterTo(page, requesterB);
+    await page.goto("/tickets");
     await expect(rows.first()).toBeVisible();
     for (const ticketNumber of requesterBTicketNumbers) {
       await expect(
