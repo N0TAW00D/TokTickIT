@@ -7,7 +7,7 @@ import { useTestServer } from '../setup/http-server.js';
 import type { TicketStatus } from '../../src/generated/prisma/client.js';
 import { createActionRow, createTicket, createUser, deleteUsers, loginCookie } from './helpers.js';
 
-// Issue #95 phase A: PATCH /api/tickets/:id/status and GET /api/tickets/:id
+// Issue #95 phases A and B: PATCH /api/tickets/:id/status and GET /api/tickets/:id
 // version (docs/lab-04/api-spec.md §1.3, §3.1, §3.2; specification.md BR-16..BR-19,
 // BR-33, BR-34, BR-39..BR-41). tests.md rows WF-01..WF-08, WF-13..WF-16 and the
 // status-route parts of WF-10..WF-12.
@@ -547,5 +547,193 @@ describe('WF-16: cancel cascade (BR-41)', () => {
     const res = await patchStatus(ticket.id, staffCookie, { status: 'WAITING_FOR_REQUESTER', version: 1 });
     expect(res.status).toBe(200);
     expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id, status: 'CANCELLED' } })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase B: owner and IT Priority guarded by version; status-history read.
+// ---------------------------------------------------------------------------
+
+function patchGuarded(route: 'owner' | 'it-priority', ticketId: number | string, cookie: string | null, body: unknown) {
+  const req = request(testServer.server).patch(`/api/tickets/${ticketId}/${route}`).set('Content-Type', 'application/json');
+  return (cookie === null ? req : req.set('Cookie', cookie)).send(body as object);
+}
+
+const ROUTES = [
+  ['owner', (v: unknown) => ({ ownerId: staff.id, ...(v === undefined ? {} : { version: v }) })],
+  ['it-priority', (v: unknown) => ({ itPriority: 'HIGH', ...(v === undefined ? {} : { version: v }) })],
+] as const;
+
+describe.each(ROUTES)('WF-10..12 (%s route): version guard', (route, bodyWith) => {
+  it('a current version succeeds, returns the incremented version and stores it', async () => {
+    const ticket = await owned('OPEN', null);
+    const res = await patchGuarded(route, ticket.id, staffCookie, bodyWith(1));
+    expect(res.status).toBe(200);
+    expect(res.body.version).toBe(2);
+    expect((await getTicket(ticket.id)).version).toBe(2);
+    // The next write must send the new version.
+    const again = await patchGuarded(route, ticket.id, staffCookie, bodyWith(2));
+    expect(again.status).toBe(200);
+    expect(again.body.version).toBe(3);
+  });
+
+  it('WF-10: an outdated version is 409 STALE_UPDATE with the current Ticket; nothing is written', async () => {
+    const ticket = await owned('OPEN', null);
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { version: 3 } });
+    const res = await patchGuarded(route, ticket.id, staffCookie, bodyWith(1));
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('STALE_UPDATE');
+    expect(res.body.current).toMatchObject({ id: ticket.id, version: 3, owner: null, itPriority: 'MEDIUM' });
+    expect(await getTicket(ticket.id)).toMatchObject({ version: 3, ownerId: null, itPriority: 'MEDIUM' });
+  });
+
+  it('WF-10: a stale version beats INVALID_OWNER (business conflicts come after STALE_UPDATE)', async () => {
+    if (route !== 'owner') return;
+    const ticket = await owned('OPEN', null);
+    const res = await patchGuarded(route, ticket.id, staffCookie, { ownerId: requester.id, version: 9 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('STALE_UPDATE');
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['a string', '1'],
+    ['a fraction', 1.5],
+    ['zero', 0],
+    ['negative', -1],
+  ])('WF-11: version %s is 400 VALIDATION_FAILED on field version', async (_label, v) => {
+    const ticket = await owned('OPEN', null);
+    const res = await patchGuarded(route, ticket.id, staffCookie, bodyWith(v));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('VALIDATION_FAILED');
+    expect(res.body.fields.map((f: { field: string }) => f.field)).toContain('version');
+    expect(await getTicket(ticket.id)).toMatchObject({ version: 1, ownerId: null, itPriority: 'MEDIUM' });
+  });
+
+  it('WF-11: a body error on the main field and a missing version are reported together', async () => {
+    const ticket = await owned('OPEN', null);
+    const bad = route === 'owner' ? { ownerId: 'x' } : { itPriority: 'URGENT' };
+    const res = await patchGuarded(route, ticket.id, staffCookie, bad);
+    expect(res.status).toBe(400);
+    expect(res.body.fields.map((f: { field: string }) => f.field).sort()).toEqual(
+      [route === 'owner' ? 'ownerId' : 'itPriority', 'version'].sort(),
+    );
+  });
+
+  it('WF-11: shape 400 comes before the access 404', async () => {
+    const ticket = await owned('OPEN', null);
+    const res = await patchGuarded(route, ticket.id, requester2Cookie, bodyWith(undefined));
+    expect(res.status).toBe(400);
+  });
+
+  it('WF-12: two simultaneous PATCHes with the same version: one 200, one 409 STALE_UPDATE, version +1 once', async () => {
+    const ticket = await owned('OPEN', null);
+    const [a, b] = await Promise.all([
+      patchGuarded(route, ticket.id, staffCookie, bodyWith(1)),
+      patchGuarded(route, ticket.id, staffCookie, bodyWith(1)),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    const loser = a.status === 409 ? a : b;
+    expect(loser.body.error).toBe('STALE_UPDATE');
+    expect((await getTicket(ticket.id)).version).toBe(2);
+  });
+
+  it('a Requester is still 404 and an unknown Ticket 404', async () => {
+    const ticket = await owned('OPEN', null);
+    expect((await patchGuarded(route, ticket.id, requesterCookie, bodyWith(1))).status).toBe(404);
+    expect((await patchGuarded(route, ticket.id + 100000, staffCookie, bodyWith(1))).status).toBe(404);
+  });
+});
+
+describe('it-priority route: Administrator keeps write access with version', () => {
+  it('an Administrator with the current version gets 200 and version + 1', async () => {
+    const ticket = await owned('OPEN', null);
+    const res = await patchGuarded('it-priority', ticket.id, adminCookie, { itPriority: 'LOW', version: 1 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ itPriority: 'LOW', version: 2 });
+  });
+});
+
+describe('WF-09: status history is append-only and scoped (BR-13, BR-14, BR-19)', () => {
+  const getHistory = (ticketId: number | string, cookie: string | null) => {
+    const req = request(testServer.server).get(`/api/tickets/${ticketId}/status-history`);
+    return cookie === null ? req : req.set('Cookie', cookie);
+  };
+
+  it('is [] for a Ticket that never changed status', async () => {
+    const ticket = await owned('OPEN');
+    const res = await getHistory(ticket.id, requesterCookie);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('the owning Requester, IT Staff and an Administrator read the rows in changedAt then id order with the documented shape', async () => {
+    const ticket = await owned('NEW');
+    const t = new Date('2026-10-01T08:00:00.000Z');
+    // Insert out of id order relative to changedAt, plus a tie on changedAt.
+    const late = await prisma.ticketStatusChange.create({
+      data: { ticketId: ticket.id, fromStatus: 'OPEN', toStatus: 'IN_PROGRESS', changedById: staff.id, changedAt: new Date(t.getTime() + 60_000) },
+    });
+    const first = await prisma.ticketStatusChange.create({
+      data: { ticketId: ticket.id, fromStatus: 'NEW', toStatus: 'OPEN', changedById: staff.id, changedAt: t },
+    });
+    const tie = await prisma.ticketStatusChange.create({
+      data: { ticketId: ticket.id, fromStatus: 'IN_PROGRESS', toStatus: 'WAITING_FOR_REQUESTER', changedById: staff.id, changedAt: new Date(t.getTime() + 60_000) },
+    });
+    for (const cookie of [requesterCookie, staffCookie, adminCookie]) {
+      const res = await getHistory(ticket.id, cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.map((r: { id: number }) => r.id)).toEqual([first.id, late.id, tie.id]);
+      expect(res.body[0]).toEqual({
+        id: first.id,
+        fromStatus: 'NEW',
+        toStatus: 'OPEN',
+        changedBy: { id: staff.id, name: staff.name, role: 'IT_STAFF' },
+        changedAt: t.toISOString(),
+      });
+    }
+  });
+
+  it('reflects a real status change made through the API', async () => {
+    const ticket = await owned('OPEN');
+    await patchStatus(ticket.id, staffCookie, { status: 'IN_PROGRESS', version: 1 });
+    const res = await getHistory(ticket.id, requesterCookie);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({ fromStatus: 'OPEN', toStatus: 'IN_PROGRESS', changedBy: { id: staff.id } });
+  });
+
+  it("another Requester's Ticket is 404 identical to a nonexistent one", async () => {
+    const ticket = await owned('OPEN');
+    await prisma.ticketStatusChange.create({
+      data: { ticketId: ticket.id, fromStatus: 'NEW', toStatus: 'OPEN', changedById: staff.id },
+    });
+    const other = await getHistory(ticket.id, requester2Cookie);
+    const missing = await getHistory(ticket.id + 100000, requester2Cookie);
+    expect(other.status).toBe(404);
+    expect(other.body).toEqual(missing.body);
+    expect(other.status).toBe(missing.status);
+  });
+
+  it('no session is 401; a malformed or unknown id is 404 for staff', async () => {
+    const ticket = await owned('OPEN');
+    expect((await getHistory(ticket.id, null)).status).toBe(401);
+    expect((await getHistory('abc', staffCookie)).status).toBe(404);
+    expect((await getHistory(ticket.id + 100000, staffCookie)).status).toBe(404);
+  });
+
+  it.each(['post', 'put', 'patch', 'delete'] as const)('%s on status-history is 404 for every role and writes nothing', async (method) => {
+    const ticket = await owned('OPEN');
+    const row = await prisma.ticketStatusChange.create({
+      data: { ticketId: ticket.id, fromStatus: 'NEW', toStatus: 'OPEN', changedById: staff.id },
+    });
+    for (const path of [`/api/tickets/${ticket.id}/status-history`, `/api/tickets/${ticket.id}/status-history/${row.id}`]) {
+      for (const cookie of [staffCookie, adminCookie, requesterCookie]) {
+        const res = await request(testServer.server)[method](path).set('Cookie', cookie).set('Content-Type', 'application/json').send({ toStatus: 'CLOSED' });
+        expect(res.status, `${method} ${path}`).toBe(404);
+      }
+    }
+    expect(await historyOf(ticket.id)).toHaveLength(1);
+    expect((await historyOf(ticket.id))[0]).toMatchObject({ id: row.id, toStatus: 'OPEN' });
   });
 });
