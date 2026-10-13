@@ -874,6 +874,7 @@ test.describe("Part 7 — My Tickets", () => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
 
+    await page.goto("/tickets");
     const rows = page.locator(".zen-my-tickets__table tbody tr");
     await expect(rows.first()).toBeVisible();
     await expect(
@@ -908,6 +909,7 @@ test.describe("Part 7 — My Tickets", () => {
   test("search in use, with a matching result", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();

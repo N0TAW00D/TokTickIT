@@ -228,6 +228,7 @@ async function goToPopulatedScreen(
     // here" rather than an exact row count, and confirm one of OUR fixtures
     // (by ticket number, sorted to the top by the default createdAt-desc
     // sort) is genuinely visible — never just "some row exists".
+    await page.goto("/tickets");
     const isTableLayout = viewportName !== "mobile";
     const rows = isTableLayout
       ? page.locator(".zen-my-tickets__table tbody tr")

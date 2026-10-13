@@ -141,6 +141,7 @@ test.describe("Part 5 — Login (EV-01)", () => {
 
     // --- valid login landing: name + role visible in the shell -----------
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     const userBadge = page.locator(".zen-user-badge__trigger");
     await expect(userBadge).toContainText(fixtureUser.name);
@@ -230,6 +231,7 @@ test.describe("Part 5 — Login (EV-01)", () => {
       page.getByRole("status").filter({ hasText: "Password changed." }),
     ).toBeVisible();
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await expect(page.locator(".zen-user-badge__trigger")).toContainText(fixtureUser.name);
     await page.screenshot({

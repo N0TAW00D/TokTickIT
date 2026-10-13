@@ -87,6 +87,7 @@ test.describe("E2E-01 login journey (AC-01, AC-05)", () => {
     // AC-01 / ROLE_LANDING (client/src/routes/RequireRole.tsx): a Requester
     // lands on My Tickets.
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
 
     // ui-spec.md §4.1 UserBadge: shows the authenticated user's real name
@@ -151,6 +152,7 @@ test.describe("E2E-02 first-login forced password change (AC-02, AC-09)", () => 
     // landing page; a web-first wait absorbs that delay rather than a fixed
     // sleep.
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await expect(page.locator(".zen-user-badge__trigger")).toContainText(fixtureUser.name);
   });

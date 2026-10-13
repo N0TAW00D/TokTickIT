@@ -155,6 +155,7 @@ test.describe("A-03 Requester My Tickets accessibility (AC-56)", () => {
     const requester = await createPlainLoginFixtureUser("a11y-my-tickets");
     await loginAs(page, requester.email, LOCAL_DEV_PASSWORD);
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await assertNoSeriousViolations(page, testInfo);
   });
