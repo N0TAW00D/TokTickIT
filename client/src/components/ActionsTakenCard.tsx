@@ -321,7 +321,7 @@ export function ActionsTakenCard({
               {actions.map((action) => (
                 <Fragment key={action.id}>
                   <tr>
-                    <td>{formatDateTime(action.actionAt)}</td>
+                    <td className="zen-actions__nowrap">{formatDateTime(action.actionAt)}</td>
                     <td>
                       <span
                         className="zen-actions__clamp"
@@ -345,7 +345,7 @@ export function ActionsTakenCard({
                       <ActionStatusBadge value={action.status} />
                     </td>
                     <td>{action.followUpRequired && <FollowUpTag />}</td>
-                    <td>{rowButtons(action)}</td>
+                    <td className="zen-actions__nowrap">{rowButtons(action)}</td>
                   </tr>
                   {viewing.has(action.id) && (
                     <tr className="zen-actions__detail-row">

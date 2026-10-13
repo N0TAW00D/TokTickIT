@@ -66,6 +66,16 @@
   overflow-wrap: anywhere;
 }
 
+/* The date and the row buttons keep their words whole; the long-text columns absorb the squeeze. */
+.zen-actions__table td.zen-actions__nowrap {
+  overflow-wrap: normal;
+}
+
+.zen-actions__table td.zen-actions__nowrap .zen-btn,
+.zen-actions__table td.zen-actions__nowrap {
+  white-space: nowrap;
+}
+
 .zen-actions__clamp {
   display: -webkit-box;
   -webkit-box-orient: vertical;
