@@ -597,7 +597,7 @@ describe("Public Comments thread (variant=public)", () => {
     fireEvent.click(screen.getByRole("button", { name: /post comment/i }));
 
     expect(
-      await screen.findByText("Following up with the vendor."),
+      await screen.findByText("Following up with the vendor.", { selector: "p" }),
     ).toBeInTheDocument();
 
     const postCall = fetchMock.mock.calls.find(
@@ -665,7 +665,7 @@ describe("Internal Notes thread (variant=internal)", () => {
     fireEvent.click(screen.getByRole("button", { name: /save internal note/i }));
 
     expect(
-      await screen.findByText("Vendor confirmed a firmware fix is available."),
+      await screen.findByText("Vendor confirmed a firmware fix is available.", { selector: "p" }),
     ).toBeInTheDocument();
 
     const postCall = fetchMock.mock.calls.find(

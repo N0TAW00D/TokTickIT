@@ -185,7 +185,7 @@ describe("Public Comments thread (ui-spec.md §8, variant=public)", () => {
     fireEvent.change(textarea, { target: { value: "Still broken after the restart." } });
     fireEvent.click(screen.getByRole("button", { name: /post comment/i }));
 
-    expect(await screen.findByText("Still broken after the restart.")).toBeInTheDocument();
+    expect(await screen.findByText("Still broken after the restart.", { selector: "p" })).toBeInTheDocument();
     expect(screen.queryByText(/no comments yet/i)).not.toBeInTheDocument();
     expect(textarea).toHaveValue("");
 
