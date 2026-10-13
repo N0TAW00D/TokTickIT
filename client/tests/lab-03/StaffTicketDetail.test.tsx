@@ -585,8 +585,9 @@ describe("Public Comments thread (variant=public)", () => {
     expect(
       await screen.findByRole("heading", { name: "Comments" }),
     ).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entry.
     expect(
-      screen.getByText("Checked cabling, looks fine."),
+      await screen.findByText("Checked cabling, looks fine."),
     ).toBeInTheDocument();
 
     const textarea = screen.getByLabelText(/add a comment/i);
@@ -640,8 +641,9 @@ describe("Internal Notes thread (variant=internal)", () => {
     expect(
       screen.getByText("Private — not visible to the Requester"),
     ).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entry.
     expect(
-      screen.getByText("Escalated to networking vendor."),
+      await screen.findByText("Escalated to networking vendor."),
     ).toBeInTheDocument();
 
     // MessageThread prefixes each internal entry with a 🔒 glyph

@@ -138,6 +138,8 @@ describe("Public Comments thread (ui-spec.md §8, variant=public)", () => {
 
     const heading = await screen.findByRole("heading", { name: "Comments" });
     expect(heading).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entries.
+    await screen.findByText("I restarted the laptop and it still fails.");
     expect(screen.queryByText(/private/i)).not.toBeInTheDocument();
 
     expect(screen.getByText("I restarted the laptop and it still fails.")).toBeInTheDocument();
