@@ -214,6 +214,16 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     expect(stored.version).toBe(1);
   });
 
+  it('API-04: PATCH of a future PLANNED Action to CANCELLED is 200 and keeps its actionAt', async () => {
+    const ticket = await createTicket(requester.id);
+    const actionAt = new Date(Date.now() + 3600_000);
+    const row = await createActionRow(ticket.id, staff.id, { actionAt });
+    const res = await patch(ticket.id, row.id, staffCookie, { version: 1, status: 'CANCELLED' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('CANCELLED');
+    expect(new Date(res.body.actionAt).toISOString()).toBe(actionAt.toISOString());
+  });
+
   it('API-05: follow-up rules; PATCH flag off clears the stored note', async () => {
     const ticket = await createTicket(requester.id);
     const noNote = await post(ticket.id, staffCookie, { description: 'x', followUpRequired: true });

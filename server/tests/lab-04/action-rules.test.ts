@@ -127,6 +127,13 @@ describe('UNIT-02 actionAt bounds (BR-04)', () => {
     // staying PLANNED with a future time is fine
     expect(mergeActionUpdate(future, { version: 1, description: 'edited' }, ctx).ok).toBe(true);
   });
+
+  it('UNIT-02 a future-dated PLANNED Action may move to CANCELLED, keeping its actionAt', () => {
+    const future = stored({ actionAt: new Date(FUTURE) });
+    const r = mergeActionUpdate(future, { version: 1, status: 'CANCELLED' }, ctx);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.actionAt.toISOString()).toBe(new Date(FUTURE).toISOString());
+  });
 });
 
 describe('UNIT-03 follow-up and attachment-notes (BR-06, BR-07)', () => {
