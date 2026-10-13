@@ -19,7 +19,7 @@ export interface RequireRoleProps {
  * data-fetching effects never mount (AC-18: "no request to a protected
  * endpoint is issued").
  */
-function ForbiddenState() {
+export function ForbiddenState() {
   return (
     <EmptyState
       title="You don't have access to this page"
