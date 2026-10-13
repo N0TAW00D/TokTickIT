@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -7,6 +9,7 @@ import { useTestServer } from '../setup/http-server.js';
 import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
 import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
 import { hashActionCreateBody } from '../../src/services/actionRequestHash.js';
+import { ACTIONS, originalCreateBody } from '../../prisma/seedLab4.js';
 import { runPackageBin, serverRoot } from '../../scripts/test-db.lib.js';
 
 // Seed coverage for Lab 4 (docs/lab-04/tests.md MIG-06..MIG-08;
@@ -288,25 +291,6 @@ describe('Lab 4 seed', () => {
     ).toBe(0);
   }, 120_000);
 
-  it('every seeded Action with a clientRequestId stores the hash of its canonical create body (BR-35)', async () => {
-    const rows = await prisma.actionTaken.findMany({ where: { clientRequestId: { not: null } } });
-    expect(rows.length).toBeGreaterThan(0);
-    for (const a of rows) {
-      expect(a.clientRequestHash, `Action ${a.id}`).toBe(
-        hashActionCreateBody({
-          description: a.description,
-          result: a.result,
-          actionAt: a.actionAt.toISOString(),
-          status: a.status,
-          assigneeId: a.assigneeId,
-          followUpRequired: a.followUpRequired,
-          followUpNote: a.followUpNote,
-          attachmentNotes: a.attachmentNotes,
-        })
-      );
-    }
-  }, 120_000);
-
   it('BR-15: every Ticket updatedAt is at or after its latest Action createdAt/updatedAt and latest history changedAt', async () => {
     const bad = await prisma.$queryRaw<{ ticketNumber: string }[]>`
       SELECT t."ticketNumber" FROM "Ticket" t
@@ -384,4 +368,37 @@ describe('Lab 4 seed', () => {
     const after = await t('TKT-2026-900003');
     expect(after.updatedAt.getTime()).toBeGreaterThan(Date.now() - 7 * 24 * 3_600_000);
   }, 180_000);
+
+  it('every keyed seeded Action hashes a valid original create payload, not its current row (api-spec §2.3)', async () => {
+    const rows = await prisma.actionTaken.findMany({ where: { clientRequestId: { not: null } } });
+    expect(rows.length).toBe(ACTIONS.length);
+    for (const spec of ACTIONS) {
+      const row = rows.find((r) => r.clientRequestId === spec.clientRequestId)!;
+      expect(row, spec.clientRequestId).toBeDefined();
+      const body = originalCreateBody(spec, row.actionAt, row.assigneeId);
+
+      // api-spec §2.3 / BR-04..06,09 asserted directly.
+      expect(['PLANNED', 'IN_PROGRESS', 'COMPLETED'], `${spec.clientRequestId} initial status`).toContain(body.status);
+      const result = typeof body.result === 'string' ? body.result.trim() : '';
+      if (body.status === 'COMPLETED') expect(result.length, 'COMPLETED needs a result').toBeGreaterThan(0);
+      if (body.followUpRequired) {
+        expect(String(body.followUpNote ?? '').trim().length).toBeGreaterThan(0);
+      } else {
+        expect(body.followUpNote ?? null).toBeNull();
+      }
+      if (body.status !== 'PLANNED') expect(row.actionAt.getTime(), 'future only when PLANNED').toBeLessThanOrEqual(Date.now());
+
+      expect(row.clientRequestHash, spec.clientRequestId).toBe(hashActionCreateBody(body));
+    }
+    // The cancelled Action must not hash a CANCELLED create body.
+    const cancelled = rows.find((r) => r.status === 'CANCELLED')!;
+    expect(cancelled.clientRequestHash).not.toBe(
+      hashActionCreateBody({
+        description: cancelled.description, result: cancelled.result, actionAt: cancelled.actionAt.toISOString(),
+        status: 'CANCELLED', assigneeId: cancelled.assigneeId, followUpRequired: cancelled.followUpRequired,
+        followUpNote: cancelled.followUpNote, attachmentNotes: cancelled.attachmentNotes,
+      })
+    );
+  }, 120_000);
+
 });

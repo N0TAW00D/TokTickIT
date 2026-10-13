@@ -144,13 +144,20 @@ const TICKET_HISTORY: Record<string, HistoryStep[]> = {
   "TKT-2026-900020": [{ to: "CANCELLED", hoursAgo: 96, by: PRIYA }],
 };
 
-interface ActionSpec {
+export interface ActionSpec {
   /** Fixed idempotency key (BR-35); unique per Ticket. */
   clientRequestId: string;
   ticketNumber: string;
   performedBy: string;
   assignee: string | null;
+  /** Current status of the seeded row. */
   status: ActionStatus;
+  /**
+   * Status of the ORIGINAL create request that clientRequestHash is computed
+   * from (api-spec §2.3: PLANNED, IN_PROGRESS or COMPLETED, never CANCELLED).
+   * Defaults to `status`; required when `status` is CANCELLED.
+   */
+  originalStatus?: Exclude<ActionStatus, "CANCELLED">;
   /** Hours before now; negative = in the future (PLANNED only, BR-04). */
   actionHoursAgo: number;
   description: string;
@@ -173,12 +180,12 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 //  - 900013: second follow-up; 900011: PLANNED unassigned Action (BR-25
 //    performer fallback); the rest give single-Action Tickets.
 //  - Tickets without an entry here have 0 Actions.
-const ACTIONS: ActionSpec[] = [
+export const ACTIONS: ActionSpec[] = [
   { clientRequestId: uuid(1), ticketNumber: "TKT-2026-900003", performedBy: PRIYA, assignee: null, status: "COMPLETED", actionHoursAgo: 30, description: "Reproduced the save timeout in the staging environment.", result: "Timeout reproduced with 40+ rows; batch validation query is the cause.", followUpNote: null },
   { clientRequestId: uuid(2), ticketNumber: "TKT-2026-900003", performedBy: CARLOS, assignee: null, status: "COMPLETED", actionHoursAgo: 26, description: "Reviewed the indexes on the grade table.", result: "Found a missing composite index on (course, student).", followUpNote: null },
   { clientRequestId: uuid(3), ticketNumber: "TKT-2026-900003", performedBy: OLIVIA, assignee: null, status: "COMPLETED", actionHoursAgo: 20, description: "Approved the production index change window.", result: "Change window approved for tonight.", followUpNote: null },
   { clientRequestId: uuid(4), ticketNumber: "TKT-2026-900003", performedBy: PRIYA, assignee: PRIYA, status: "IN_PROGRESS", actionHoursAgo: 5, description: "Applying the composite index to production.", result: null, followUpNote: "Confirm the timeout is gone after 24 hours of normal use." },
-  { clientRequestId: uuid(5), ticketNumber: "TKT-2026-900003", performedBy: CARLOS, assignee: null, status: "CANCELLED", actionHoursAgo: 10, description: "Scale up the database instance.", result: null, followUpNote: null },
+  { clientRequestId: uuid(5), ticketNumber: "TKT-2026-900003", performedBy: CARLOS, assignee: null, status: "CANCELLED", originalStatus: "IN_PROGRESS", actionHoursAgo: 10, description: "Scale up the database instance.", result: null, followUpNote: null },
   { clientRequestId: uuid(6), ticketNumber: "TKT-2026-900012", performedBy: CARLOS, assignee: null, status: "COMPLETED", actionHoursAgo: 18, description: "Compared the export template with the column spec.", result: "Template swaps the first two columns.", followUpNote: null },
   { clientRequestId: uuid(7), ticketNumber: "TKT-2026-900012", performedBy: CARLOS, assignee: PRIYA, status: "PLANNED", actionHoursAgo: -48, description: "Deploy the corrected export template.", result: null, followUpNote: null, attachmentNotes: "See the sample export attached to the Ticket." },
   { clientRequestId: uuid(8), ticketNumber: "TKT-2026-900013", performedBy: PRIYA, assignee: PRIYA, status: "IN_PROGRESS", actionHoursAgo: 6, description: "Re-enrolled the requester's phone for two-factor prompts.", result: null, followUpNote: "Check back with the requester once they test the new prompt." },
@@ -191,6 +198,29 @@ const ACTIONS: ActionSpec[] = [
   { clientRequestId: uuid(15), ticketNumber: "TKT-2026-900011", performedBy: PRIYA, assignee: null, status: "PLANNED", actionHoursAgo: -24, description: "Request mailbox permission refresh from the mail team.", result: null, followUpNote: null },
   { clientRequestId: uuid(16), ticketNumber: "TKT-2026-900016", performedBy: PRIYA, assignee: null, status: "COMPLETED", actionHoursAgo: 280, description: "Reissued the Wi-Fi certificate for the requester.", result: "Annex Wi-Fi authenticates with the new certificate.", followUpNote: null },
 ];
+
+/**
+ * The valid create body (api-spec §2.3) a client would have sent to create
+ * this Action, which BR-35's clientRequestHash is computed from. It is
+ * independent of the row's current status: a CANCELLED Action was created as
+ * IN_PROGRESS (or PLANNED) and cancelled afterwards.
+ */
+export function originalCreateBody(a: ActionSpec, actionAt: Date, assigneeId: number | null): Record<string, unknown> {
+  const status = a.originalStatus ?? a.status;
+  if (status === "CANCELLED") {
+    throw new Error(`Seeded Action ${a.clientRequestId} needs an originalStatus (CANCELLED is not a valid initial status).`);
+  }
+  return {
+    description: a.description,
+    result: a.result,
+    actionAt: actionAt.toISOString(),
+    status,
+    assigneeId,
+    followUpRequired: a.followUpNote !== null,
+    followUpNote: a.followUpNote,
+    attachmentNotes: a.attachmentNotes ?? null,
+  };
+}
 
 export interface Lab4SeedSummary {
   lab4ActionsTaken: number;
@@ -330,17 +360,8 @@ export async function seedLab4(
       attachmentNotes: a.attachmentNotes ?? null,
       lastUpdatedById: performedById,
       clientRequestId: a.clientRequestId,
-      // BR-35: hash of the canonical create body, as the API would store it.
-      clientRequestHash: hashActionCreateBody({
-        description: a.description,
-        result: a.result,
-        actionAt: when.toISOString(),
-        status: a.status,
-        assigneeId,
-        followUpRequired: a.followUpNote !== null,
-        followUpNote: a.followUpNote,
-        attachmentNotes: a.attachmentNotes ?? null,
-      }),
+      // BR-35: hash of the original (valid) create body, not of the current row.
+      clientRequestHash: hashActionCreateBody(originalCreateBody(a, when, assigneeId)),
     };
     const existing = await prisma.actionTaken.findUnique({
       where: { ticketId_clientRequestId: { ticketId: tId, clientRequestId: a.clientRequestId } },
