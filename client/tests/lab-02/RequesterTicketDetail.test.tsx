@@ -251,8 +251,9 @@ describe("Ticket Detail failure state", () => {
 
     await screen.findByText(TICKET.ticketNumber);
     // Ticket retry + the comments thread's own fetch, once the screen
-    // reaches "loaded" and MessageThread mounts (issue #70).
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // reaches "loaded" and MessageThread mounts (issue #70), + the read-only
+    // Actions Taken and Status history reads (lab-04 ui-spec.md §5.3).
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it("shows the same failure state on a 500 response", async () => {
