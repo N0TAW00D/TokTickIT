@@ -403,7 +403,7 @@ describe('Lab 4 seed', () => {
 
   // Each kind of application activity is exercised alone (fresh seed from
   // beforeEach), so each pristine-rule guard is proven on its own.
-  it.each(['attachment', 'public comment', 'internal note'] as const)(
+  it.each(['attachment', 'public comment', 'internal note', 'requester-resolved indication'] as const)(
     'MIG-06c: reseeding keeps a %s added through the API on a seeded Ticket (updatedAt and content unchanged)',
     async (kind) => {
       const uploadsDir = mkdtempSync(path.join(os.tmpdir(), 'toktickit-seed-uploads-'));
@@ -419,8 +419,10 @@ describe('Lab 4 seed', () => {
             .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))!.split(';')[0]!;
         };
         // TKT-2026-900015 belongs to David Lee; its seeded updatedAt is ~290 h old.
+        // The indication needs an active Ticket, so it uses 900003 instead.
         const ticket = await prisma.ticket.findUniqueOrThrow({
-          where: { ticketNumber: 'TKT-2026-900015' }, include: { requester: true },
+          where: { ticketNumber: kind === 'requester-resolved indication' ? 'TKT-2026-900003' : 'TKT-2026-900015' },
+          include: { requester: true },
         });
         if (kind === 'attachment') {
           const cookie = await login(ticket.requester.email);
@@ -435,6 +437,12 @@ describe('Lab 4 seed', () => {
             .post(`/api/tickets/${ticket.id}/comments`).set('Cookie', cookie)
             .set('Content-Type', 'application/json').send({ body: 'Thanks, the monitor works.' });
           expect(r.status, JSON.stringify(r.body)).toBe(201);
+        } else if (kind === 'requester-resolved indication') {
+          const cookie = await login(ticket.requester.email);
+          const r = await request(testServer.server)
+            .post(`/api/tickets/${ticket.id}/requester-resolved`).set('Cookie', cookie)
+            .set('Content-Type', 'application/json').send({});
+          expect(r.status, JSON.stringify(r.body)).toBe(204);
         } else {
           const cookie = await login('priya.natarajan@example.edu');
           const r = await request(testServer.server)
@@ -447,14 +455,19 @@ describe('Lab 4 seed', () => {
           const tk = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
           return {
             updatedAt: tk.updatedAt.toISOString(),
+            requesterResolvedAt: tk.requesterResolvedAt?.toISOString() ?? null,
             attachments: await prisma.attachment.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
             comments: await prisma.publicComment.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
             notes: await prisma.internalNote.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }),
           };
         };
         const before = await snap();
-        const added = kind === 'attachment' ? before.attachments : kind === 'public comment' ? before.comments : before.notes;
-        expect(added).toHaveLength(1);
+        if (kind === 'requester-resolved indication') {
+          expect(before.requesterResolvedAt).not.toBeNull();
+        } else {
+          const added = kind === 'attachment' ? before.attachments : kind === 'public comment' ? before.comments : before.notes;
+          expect(added).toHaveLength(1);
+        }
 
         runSeed();
         expect(await snap()).toEqual(before);
@@ -466,6 +479,28 @@ describe('Lab 4 seed', () => {
     },
     180_000
   );
+
+  it('MIG-06e: an extra comment or note identical to a seeded one is activity, not fixture data', async () => {
+    const seededComment = await prisma.publicComment.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    const seededNote = await prisma.internalNote.findFirstOrThrow({ orderBy: { id: 'asc' } });
+    for (const [model, row] of [['publicComment', seededComment], ['internalNote', seededNote]] as const) {
+      const { id: _id, ...copy } = row;
+      if (model === 'publicComment') await prisma.publicComment.create({ data: copy as typeof seededComment });
+      else await prisma.internalNote.create({ data: copy as typeof seededNote });
+      await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = '2000-01-01' WHERE id = ${row.ticketId}`;
+    }
+    const countFor = async () => ({
+      comments: await prisma.publicComment.count({ where: { ticketId: seededComment.ticketId } }),
+      notes: await prisma.internalNote.count({ where: { ticketId: seededNote.ticketId } }),
+    });
+    const before = await countFor();
+    runSeed();
+    expect(await countFor()).toEqual(before);
+    for (const ticketId of new Set([seededComment.ticketId, seededNote.ticketId])) {
+      const tk = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      expect(tk.updatedAt.getFullYear(), 'not re-anchored').toBe(2000);
+    }
+  }, 180_000);
 
   it('MIG-06d: a DB seeded by the earlier revision (Administrator history, no hashes) is repaired; genuine history is kept', async () => {
     // State written by `git show ef80e88:server/prisma/seedLab4.ts`: history of

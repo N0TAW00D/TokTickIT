@@ -278,6 +278,8 @@ export async function findPristineSeedTickets(
     }
     const ownerId = spec.ownerEmail ? idOf(spec.ownerEmail) : null;
     if (t.status !== spec.status || t.ownerId !== (ownerId ?? null) || t.version !== 1) continue;
+    // POST /requester-resolved sets this without touching status or version.
+    if (t.requesterResolvedAt !== null) continue;
 
     const history = await prisma.ticketStatusChange.findMany({
       where: { ticketId: t.id },
@@ -307,20 +309,31 @@ export async function findPristineSeedTickets(
     if (actions.some((a) => a.version !== 1 || !a.clientRequestId || !seededKeys.has(a.clientRequestId))) continue;
 
     // Application activity the seed never creates: any Attachment (the seed
-    // has none), and any Public Comment or Internal Note that is not exactly
-    // one of the seeded ones for this Ticket (author and body).
+    // has none), and any Public Comment or Internal Note beyond the seeded
+    // ones for this Ticket. Compared by (author, body) with multiplicity, so
+    // an extra row identical to a seeded one still counts as activity.
     if ((await prisma.attachment.count({ where: { ticketId: t.id } })) > 0) continue;
-    const isSeeded = (
+    const hasExtra = (
       list: readonly SeededComment[],
-      row: { authorId: number; body: string }
-    ) =>
-      list.some(
-        (c) => c.ticketNumber === spec.ticketNumber && idOf(c.authorEmail) === row.authorId && c.body === row.body
-      );
+      rows: readonly { authorId: number; body: string }[]
+    ) => {
+      const budget = new Map<string, number>();
+      for (const c of list) {
+        if (c.ticketNumber !== spec.ticketNumber) continue;
+        const key = `${idOf(c.authorEmail)}\u0000${c.body}`;
+        budget.set(key, (budget.get(key) ?? 0) + 1);
+      }
+      return rows.some((r) => {
+        const key = `${r.authorId}\u0000${r.body}`;
+        const left = budget.get(key) ?? 0;
+        budget.set(key, left - 1);
+        return left <= 0;
+      });
+    };
     const comments = await prisma.publicComment.findMany({ where: { ticketId: t.id } });
-    if (comments.some((c) => !isSeeded(seededComments.publicComments, c))) continue;
+    if (hasExtra(seededComments.publicComments, comments)) continue;
     const notes = await prisma.internalNote.findMany({ where: { ticketId: t.id } });
-    if (notes.some((n) => !isSeeded(seededComments.internalNotes, n))) continue;
+    if (hasExtra(seededComments.internalNotes, notes)) continue;
 
     pristine.add(spec.ticketNumber);
   }
