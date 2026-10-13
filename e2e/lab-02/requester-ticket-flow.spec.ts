@@ -93,7 +93,7 @@ async function clickSubmitTicket(page: Page): Promise<void> {
  */
 async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
   await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(page).toHaveURL(/\/tickets$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 }
 
 /**
@@ -113,7 +113,7 @@ async function loginApiContext(
   const loginContext = await browser.newContext();
   const loginPage = await loginContext.newPage();
   await loginAs(loginPage, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(loginPage).toHaveURL(/\/tickets$/);
+  await expect(loginPage).toHaveURL(/\/dashboard$/);
   const storageState = await loginContext.storageState();
   await loginContext.close();
 

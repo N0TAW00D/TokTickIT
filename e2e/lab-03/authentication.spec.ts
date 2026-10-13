@@ -86,7 +86,7 @@ test.describe("E2E-01 login journey (AC-01, AC-05)", () => {
 
     // AC-01 / ROLE_LANDING (client/src/routes/RequireRole.tsx): a Requester
     // lands on My Tickets.
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
 
     // ui-spec.md §4.1 UserBadge: shows the authenticated user's real name
@@ -150,7 +150,7 @@ test.describe("E2E-02 first-login forced password change (AC-02, AC-09)", () => 
     // own success timer (SUCCESS_REDIRECT_DELAY_MS) redirects to the role
     // landing page; a web-first wait absorbs that delay rather than a fixed
     // sleep.
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await expect(page.locator(".zen-user-badge__trigger")).toContainText(fixtureUser.name);
   });
@@ -203,7 +203,7 @@ test.describe("E2E-04 logout (AC-10)", () => {
   }) => {
     const fixtureUser = await createPlainLoginFixtureUser("logout-journey");
     await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
 
     // A real (pushed, not replaced) client-side navigation to a second
     // protected route, so the Back button below has a genuine authenticated

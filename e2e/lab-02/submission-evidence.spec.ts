@@ -530,7 +530,7 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
  */
 async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
   await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(page).toHaveURL(/\/tickets$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 }
 
 /**
