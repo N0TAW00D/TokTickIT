@@ -94,6 +94,10 @@ export interface Lab4FixtureTicket {
 
 export interface Lab4FixtureOptions {
   summary?: string;
+  /** Free-text description of the Ticket (default: the generic fixture text). */
+  description?: string;
+  /** Display name of the fixture Requester, for screenshots that must not read "E2E ... Fixture". */
+  requesterName?: string;
   status?: string;
   ownerEmail?: string | null;
   actions?: FixtureActionSpec[];
@@ -139,6 +143,13 @@ export async function createLab4FixtureTicket(
         await emailToId(options.ownerEmail === undefined ? IT_STAFF_EMAIL : options.ownerEmail),
       ],
     );
+
+    if (options.description) {
+      await client.query('UPDATE "Ticket" SET description = $2 WHERE id = $1', [base.id, options.description]);
+    }
+    if (options.requesterName) {
+      await client.query('UPDATE "User" SET name = $2 WHERE id = $1', [base.requester.id, options.requesterName]);
+    }
 
     const actionIds: number[] = [];
     for (const [index, a] of (options.actions ?? []).entries()) {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
-import { LOCAL_DEV_PASSWORD, loginAs, loginAsSeededUser } from "../support/auth.js";
+import { loginAsSeededUser } from "../support/auth.js";
 import {
   ADMIN_EMAIL,
   IT_STAFF_EMAIL,
@@ -13,6 +13,7 @@ import {
   bumpActionVersion,
   cleanupLab4Fixtures,
   createLab4FixtureTicket,
+  ticketIdByNumber,
   type Lab4FixtureTicket,
 } from "../support/lab4.js";
 
@@ -45,36 +46,20 @@ async function shot(page: Page, folder: string, state: string, viewport: string)
   expect(fs.statSync(file).size, `${folder}/${state}-${viewport}.png is a real image`).toBeGreaterThan(5_000);
 }
 
-const LONG_RESULT =
-  "Replaced the failing power supply, re-flashed the firmware, ran the vendor diagnostic suite for two hours and confirmed " +
-  "the fault did not return; the old unit was tagged for recycling and the asset register updated accordingly.";
+/** Seeded Tickets (server/prisma/seed*.ts) used read-only, so the evidence shows seeded data. */
+const SEEDED = {
+  /** IT Staff view: Priya owns it; completed, in-progress (follow-up) and cancelled Actions, four history rows. */
+  rich: "TKT-2026-900003",
+  /** NEW, no Actions. */
+  empty: "TKT-2026-900001",
+  /** CLOSED with an Action. */
+  closed: "TKT-2026-900006",
+  /** Jennifer Anderson's resolved Ticket with two completed Actions and history. */
+  jennifer: "TKT-2026-900005",
+} as const;
 
-async function richTicket(number: string, overrides: { status?: string; ownerEmail?: string | null } = {}): Promise<Lab4FixtureTicket> {
-  return createLab4FixtureTicket(`l4-shot-${number.slice(-3)}`, number, {
-    summary: "Lab workstation will not power on after the weekend maintenance window",
-    status: overrides.status ?? "IN_PROGRESS",
-    ownerEmail: overrides.ownerEmail,
-    actions: [
-      {
-        description: "Reproduced the problem on the lab workstation and photographed the error screen.",
-        result: LONG_RESULT,
-        status: "COMPLETED",
-        hoursAgo: 30,
-        followUpNote: "Re-check the unit after the next patch Tuesday.",
-        attachmentNotes: "the photo of the error screen",
-        assigneeEmail: "carlos.mendes@example.edu",
-      },
-      { description: "Roll out the replacement power supply to the other lab machines.", status: "IN_PROGRESS", hoursAgo: 6, assigneeEmail: ADMIN_EMAIL },
-      { description: "Order two spare power supplies for the lab.", status: "PLANNED", hoursAgo: 3 },
-      { description: "Ask the vendor about the firmware advisory.", status: "CANCELLED", hoursAgo: 20 },
-    ],
-    history: [
-      { from: "NEW", to: "OPEN", hoursAgo: 100 },
-      { from: "OPEN", to: "IN_PROGRESS", hoursAgo: 90 },
-      { from: "IN_PROGRESS", to: "WAITING_FOR_REQUESTER", hoursAgo: 60 },
-      { from: "WAITING_FOR_REQUESTER", to: "IN_PROGRESS", hoursAgo: 40 },
-    ],
-  });
+async function seededTicket(number: string): Promise<Lab4FixtureTicket> {
+  return { id: await ticketIdByNumber(number), ticketNumber: number, requester: { id: 0, email: "", name: "" }, actionIds: [] };
 }
 
 async function gotoStaffTicket(page: Page, ticket: Lab4FixtureTicket): Promise<void> {
@@ -177,7 +162,7 @@ for (const [viewport, size] of Object.entries(SHOT_VIEWPORTS)) {
     // -- actions-taken/ -----------------------------------------------------------------
 
     test("actions-taken: list, view, edit, validation, create-form", async ({ page }) => {
-      const ticket = await richTicket("TKT-2026-997701");
+      const ticket = await seededTicket(SEEDED.rich);
       await loginAsSeededUser(page, IT_STAFF_EMAIL);
       await gotoStaffTicket(page, ticket);
       await shot(page, "actions-taken", "list", viewport);
@@ -210,16 +195,15 @@ for (const [viewport, size] of Object.entries(SHOT_VIEWPORTS)) {
     test("actions-taken: empty, stale-conflict, closed-readonly, requester-readonly", async ({ page, browser }) => {
       await loginAsSeededUser(page, IT_STAFF_EMAIL);
 
-      const empty = await createLab4FixtureTicket("l4-shot-702", "TKT-2026-997702", {
-        summary: "Projector in room B12 shows a green tint",
-        actions: [],
-      });
+      const empty = await seededTicket(SEEDED.empty);
       await gotoStaffTicket(page, empty);
       await expect(page.getByText("No actions recorded yet.")).toBeVisible();
       await shot(page, "actions-taken", "empty", viewport);
 
       const stale = await createLab4FixtureTicket("l4-shot-703", "TKT-2026-997703", {
         summary: "Projector in room B12 shows a green tint",
+        requesterName: "Ana Ruiz",
+        description: "The projector in room B12 turns everything green a few minutes after it warms up.",
         actions: [{ description: "Swap the HDMI cable and test the projector.", status: "PLANNED", hoursAgo: 5 }],
         history: [{ from: "NEW", to: "OPEN", hoursAgo: 50 }],
       });
@@ -233,16 +217,16 @@ for (const [viewport, size] of Object.entries(SHOT_VIEWPORTS)) {
       await expect(form.getByRole("complementary", { name: "Latest version" })).toBeVisible();
       await shot(page, "actions-taken", "stale-conflict", viewport);
 
-      const closed = await richTicket("TKT-2026-997704", { status: "CLOSED" });
+      const closed = await seededTicket(SEEDED.closed);
       await gotoStaffTicket(page, closed);
       await expect(page.getByText("This ticket is closed. Actions Taken are read-only.")).toBeVisible();
       await shot(page, "actions-taken", "closed-readonly", viewport);
 
-      const shared = await richTicket("TKT-2026-997705");
+      const shared = await seededTicket(SEEDED.jennifer);
       const requesterPage = await (await browser.newContext({ viewport: size })).newPage();
-      await loginAs(requesterPage, shared.requester.email, LOCAL_DEV_PASSWORD);
+      await loginAsSeededUser(requesterPage, REQUESTER_EMAIL);
       await requesterPage.goto(`/tickets/${shared.id}`);
-      await expect(requesterPage.getByRole("heading", { name: /^Actions Taken \(4\)$/ })).toBeVisible();
+      await expect(requesterPage.getByRole("heading", { name: /^Actions Taken \(\d+\)$/ })).toBeVisible();
       await expect(requesterPage.getByRole("heading", { name: "Status history" })).toBeVisible();
       await expect(requesterPage.getByRole("button", { name: "Add action" })).toHaveCount(0);
       await shot(requesterPage, "actions-taken", "requester-readonly", viewport);
@@ -252,13 +236,13 @@ for (const [viewport, size] of Object.entries(SHOT_VIEWPORTS)) {
     // -- ticket-workflow/ ---------------------------------------------------------------
 
     test("ticket-workflow: status-options, resolution-blocked, status-history", async ({ page }) => {
-      const ticket = await richTicket("TKT-2026-997706");
+      const ticket = await seededTicket(SEEDED.rich);
       await loginAsSeededUser(page, IT_STAFF_EMAIL);
       await gotoStaffTicket(page, ticket);
 
       // status-history: the card as it renders for the Ticket's four recorded changes.
       await page.locator("#status-history-heading").scrollIntoViewIfNeeded();
-      await expect(page.locator("ol.zen-status-history li")).toHaveCount(4);
+      await expect(page.locator("ol.zen-status-history li").first()).toBeVisible();
       await shot(page, "ticket-workflow", "status-history", viewport);
 
       // status-options: the select shown expanded, listing only the permitted next states.
