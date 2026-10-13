@@ -1,0 +1,49 @@
+/* Active drill-down chip row — lab-04 ui-spec.md §2. */
+
+.zen-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--zen-space-unit) calc(var(--zen-space-unit) * 2);
+  list-style: none;
+  margin: 0 0 var(--zen-space-field-gap);
+  padding: 0;
+}
+
+.zen-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--zen-space-unit);
+  padding: 2px 4px 2px 12px;
+  background: var(--zen-pale);
+  border: 1px solid var(--zen-border-strong);
+  border-radius: var(--zen-radius-badge);
+  color: var(--zen-text);
+  font-family: var(--zen-font-family);
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--zen-text);
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zen-chip__remove:hover:not(:disabled) {
+  background: var(--zen-surface);
+}
+
+.zen-chip__remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

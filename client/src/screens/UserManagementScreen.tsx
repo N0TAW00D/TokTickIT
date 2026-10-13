@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
 import { SelectField, type SelectOption } from "../components/SelectField";
@@ -178,7 +179,13 @@ export function UserManagementScreen() {
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [role, setRole] = useState("");
+  // The dashboard Users strip links here with `?role=` (lab-04 api-spec.md
+  // §5); an unknown value is ignored rather than sent to the API.
+  const [searchParams] = useSearchParams();
+  const [role, setRole] = useState(() => {
+    const fromUrl = searchParams.get("role");
+    return fromUrl === "REQUESTER" || fromUrl === "IT_STAFF" || fromUrl === "ADMINISTRATOR" ? fromUrl : "";
+  });
 
   const [mode, setMode] = useState<DialogMode>({ kind: "none" });
 

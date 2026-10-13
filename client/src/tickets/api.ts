@@ -162,7 +162,10 @@ export interface FetchMyTicketsParams {
   search?: string;
   categoryId?: number;
   priority?: RequestedPriority;
+  /** Any of the eight ticket statuses (lab-04 api-spec.md §6.1). */
   status?: string;
+  /** Dashboard drill-down scope (lab-04 api-spec.md §6.1). */
+  scope?: "open" | "recent" | "recently-resolved";
   sort?: TicketSortField;
   order?: SortOrder;
   page?: number;
@@ -190,6 +193,7 @@ export async function fetchMyTickets(
   }
   if (params.priority !== undefined) query.set("priority", params.priority);
   if (params.status !== undefined) query.set("status", params.status);
+  if (params.scope !== undefined) query.set("scope", params.scope);
   if (params.sort !== undefined) query.set("sort", params.sort);
   if (params.order !== undefined) query.set("order", params.order);
   if (params.page !== undefined) query.set("page", String(params.page));

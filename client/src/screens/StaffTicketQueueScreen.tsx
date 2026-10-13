@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
 import { SelectField, type SelectOption } from "../components/SelectField";
@@ -8,11 +8,18 @@ import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { NoResultsState } from "../components/NoResultsState";
 import { Pagination, type PageSizeValue } from "../components/Pagination";
+import { DrillDownChips, type DrillDownChip } from "../components/DrillDownChips";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { OwnerCell } from "../components/OwnerCell";
 import { fetchCategories, type ReferenceOption } from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
+import {
+  SCOPE_LABEL,
+  parseStaffQuery,
+  serializeStaffQuery,
+  type StaffScope,
+} from "../lists/drillDown";
 import { useAuth } from "../auth/AuthContext";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
@@ -478,14 +485,26 @@ export function StaffTicketQueueScreen() {
   const [categories, setCategories] = useState<ReferenceOption[]>([]);
   const [assignableStaff, setAssignableStaff] = useState<AssignableUser[]>([]);
 
+  // Drill-down parameters come from the URL (lab-04 ui-spec.md §2): read
+  // once into the initial state so the first request already carries them,
+  // then kept in step both ways (see the two effects below).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialQuery] = useState(() => parseStaffQuery(searchParams));
+
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [itPriority, setItPriority] = useState("");
+  const [status, setStatus] = useState<string>(initialQuery.status);
+  const [itPriority, setItPriority] = useState<string>(initialQuery.itPriority);
   const [categoryId, setCategoryId] = useState("");
-  const [owner, setOwner] = useState("");
-  const [sort, setSort] = useState<StaffSortField>(DEFAULT_SORT);
-  const [direction, setDirection] = useState<StaffSortDirection>(DEFAULT_DIRECTION);
+  const [owner, setOwner] = useState(initialQuery.owner);
+  const [scope, setScope] = useState<StaffScope | "">(initialQuery.scope);
+  const [myActions, setMyActions] = useState(initialQuery.myActions);
+  const [followUp, setFollowUp] = useState(initialQuery.followUp);
+  const [sort, setSort] = useState<StaffSortField>(initialQuery.sort || DEFAULT_SORT);
+  const [direction, setDirection] = useState<StaffSortDirection>(
+    initialQuery.direction ||
+      (initialQuery.sort ? HEADER_DEFAULT_DIRECTION[initialQuery.sort] : DEFAULT_DIRECTION),
+  );
   const [page, setPage] = useState(DEFAULT_PAGE);
   const [pageSize, setPageSize] = useState<PageSizeValue>(DEFAULT_PAGE_SIZE);
 
@@ -497,6 +516,9 @@ export function StaffTicketQueueScreen() {
     itPriority === "" &&
     categoryId === "" &&
     owner === "" &&
+    scope === "" &&
+    !myActions &&
+    !followUp &&
     sort === DEFAULT_SORT &&
     direction === DEFAULT_DIRECTION;
 
@@ -505,7 +527,10 @@ export function StaffTicketQueueScreen() {
     status !== "" ||
     itPriority !== "" ||
     categoryId !== "" ||
-    owner !== "";
+    owner !== "" ||
+    scope !== "" ||
+    myActions ||
+    followUp;
 
   // Reference data for the Category filter (`GET /api/categories`, not
   // staff-scoped) — loaded once, same as My Tickets. A failure here simply
@@ -555,6 +580,9 @@ export function StaffTicketQueueScreen() {
       itPriority: itPriority ? (itPriority as ItPriority) : undefined,
       categoryId: categoryId ? Number(categoryId) : undefined,
       owner: resolveOwnerParam(),
+      scope: scope || undefined,
+      myActions: myActions ? true : undefined,
+      followUp: followUp ? true : undefined,
       sort,
       direction,
       page,
@@ -577,11 +605,48 @@ export function StaffTicketQueueScreen() {
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, status, itPriority, categoryId, owner, sort, direction, page, pageSize]);
+  }, [debouncedSearch, status, itPriority, categoryId, owner, scope, myActions, followUp, sort, direction, page, pageSize]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // URL -> state: a navigation to a different drill-down on this same screen
+  // (a dashboard link, browser Back) re-applies it. `appliedKeyRef` holds the
+  // last query string this screen wrote or read, so its own URL writes below
+  // are not mistaken for outside navigation.
+  const urlKey = searchParams.toString();
+  const appliedKeyRef = useRef(urlKey);
+  useEffect(() => {
+    if (urlKey === appliedKeyRef.current) return;
+    appliedKeyRef.current = urlKey;
+    const next = parseStaffQuery(new URLSearchParams(urlKey));
+    setScope(next.scope);
+    setStatus(next.status);
+    setOwner(next.owner);
+    setItPriority(next.itPriority);
+    setMyActions(next.myActions);
+    setFollowUp(next.followUp);
+    setSort(next.sort || DEFAULT_SORT);
+    setDirection(next.direction || (next.sort ? HEADER_DEFAULT_DIRECTION[next.sort] : DEFAULT_DIRECTION));
+    setPage(DEFAULT_PAGE);
+  }, [urlKey]);
+
+  // state -> URL (replace, so filtering never piles up history entries):
+  // reload and Back restore what the user sees.
+  useEffect(() => {
+    const next = serializeStaffQuery(
+      { scope, status: status as StaffQueueStatus | "", owner, itPriority: itPriority as ItPriority | "", myActions, followUp },
+      {
+        value: sort,
+        direction,
+        isDefault: sort === DEFAULT_SORT && direction === DEFAULT_DIRECTION,
+      },
+    );
+    if (next === appliedKeyRef.current) return;
+    appliedKeyRef.current = next;
+    setSearchParams(new URLSearchParams(next), { replace: true });
+  }, [scope, status, owner, itPriority, myActions, followUp, sort, direction, setSearchParams]);
 
   function handleToggleSort(field: StaffSortField) {
     if (sort === field) {
@@ -637,9 +702,44 @@ export function StaffTicketQueueScreen() {
     setItPriority("");
     setCategoryId("");
     setOwner("");
+    setScope("");
+    setMyActions(false);
+    setFollowUp(false);
     setSort(DEFAULT_SORT);
     setDirection(DEFAULT_DIRECTION);
     setPage(DEFAULT_PAGE);
+  }
+
+  const drillDownChips: DrillDownChip[] = [];
+  if (scope) {
+    drillDownChips.push({
+      key: "scope",
+      label: SCOPE_LABEL[scope],
+      onRemove: () => {
+        setScope("");
+        setPage(DEFAULT_PAGE);
+      },
+    });
+  }
+  if (myActions) {
+    drillDownChips.push({
+      key: "myActions",
+      label: "My open actions",
+      onRemove: () => {
+        setMyActions(false);
+        setPage(DEFAULT_PAGE);
+      },
+    });
+  }
+  if (followUp) {
+    drillDownChips.push({
+      key: "followUp",
+      label: "Follow-ups required",
+      onRemove: () => {
+        setFollowUp(false);
+        setPage(DEFAULT_PAGE);
+      },
+    });
   }
 
   const categoryOptions = useMemo<SelectOption[]>(
@@ -699,6 +799,8 @@ export function StaffTicketQueueScreen() {
           )}
         </div>
       </div>
+
+      <DrillDownChips chips={drillDownChips} disabled={isLoading} />
 
       {!hideControls && (
         <div className="zen-staff-queue__controls">
