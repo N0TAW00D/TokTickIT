@@ -171,8 +171,8 @@ function validate(
     errors.actionAt = "Enter the date and time of the action.";
   } else if (new Date(iso).getTime() < new Date(ticketCreatedAt).getTime()) {
     errors.actionAt = "The action can't be earlier than the ticket was created.";
-  } else if (values.status !== "PLANNED" && new Date(iso).getTime() > Date.now()) {
-    errors.actionAt = "A future time is allowed only for a planned action.";
+  } else if (values.status !== "PLANNED" && values.status !== "CANCELLED" && new Date(iso).getTime() > Date.now()) {
+    errors.actionAt = "A future time is allowed only for a planned or cancelled action.";
   }
 
   const description = values.description.trim();
@@ -594,7 +594,7 @@ export function ActionTakenForm({
             label="Action date/time"
             required
             error={errors.actionAt}
-            helperText="When the work was done, or is planned for. A future time is allowed only for a planned action."
+            helperText="When the work was done, or is planned for. A future time is allowed only for a planned or cancelled action."
           >
             <TextInput
               type="datetime-local"
