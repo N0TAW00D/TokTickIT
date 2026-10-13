@@ -53,7 +53,8 @@ npm run db:seed      # loads reference data, Users and example Tickets (idempote
 `db:migrate` and `db:seed` both target the database in `server/.env` (the dev database,
 `localdb` by default). Re-running `db:seed` never creates duplicate rows — it upserts every
 row by its natural key (email for Users, ticketNumber for Tickets — see
-`server/prisma/seed.ts`).
+`server/prisma/seed.ts`). A seeded Ticket that has gained application activity (a status
+change, Action, attachment, comment, note or requester-resolved indication) is left as it is.
 
 #### Seeded accounts (local development only)
 
