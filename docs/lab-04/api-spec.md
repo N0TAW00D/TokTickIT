@@ -142,7 +142,7 @@ edit of the Action does not make a genuine retry conflict. Canonicalisation:
 |---|---|---|
 | `description` | yes | string, 1–2000 after trim (BR-05) |
 | `result` | when `status` is `COMPLETED` | string, 1–2000 after trim; optional (absent/`null`/blank = none) for `PLANNED`/`IN_PROGRESS` (BR-05) |
-| `actionAt` | no | ISO 8601 with offset; default server now; not before the Ticket's `createdAt`; in the future only when `status` is `PLANNED` (BR-04) |
+| `actionAt` | no | ISO 8601 with offset; default server now; not before the Ticket's `createdAt`; in the future only when `status` is `PLANNED` (BR-04; an update may also keep a future time when cancelling) |
 | `status` | no | `PLANNED` (default) \| `IN_PROGRESS` \| `COMPLETED`; `CANCELLED` is not a valid initial value (BR-09) |
 | `assigneeId` | no | integer or `null`; active IT Staff/Administrator (BR-08) |
 | `followUpRequired` | no | boolean, default `false` |
