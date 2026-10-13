@@ -8,6 +8,7 @@ import {
   ZERO_REQUESTER_EMAIL,
   ZERO_STAFF_EMAIL,
   bumpActionVersion,
+  cleanupLab4Fixtures,
   createLab4FixtureTicket,
   expectNoHorizontalOverflow,
   expectNothingOutsideViewport,
@@ -18,7 +19,7 @@ import { LOCAL_DEV_PASSWORD, loginAs } from "../support/auth.js";
 // Lab 4 responsive rows R-01..R-05 (docs/lab-04/tests.md §2, ui-spec.md §8,
 // checklist V-11, V-12, V-14). Real client + real server + `toktickit_e2e`;
 // read-only seeded rows for the dashboards, own fixture Tickets (numbers
-// TKT-2026-9911xx) for anything that is edited.
+// TKT-2026-9971xx) for anything that is edited.
 
 /** tests.md §1.3: 320 px for overflow, the three named devices, and the two breakpoints. */
 const WIDTHS = [
@@ -152,6 +153,8 @@ let closeDialog: Lab4FixtureTicket;
 let staleTicket: Lab4FixtureTicket;
 let blockedTicket: Lab4FixtureTicket;
 
+test.afterAll(cleanupLab4Fixtures);
+
 test.beforeAll(async () => {
   const longActions = [
     {
@@ -164,7 +167,7 @@ test.beforeAll(async () => {
     { description: "Planned a driver rollout for next week.", status: "PLANNED" as const, hoursAgo: -24, assigneeEmail: ADMIN_EMAIL },
     { description: "Applying the fix.", status: "IN_PROGRESS" as const, hoursAgo: 3 },
   ];
-  detail = await createLab4FixtureTicket("l4-resp-detail", "TKT-2026-991100", {
+  detail = await createLab4FixtureTicket("l4-resp-detail", "TKT-2026-997100", {
     summary: `Responsive fixture ${LONG_UNBROKEN}`,
     actions: longActions,
     history: [
@@ -172,7 +175,7 @@ test.beforeAll(async () => {
       { from: "OPEN", to: "IN_PROGRESS", hoursAgo: 90 },
     ],
   });
-  requesterDetail = await createLab4FixtureTicket("l4-resp-requester", "TKT-2026-991101", {
+  requesterDetail = await createLab4FixtureTicket("l4-resp-requester", "TKT-2026-997101", {
     summary: `Requester responsive fixture ${LONG_UNBROKEN}`,
     actions: longActions,
     history: [
@@ -180,18 +183,18 @@ test.beforeAll(async () => {
       { from: "OPEN", to: "IN_PROGRESS", hoursAgo: 90 },
     ],
   });
-  cancelDialog = await createLab4FixtureTicket("l4-resp-cancel", "TKT-2026-991102", {
+  cancelDialog = await createLab4FixtureTicket("l4-resp-cancel", "TKT-2026-997102", {
     actions: [{ description: "Order a replacement dock.", status: "PLANNED", hoursAgo: 6 }],
   });
-  closeDialog = await createLab4FixtureTicket("l4-resp-close", "TKT-2026-991103", {
+  closeDialog = await createLab4FixtureTicket("l4-resp-close", "TKT-2026-997103", {
     status: "RESOLVED",
     actions: [{ description: "Replaced the dock.", status: "COMPLETED" }],
     history: [{ from: "IN_PROGRESS", to: "RESOLVED", hoursAgo: 5 }],
   });
-  staleTicket = await createLab4FixtureTicket("l4-resp-stale", "TKT-2026-991104", {
+  staleTicket = await createLab4FixtureTicket("l4-resp-stale", "TKT-2026-997104", {
     actions: [{ description: "Original description.", status: "PLANNED", hoursAgo: 6 }],
   });
-  blockedTicket = await createLab4FixtureTicket("l4-resp-blocked", "TKT-2026-991105", {
+  blockedTicket = await createLab4FixtureTicket("l4-resp-blocked", "TKT-2026-997105", {
     actions: [
       { description: "Done part.", status: "COMPLETED" },
       { description: "Still planned part.", status: "PLANNED", hoursAgo: -6 },

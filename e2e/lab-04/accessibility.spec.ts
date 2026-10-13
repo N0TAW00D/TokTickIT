@@ -8,6 +8,7 @@ import {
   ZERO_STAFF_EMAIL,
   assertNoSeriousViolations,
   bumpActionVersion,
+  cleanupLab4Fixtures,
   createLab4FixtureTicket,
   type Lab4FixtureTicket,
 } from "../support/lab4.js";
@@ -15,7 +16,7 @@ import {
 // Lab 4 accessibility rows A11Y-01..A11Y-06 (docs/lab-04/tests.md §2,
 // ui-spec.md §9, checklist V-10). axe-core scans (serious/critical fail) of
 // the real rendered DOM, and keyboard-only flows that never use the mouse
-// after the page is open. Fixture Tickets use numbers TKT-2026-9912xx.
+// after the page is open. Fixture Tickets use numbers TKT-2026-9972xx.
 
 /** Waits for CSS transitions to finish so axe never samples a half-blended colour pair. */
 async function settle(page: Page): Promise<void> {
@@ -81,6 +82,8 @@ let richTicket: Lab4FixtureTicket; // axe on Staff Ticket Detail and Requester T
 let flowTicket: Lab4FixtureTicket; // keyboard Actions flow
 let dialogTicket: Lab4FixtureTicket; // keyboard Close-ticket dialog
 
+test.afterAll(cleanupLab4Fixtures);
+
 test.beforeAll(async () => {
   const actions = [
     {
@@ -97,14 +100,14 @@ test.beforeAll(async () => {
     { from: "NEW", to: "OPEN", hoursAgo: 100 },
     { from: "OPEN", to: "IN_PROGRESS", hoursAgo: 90 },
   ];
-  richTicket = await createLab4FixtureTicket("l4-a11y-rich", "TKT-2026-991200", { actions, history });
-  flowTicket = await createLab4FixtureTicket("l4-a11y-flow", "TKT-2026-991201", {
+  richTicket = await createLab4FixtureTicket("l4-a11y-rich", "TKT-2026-997200", { actions, history });
+  flowTicket = await createLab4FixtureTicket("l4-a11y-flow", "TKT-2026-997201", {
     actions: [
       { description: "Order a replacement dock.", status: "PLANNED", hoursAgo: 6 },
       { description: "Re-image the laptop.", status: "PLANNED", hoursAgo: 5 },
     ],
   });
-  dialogTicket = await createLab4FixtureTicket("l4-a11y-dialog", "TKT-2026-991202", {
+  dialogTicket = await createLab4FixtureTicket("l4-a11y-dialog", "TKT-2026-997202", {
     status: "RESOLVED",
     actions: [{ description: "Replaced the dock.", status: "COMPLETED" }],
     history: [{ from: "IN_PROGRESS", to: "RESOLVED", hoursAgo: 5 }],
@@ -188,7 +191,7 @@ test.describe("A11Y-03 axe: staff ticket detail (AC-44)", () => {
   });
 
   test("the stale-update callout and latest-version panel have no serious or critical violations", async ({ page }, testInfo) => {
-    const stale = await createLab4FixtureTicket("l4-a11y-stale", "TKT-2026-991203", {
+    const stale = await createLab4FixtureTicket("l4-a11y-stale", "TKT-2026-997203", {
       actions: [{ description: "Original description.", status: "PLANNED", hoursAgo: 6 }],
     });
     await openStaffDetail(page, stale);
@@ -205,7 +208,7 @@ test.describe("A11Y-03 axe: staff ticket detail (AC-44)", () => {
   });
 
   test("the resolution-blocked callout has no serious or critical violations", async ({ page }, testInfo) => {
-    const blocked = await createLab4FixtureTicket("l4-a11y-blocked", "TKT-2026-991204", {
+    const blocked = await createLab4FixtureTicket("l4-a11y-blocked", "TKT-2026-997204", {
       actions: [
         { description: "Done part.", status: "COMPLETED" },
         { description: "Still planned part.", status: "PLANNED", hoursAgo: 6 },

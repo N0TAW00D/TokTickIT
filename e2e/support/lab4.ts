@@ -178,6 +178,24 @@ export async function createLab4FixtureTicket(
   });
 }
 
+/**
+ * Removes everything the Lab 4 hardening specs created, so the seeded dashboards (Owned by Me,
+ * My Open Actions, Unassigned...) are back to their seeded numbers for any spec that runs after
+ * them: fixture Tickets in the TKT-2026-997xxx band (Actions and history cascade), the fixture
+ * Requesters made for them, Tickets/users created through the UI by the regression spec.
+ */
+export async function cleanupLab4Fixtures(): Promise<void> {
+  await withClient(async (client) => {
+    await client.query(
+      `DELETE FROM "Ticket" WHERE "ticketNumber" ~ '^TKT-2026-997[0-9]{3}$'
+         OR "requesterId" IN (SELECT id FROM "User" WHERE email LIKE 'e2e-plain-login-l4-%@toktickit.local' OR email LIKE 'l4-regression-%@example.test')`,
+    );
+    await client.query(
+      `DELETE FROM "User" WHERE email LIKE 'e2e-plain-login-l4-%@toktickit.local' OR email LIKE 'l4-regression-%@example.test'`,
+    );
+  });
+}
+
 /** Simulates a second editor: bumps an Action's version so the next save is stale. */
 export async function bumpActionVersion(actionId: number): Promise<void> {
   await withClient((client) =>
