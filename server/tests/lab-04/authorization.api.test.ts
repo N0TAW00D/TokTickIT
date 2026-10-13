@@ -182,6 +182,145 @@ describe('Actions Taken routes', () => {
   });
 });
 
+// The remaining Lab 4 routes (history, workflow, dashboards, staff queue and the
+// Lab 4 changes to the ticket reads) get the same cross-cutting SEC rows as the
+// Actions Taken routes above: SEC-04 (401 / password gate), SEC-06 (safe
+// failure) and SEC-07 (content type).
+describe('Every other Lab 4 route', () => {
+  type User = Awaited<ReturnType<typeof createUser>>;
+  let userIds: number[] = [];
+  let requester: User;
+  let staff: User;
+  let admin: User;
+  let cookies: { requester: string; staff: string; admin: string };
+  let ticketId: number;
+
+  beforeEach(async () => {
+    requester = await createUser('REQUESTER');
+    staff = await createUser('IT_STAFF');
+    admin = await createUser('ADMINISTRATOR');
+    userIds = [requester.id, staff.id, admin.id];
+    cookies = {
+      requester: await loginCookie(testServer.server, requester.email),
+      staff: await loginCookie(testServer.server, staff.email),
+      admin: await loginCookie(testServer.server, admin.email),
+    };
+    ticketId = (await createTicket(requester.id, { status: 'OPEN' })).id;
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await prisma.ticket.deleteMany({});
+    await deleteUsers(userIds);
+    userIds = [];
+  });
+
+  type Method = 'get' | 'patch';
+  interface Route {
+    label: string;
+    method: Method;
+    path: () => string;
+    body?: () => object;
+    cookie: 'requester' | 'staff';
+  }
+  const send = (r: Route, cookie?: string, contentType = 'application/json') => {
+    let call = request(testServer.server)[r.method](r.path());
+    if (cookie) call = call.set('Cookie', cookie);
+    if (r.method === 'patch') call = call.set('Content-Type', contentType);
+    return r.method === 'patch' ? call.send(contentType === 'application/json' ? (r.body?.() ?? {}) : 'plain=body') : call;
+  };
+
+  // Routes added or changed by Lab 4 beyond the Actions Taken ones above.
+  const readRoutes: Route[] = [
+    { label: 'GET /api/tickets/:id/status-history', method: 'get', path: () => `/api/tickets/${ticketId}/status-history`, cookie: 'staff' },
+    { label: 'GET /api/tickets/:id', method: 'get', path: () => `/api/tickets/${ticketId}`, cookie: 'staff' },
+    { label: 'GET /api/tickets', method: 'get', path: () => '/api/tickets?scope=open', cookie: 'requester' },
+    { label: 'GET /api/dashboard/requester', method: 'get', path: () => '/api/dashboard/requester', cookie: 'requester' },
+    { label: 'GET /api/dashboard/staff', method: 'get', path: () => '/api/dashboard/staff', cookie: 'staff' },
+    { label: 'GET /api/staff/tickets', method: 'get', path: () => '/api/staff/tickets', cookie: 'staff' },
+    { label: 'GET /api/staff/assignable-users', method: 'get', path: () => '/api/staff/assignable-users', cookie: 'staff' },
+  ];
+  const writeRoutes: Route[] = [
+    { label: 'PATCH /api/tickets/:id/status', method: 'patch', path: () => `/api/tickets/${ticketId}/status`, body: () => ({ status: 'IN_PROGRESS', version: 1 }), cookie: 'staff' },
+    { label: 'PATCH /api/tickets/:id/owner', method: 'patch', path: () => `/api/tickets/${ticketId}/owner`, body: () => ({ ownerId: staff.id, version: 1 }), cookie: 'staff' },
+    { label: 'PATCH /api/tickets/:id/it-priority', method: 'patch', path: () => `/api/tickets/${ticketId}/it-priority`, body: () => ({ itPriority: 'HIGH', version: 1 }), cookie: 'staff' },
+  ];
+  const allRoutes = [...readRoutes, ...writeRoutes];
+
+  async function snapshot() {
+    const t = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+    return { status: t.status, ownerId: t.ownerId, itPriority: t.itPriority, version: t.version, history: await prisma.ticketStatusChange.count() };
+  }
+
+  it('SEC-04: every Lab 4 route without a session is 401 and writes nothing', async () => {
+    const before = await snapshot();
+    for (const r of allRoutes) {
+      const res = await send(r);
+      expect(res.status, r.label).toBe(401);
+      expect(res.body.error, r.label).toBe('UNAUTHENTICATED');
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('SEC-04: every Lab 4 route with mustChangePassword is 403 PASSWORD_CHANGE_REQUIRED and writes nothing', async () => {
+    await prisma.user.updateMany({ where: { id: { in: [requester.id, staff.id] } }, data: { mustChangePassword: true } });
+    const before = await snapshot();
+    for (const r of allRoutes) {
+      const res = await send(r, cookies[r.cookie]);
+      expect(res.status, r.label).toBe(403);
+      expect(res.body.error, r.label).toBe('PASSWORD_CHANGE_REQUIRED');
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('SEC-05: status history is attributed to the session user, and dashboards ignore a supplied requesterId', async () => {
+    await prisma.ticket.update({ where: { id: ticketId }, data: { ownerId: staff.id } });
+    const res = await request(testServer.server)
+      .patch(`/api/tickets/${ticketId}/status?changedById=${admin.id}`)
+      .set('Cookie', cookies.staff)
+      .set('Content-Type', 'application/json')
+      .send({ status: 'IN_PROGRESS', version: 1, changedById: admin.id, requesterId: admin.id });
+    expect(res.status).toBe(200);
+    const rows = await prisma.ticketStatusChange.findMany({ where: { ticketId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.changedById).toBe(staff.id);
+    const dash = await request(testServer.server).get(`/api/dashboard/requester?requesterId=${admin.id}`).set('Cookie', cookies.requester);
+    expect(dash.status).toBe(200);
+    const mine = await request(testServer.server).get('/api/dashboard/requester').set('Cookie', cookies.requester);
+    expect({ ...dash.body, generatedAt: null }).toEqual({ ...mine.body, generatedAt: null });
+  });
+
+  it('SEC-06: a forced internal error on each of these routes returns the generic INTERNAL body', async () => {
+    const boom = () => Promise.reject(new Error('SELECT secret FROM /var/db/pg.sock failed at Object.<anonymous> (/srv/app.ts:1:1)'));
+    // Only data-access methods are broken; session lookup (authenticate) is untouched.
+    for (const m of ['findUnique', 'findFirst', 'findMany', 'count', 'update', 'updateMany', 'groupBy'] as const) {
+      vi.spyOn(prisma.ticket, m as 'findMany').mockImplementation(boom as never);
+    }
+    vi.spyOn(prisma.ticketStatusChange, 'findMany').mockImplementation(boom as never);
+    vi.spyOn(prisma.user, 'findMany').mockImplementation(boom as never);
+    vi.spyOn(prisma, '$queryRaw').mockImplementation(boom as never);
+    vi.spyOn(prisma, '$queryRawUnsafe').mockImplementation(boom as never);
+    vi.spyOn(prisma, '$transaction').mockImplementation(boom as never);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const r of allRoutes) {
+      const res = await send(r, cookies[r.cookie]);
+      expect(res.status, r.label).toBe(500);
+      expect(res.body, r.label).toEqual({ error: 'INTERNAL', message: 'An unexpected error occurred.' });
+      expect(res.text, r.label).not.toMatch(/SELECT|\/srv|\/var|at Object/);
+    }
+  });
+
+  it('SEC-07: text/plain on every new state-changing route is 415 and writes nothing', async () => {
+    const before = await snapshot();
+    for (const r of writeRoutes) {
+      const res = await send(r, cookies[r.cookie], 'text/plain');
+      expect(res.status, r.label).toBe(415);
+      expect(res.body.error, r.label).toBe('UNSUPPORTED_MEDIA_TYPE');
+    }
+    expect(await snapshot()).toEqual(before);
+  });
+});
+
 describe('Dashboards and the staff queue', () => {
   // Lab 4 authorization matrix (docs/lab-04/tests.md SEC-*). This file holds the
   // dashboard and D-13 queue rows; Actions / workflow rows land with their issues.
