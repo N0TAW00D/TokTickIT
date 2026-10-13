@@ -229,6 +229,21 @@ export interface Lab4SeedSummary {
   lab4StatusHistoryRows: number;
 }
 
+// Previous seed signature, recognised as seed-owned so a database seeded by
+// the earlier revision (PR #103, commit ef80e88) upgrades cleanly. That
+// revision wrote two chains authored by an Administrator (BR-16 says only IT
+// Staff change status); its Actions equal the current ones apart from a null
+// clientRequestHash, which the Action check below already tolerates. A chain
+// matching either this or the current TICKET_HISTORY is pristine and is
+// rewritten to the current one; anything else is genuine user history.
+const LEGACY_HISTORY_103: Record<string, HistoryStep[]> = {
+  "TKT-2026-900008": [
+    { to: "OPEN", hoursAgo: 230, by: OLIVIA },
+    { to: "CANCELLED", hoursAgo: 216, by: OLIVIA },
+  ],
+  "TKT-2026-900020": [{ to: "CANCELLED", hoursAgo: 96, by: OLIVIA }],
+};
+
 export interface SeedTicketState {
   ticketNumber: string;
   status: Status;
@@ -268,22 +283,21 @@ export async function findPristineSeedTickets(
       where: { ticketId: t.id },
       orderBy: { id: "asc" },
     });
-    const steps = TICKET_HISTORY[spec.ticketNumber] ?? [];
-    let from: Status = "NEW";
-    const expected = steps.map((step) => {
-      const row = { from, to: step.to, by: idOf(step.by) };
-      from = step.to;
-      return row;
-    });
+    const chains = [TICKET_HISTORY[spec.ticketNumber] ?? [], LEGACY_HISTORY_103[spec.ticketNumber]];
+    const matchesChain = (steps: HistoryStep[]) => {
+      let from: Status = "NEW";
+      return (
+        history.length === steps.length &&
+        steps.every((step, i) => {
+          const h = history[i]!;
+          const ok = h.fromStatus === from && h.toStatus === step.to && h.changedById === idOf(step.by);
+          from = step.to;
+          return ok;
+        })
+      );
+    };
     const historyOk =
-      history.length === 0 ||
-      (history.length === expected.length &&
-        history.every(
-          (h, i) =>
-            h.fromStatus === expected[i]!.from &&
-            h.toStatus === expected[i]!.to &&
-            h.changedById === expected[i]!.by
-        ));
+      history.length === 0 || chains.some((steps) => steps !== undefined && matchesChain(steps));
     if (!historyOk) continue;
 
     const seededKeys = new Set(

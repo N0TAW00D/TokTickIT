@@ -467,4 +467,33 @@ describe('Lab 4 seed', () => {
     180_000
   );
 
+  it('MIG-06d: a DB seeded by the earlier revision (Administrator history, no hashes) is repaired; genuine history is kept', async () => {
+    // State written by `git show ef80e88:server/prisma/seedLab4.ts`: history of
+    // 900008 and 900020 authored by an Administrator, Actions without a hash.
+    const olivia = await userId('olivia.grant@example.edu');
+    const ticketId = async (n: string) => (await prisma.ticket.findUniqueOrThrow({ where: { ticketNumber: n } })).id;
+    for (const n of ['TKT-2026-900008', 'TKT-2026-900020']) {
+      await prisma.$executeRaw`UPDATE "TicketStatusChange" SET "changedById" = ${olivia} WHERE "ticketId" = ${await ticketId(n)}`;
+    }
+    await prisma.$executeRaw`UPDATE "ActionTaken" SET "clientRequestHash" = NULL`;
+
+    // Genuine user history on another seeded Ticket (has seeded history already).
+    const priya = await userId('priya.natarajan@example.edu');
+    const genuineTicket = await ticketId('TKT-2026-900002');
+    await prisma.$executeRaw`
+      INSERT INTO "TicketStatusChange" ("ticketId", "fromStatus", "toStatus", "changedById", "changedAt")
+      VALUES (${genuineTicket}, 'OPEN', 'IN_PROGRESS', ${priya}, now())`;
+    const genuineBefore = await prisma.ticketStatusChange.findMany({ where: { ticketId: genuineTicket }, orderBy: { id: 'asc' } });
+    expect(genuineBefore).toHaveLength(2);
+
+    runSeed();
+
+    const admins = await one(`
+      SELECT count(*)::int AS v FROM "TicketStatusChange" h JOIN "User" u ON u.id = h."changedById"
+      WHERE u.role = 'ADMINISTRATOR'`);
+    expect(admins, 'Administrator-authored history rows').toBe(0);
+    expect(await one(`SELECT count(*)::int AS v FROM "ActionTaken" WHERE "clientRequestHash" IS NULL`)).toBe(0);
+    const genuineAfter = await prisma.ticketStatusChange.findMany({ where: { ticketId: genuineTicket }, orderBy: { id: 'asc' } });
+    expect(genuineAfter).toEqual(genuineBefore);
+  }, 180_000);
 });
