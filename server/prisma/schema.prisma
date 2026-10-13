@@ -61,6 +61,12 @@ model User {
   publicComments     PublicComment[]
   internalNotes      InternalNote[]
 
+  // --- Lab 4 (specification.md §7.2) ---
+  actionsPerformed    ActionTaken[]        @relation("ActionPerformedBy")
+  actionsAssigned     ActionTaken[]        @relation("ActionAssignee")
+  actionsLastUpdated  ActionTaken[]        @relation("ActionLastUpdatedBy")
+  ticketStatusChanges TicketStatusChange[]
+
   // Administrator role filter and the last-active-Administrator check
   // (BR-32).
   @@index([role, isActive])
@@ -122,6 +128,12 @@ model Ticket {
   // Set by "Problem Appears Resolved" (BR-26); does not change status.
   requesterResolvedAt DateTime?
 
+  // --- Lab 4 addition (specification.md §7.1, BR-33) ---
+
+  // Optimistic-concurrency counter: changes exactly when a guarded field
+  // (status, owner, IT Priority) changes. Every pre-Lab-4 row becomes 1.
+  version Int @default(1)
+
   requester      User            @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: Restrict)
   owner          User?           @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   category       Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
@@ -129,6 +141,9 @@ model Ticket {
   attachments    Attachment[]
   publicComments PublicComment[]
   internalNotes  InternalNote[]
+
+  actionsTaken  ActionTaken[]
+  statusChanges TicketStatusChange[]
 
   @@index([requesterId, createdAt])
   @@index([requesterId, updatedAt])
@@ -140,6 +155,10 @@ model Ticket {
   @@index([status])
   // Queue filter by owner, including "unassigned".
   @@index([ownerId])
+  // Recent-window and by-status dashboard queries (§7.3).
+  @@index([status, updatedAt])
+  // Owned by Me / Unassigned dashboard counts (§7.3).
+  @@index([ownerId, status])
 }
 
 model Attachment {
@@ -191,6 +210,72 @@ model InternalNote {
 
   // Thread retrieval in order.
   @@index([ticketId, createdAt])
+}
+
+// New in Lab 4 (specification.md §7.1). Editable by IT Staff (not deleted).
+// The follow-up consistency CHECK constraint is hand-written in the Lab 4
+// migration SQL (§7.4 item 2): Prisma cannot express it and does not diff it.
+model ActionTaken {
+  id                Int          @id @default(autoincrement())
+  ticketId          Int
+  actionAt          DateTime
+  description       String
+  result            String?
+  status            ActionStatus @default(PLANNED)
+  performedById     Int
+  assigneeId        Int?
+  followUpRequired  Boolean      @default(false)
+  followUpNote      String?
+  attachmentNotes   String?
+  lastUpdatedById   Int
+  // Idempotency key and canonical-body hash (BR-35).
+  clientRequestId   String?
+  clientRequestHash String?
+  version           Int          @default(1)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  ticket        Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  performedBy   User   @relation("ActionPerformedBy", fields: [performedById], references: [id], onDelete: Restrict)
+  assignee      User?  @relation("ActionAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  lastUpdatedBy User   @relation("ActionLastUpdatedBy", fields: [lastUpdatedById], references: [id], onDelete: Restrict)
+
+  // Idempotent create (BR-35); NULLs are distinct in Postgres.
+  @@unique([ticketId, clientRequestId])
+  // Ticket Detail list in BR-14 order.
+  @@index([ticketId, actionAt, id])
+  // Resolution gate (BR-17) and the Open Actions count.
+  @@index([ticketId, status])
+  // My Open Actions (BR-25).
+  @@index([assigneeId, status])
+  @@index([performedById, status])
+  // Follow-ups Required (BR-26).
+  @@index([ticketId, followUpRequired])
+}
+
+// New in Lab 4 (specification.md §7.1). Append-only (BR-19).
+model TicketStatusChange {
+  id          Int          @id @default(autoincrement())
+  ticketId    Int
+  fromStatus  TicketStatus
+  toStatus    TicketStatus
+  changedById Int
+  changedAt   DateTime     @default(now())
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  changedBy User   @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  // History order (BR-14).
+  @@index([ticketId, changedAt, id])
+  // Recently Resolved (BR-23).
+  @@index([toStatus, changedAt])
+}
+
+enum ActionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
 }
 
 model TicketCounter {
