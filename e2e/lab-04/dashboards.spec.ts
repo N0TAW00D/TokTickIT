@@ -528,3 +528,33 @@ test.describe("E2E-15 landing and navigation per role (AC-35)", () => {
     await expect(page).toHaveURL(/\/dashboard$/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Count tile layout (ui-spec §3.1, §8): every status tile keeps its badge and
+// count on one row at every width, with no overflow.
+// ---------------------------------------------------------------------------
+
+test.describe("status count tiles keep badge and count on one row (V-11, V-12)", () => {
+  for (const [name, width, height] of [["mobile", 390, 844], ["narrow", 320, 640], ["tablet", 820, 1180]] as const) {
+    test(`at ${name} ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await openDashboard(page, IT_STAFF_EMAIL);
+      const tiles = page.locator(".zen-dashboard__counts--status .zen-dashboard__count-link");
+      await expect(tiles).toHaveCount(8);
+      const scrollOk = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+      expect(scrollOk, "no horizontal page scroll").toBe(true);
+      for (const tile of await tiles.all()) {
+        const badge = await tile.locator(".zen-badge").boundingBox();
+        const count = await tile.locator(".zen-dashboard__count-value").boundingBox();
+        const label = await tile.getAttribute("aria-label");
+        expect(badge && count, `${label} laid out`).toBeTruthy();
+        // The count sits beside the badge: its vertical centre falls inside the badge's vertical extent.
+        const countMiddle = count!.y + count!.height / 2;
+        expect(countMiddle, `${label}: count shares a row with its badge`).toBeGreaterThanOrEqual(badge!.y);
+        expect(countMiddle, `${label}: count shares a row with its badge`).toBeLessThanOrEqual(badge!.y + badge!.height);
+        const tileBox = await tile.boundingBox();
+        expect(badge!.x + badge!.width, `${label}: badge inside tile`).toBeLessThanOrEqual(tileBox!.x + tileBox!.width + 1);
+      }
+    });
+  }
+});
