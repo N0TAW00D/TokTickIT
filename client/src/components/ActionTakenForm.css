@@ -97,7 +97,8 @@
 
 @media (max-width: 767px) {
   .zen-action-form__buttons {
-    flex-direction: column-reverse;
+    /* DOM order is Save then Cancel, so a plain column puts the primary on top (ui-spec.md §8). */
+    flex-direction: column;
   }
 
   .zen-action-form__buttons .zen-btn {
