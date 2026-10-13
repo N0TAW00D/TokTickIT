@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { hashPassword } from "../src/lib/password.js";
 import { LOCAL_DEV_PASSWORD } from "./seedConstants.js";
-import { seedLab4 } from "./seedLab4.js";
+import { findPristineSeedTickets, seedLab4 } from "./seedLab4.js";
 
 // Reference and fixture data per docs/lab-03/specification.md §7.5 (Lab 2's
 // Categories/Related Systems/Requesters reference-data style is unchanged
@@ -407,7 +407,7 @@ const SEED_INTERNAL_NOTES: SeedCommentSpec[] = [
   },
 ];
 
-async function seedTickets(): Promise<Map<string, { id: number }>> {
+async function seedTickets(pristine: ReadonlySet<string>): Promise<Map<string, { id: number }>> {
   const categories = await prisma.category.findMany();
   const categoryIdByName = new Map(categories.map((c) => [c.name, c.id]));
   const relatedSystems = await prisma.relatedSystem.findMany();
@@ -425,6 +425,16 @@ async function seedTickets(): Promise<Map<string, { id: number }>> {
 
     if (!requesterId || !categoryId || !relatedSystemId || (spec.ownerEmail && !ownerId)) {
       throw new Error(`Seed ticket ${spec.ticketNumber} references an unknown fixture row.`);
+    }
+
+    // Pristine rule (see seedLab4.ts): an existing Ticket with application
+    // activity (status/owner changed, version bumped, extra history or
+    // Actions) is left completely untouched, not even a no-op update, which
+    // would bump @updatedAt.
+    if (!pristine.has(spec.ticketNumber)) {
+      const existing = await prisma.ticket.findUniqueOrThrow({ where: { ticketNumber: spec.ticketNumber } });
+      ticketsByNumber.set(spec.ticketNumber, { id: existing.id });
+      continue;
     }
 
     const ticket = await prisma.ticket.upsert({
@@ -534,7 +544,13 @@ async function main() {
   // allocator entirely (fixed "900xxx" ticketNumbers, well outside the
   // sequential band real ticket creation uses), so they never collide with
   // it either.
-  const ticketsByNumber = await seedTickets();
+  const pristine = await findPristineSeedTickets(prisma, SEED_TICKETS);
+  for (const spec of SEED_TICKETS) {
+    if (!pristine.has(spec.ticketNumber)) {
+      console.log(`Skipping ${spec.ticketNumber}: it has application activity since it was seeded.`);
+    }
+  }
+  const ticketsByNumber = await seedTickets(pristine);
 
   const users = await prisma.user.findMany();
   const userIdByEmail = new Map(users.map((u) => [u.email, u.id]));
@@ -556,7 +572,7 @@ async function main() {
 
   // Lab 4 (docs/lab-04/specification.md §7.5): Actions Taken, status history
   // and timestamps re-anchored to now. Runs last, after Tickets and Users exist.
-  const lab4 = await seedLab4(prisma);
+  const lab4 = await seedLab4(prisma, pristine);
 
   console.log({
     ...lab4,

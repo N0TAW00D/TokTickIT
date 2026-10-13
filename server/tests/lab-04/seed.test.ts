@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import request from 'supertest';
+import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
+import { useTestServer } from '../setup/http-server.js';
+import { SESSION_COOKIE_NAME } from '../../src/lib/session.js';
+import { LOCAL_DEV_PASSWORD } from '../../prisma/seedConstants.js';
+import { hashActionCreateBody } from '../../src/services/actionRequestHash.js';
 import { runPackageBin, serverRoot } from '../../scripts/test-db.lib.js';
 
 // Seed coverage for Lab 4 (docs/lab-04/tests.md MIG-06..MIG-08;
@@ -17,6 +23,8 @@ import { runPackageBin, serverRoot } from '../../scripts/test-db.lib.js';
 //
 // Expected metric values are computed with independent SQL here; no
 // dashboard service code is imported (it does not exist yet).
+
+const testServer = useTestServer(app);
 
 function runSeed(): void {
   runPackageBin('tsx', [path.join(serverRoot, 'prisma/seed.ts')], {
@@ -279,4 +287,101 @@ describe('Lab 4 seed', () => {
       "David's Tickets were resolved 10+ days ago"
     ).toBe(0);
   }, 120_000);
+
+  it('every seeded Action with a clientRequestId stores the hash of its canonical create body (BR-35)', async () => {
+    const rows = await prisma.actionTaken.findMany({ where: { clientRequestId: { not: null } } });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const a of rows) {
+      expect(a.clientRequestHash, `Action ${a.id}`).toBe(
+        hashActionCreateBody({
+          description: a.description,
+          result: a.result,
+          actionAt: a.actionAt.toISOString(),
+          status: a.status,
+          assigneeId: a.assigneeId,
+          followUpRequired: a.followUpRequired,
+          followUpNote: a.followUpNote,
+          attachmentNotes: a.attachmentNotes,
+        })
+      );
+    }
+  }, 120_000);
+
+  it('BR-15: every Ticket updatedAt is at or after its latest Action createdAt/updatedAt and latest history changedAt', async () => {
+    const bad = await prisma.$queryRaw<{ ticketNumber: string }[]>`
+      SELECT t."ticketNumber" FROM "Ticket" t
+      WHERE t."updatedAt" < COALESCE((SELECT max(GREATEST(a."createdAt", a."updatedAt")) FROM "ActionTaken" a WHERE a."ticketId" = t.id), '-infinity')
+         OR t."updatedAt" < COALESCE((SELECT max(h."changedAt") FROM "TicketStatusChange" h WHERE h."ticketId" = t.id), '-infinity')
+      ORDER BY 1`;
+    expect(bad.map((r) => r.ticketNumber)).toEqual([]);
+    expect(
+      await one(`SELECT count(*)::int AS v FROM "Ticket" t WHERE EXISTS (SELECT 1 FROM "ActionTaken" a WHERE a."ticketId" = t.id)`)
+    ).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('BR-16: every status-history changedBy is IT Staff', async () => {
+    const bad = await prisma.$queryRaw<{ ticketNumber: string; role: string }[]>`
+      SELECT t."ticketNumber", u.role::text AS role FROM "TicketStatusChange" h
+      JOIN "User" u ON u.id = h."changedById" JOIN "Ticket" t ON t.id = h."ticketId"
+      WHERE u.role <> 'IT_STAFF' ORDER BY 1`;
+    expect(bad).toEqual([]);
+    expect(await one(`SELECT count(*)::int AS v FROM "TicketStatusChange"`)).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('MIG-06b: reseeding preserves application activity on a seeded Ticket and still re-anchors pristine ones', async () => {
+    const t = async (n: string) => prisma.ticket.findUniqueOrThrow({ where: { ticketNumber: n } });
+    const snapshot = async (n: string) => {
+      const ticket = await t(n);
+      return {
+        status: ticket.status,
+        ownerId: ticket.ownerId,
+        version: ticket.version,
+        updatedAt: ticket.updatedAt.toISOString(),
+        history: (await prisma.ticketStatusChange.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }))
+          .map((h) => ({ ...h, changedAt: h.changedAt.toISOString() })),
+        actions: (await prisma.actionTaken.findMany({ where: { ticketId: ticket.id }, orderBy: { id: 'asc' } }))
+          .map((a) => ({ ...a, actionAt: a.actionAt.toISOString(), createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() })),
+      };
+    };
+
+    // (a) through the existing HTTP route as IT Staff (Lab 3 contract).
+    const login = await request(testServer.server)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send({ email: 'priya.natarajan@example.edu', password: LOCAL_DEV_PASSWORD });
+    expect(login.status, 'login').toBe(200);
+    const cookie = (login.headers['set-cookie'] as unknown as string[])
+      .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))!.split(';')[0]!;
+    const viaHttp = await t('TKT-2026-900013'); // WAITING_FOR_REQUESTER, owned
+    const patch = await request(testServer.server)
+      .patch(`/api/tickets/${viaHttp.id}/status`)
+      .set('Content-Type', 'application/json')
+      .set('Cookie', cookie)
+      .send({ status: 'IN_PROGRESS' });
+    expect(patch.status, JSON.stringify(patch.body)).toBe(200);
+
+    // (b) direct SQL mimicking the Lab 4 contract: status + version + history row.
+    const viaSql = await t('TKT-2026-900012'); // IN_PROGRESS
+    const carlos = await userId('carlos.mendes@example.edu');
+    await prisma.$executeRaw`UPDATE "Ticket" SET status = 'WAITING_FOR_REQUESTER', version = version + 1 WHERE id = ${viaSql.id}`;
+    await prisma.$executeRaw`
+      INSERT INTO "TicketStatusChange" ("ticketId", "fromStatus", "toStatus", "changedById", "changedAt")
+      VALUES (${viaSql.id}, 'IN_PROGRESS', 'WAITING_FOR_REQUESTER', ${carlos}, now())`;
+
+    // A pristine Ticket made stale: reseeding must re-anchor it.
+    const pristine = await t('TKT-2026-900003');
+    await prisma.$executeRaw`UPDATE "Ticket" SET "updatedAt" = '2000-01-01' WHERE id = ${pristine.id}`;
+
+    const beforeHttp = await snapshot('TKT-2026-900013');
+    const beforeSql = await snapshot('TKT-2026-900012');
+    expect(beforeHttp.status).toBe('IN_PROGRESS');
+    expect(beforeSql.status).toBe('WAITING_FOR_REQUESTER');
+
+    runSeed();
+
+    expect(await snapshot('TKT-2026-900013')).toEqual(beforeHttp);
+    expect(await snapshot('TKT-2026-900012')).toEqual(beforeSql);
+    const after = await t('TKT-2026-900003');
+    expect(after.updatedAt.getTime()).toBeGreaterThan(Date.now() - 7 * 24 * 3_600_000);
+  }, 180_000);
 });
