@@ -291,8 +291,8 @@ Start the stack (`cd server && npm run dev`, `cd client && npm run dev`, open ht
 `db:migrate` and `db:seed`. All seeded accounts use the password above. Every role lands on **Dashboard**.
 
 - **Requester** — `jennifer.anderson@example.edu` (Jennifer Anderson). The Dashboard shows her open Tickets,
-  those waiting on her and recently resolved ones. Open a Ticket to read its Actions Taken (a read-only view
-  of the entries visible to Requesters) and its status history; use *Create Ticket* to raise a new one. She cannot add Actions
+  those waiting on her and recently resolved ones. Open a Ticket to read all of its Actions Taken (read-only)
+  and its status history; use *Create Ticket* to raise a new one. She cannot add Actions
   or reach the staff Ticket Queue or User Management.
 - **IT Staff** — `priya.natarajan@example.edu` (Priya Natarajan). The Dashboard shows queue metrics, follow-ups and
   her assigned work. Open a Ticket from the Ticket Queue, claim it, then add an Action Taken (describe it,
