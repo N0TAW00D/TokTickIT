@@ -23,12 +23,23 @@ export type SortField = (typeof SORT_FIELDS)[number];
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 export type SortOrder = (typeof SORT_ORDERS)[number];
 
-// "NEW" is the only TicketStatus value in Lab 2 (schema.prisma), but the
-// filter is still validated as an enum against a list, not a literal
-// equality check, so this reads the same as `priority`/`sort`/`order` and
-// needs no special-casing if Lab 3 adds a second status.
-export const TICKET_STATUSES = ['NEW'] as const;
+// Lab 4 api-spec.md §6.1: `status` accepts all eight TicketStatus values
+// (it was `NEW` only in Lab 2/3), so dashboard cards can drill down.
+export const TICKET_STATUSES = [
+  'NEW',
+  'OPEN',
+  'IN_PROGRESS',
+  'WAITING_FOR_REQUESTER',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+  'CANCELLED',
+] as const;
 export type TicketStatusFilter = (typeof TICKET_STATUSES)[number];
+
+// Lab 4 api-spec.md §6.1 drill-down `scope` (BR-21, BR-22, BR-23).
+export const TICKET_SCOPES = ['open', 'recent', 'recently-resolved'] as const;
+export type TicketScope = (typeof TICKET_SCOPES)[number];
 
 export const PAGE_SIZES = [10, 20, 50] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
@@ -52,6 +63,7 @@ export interface TicketListQuery {
   categoryId?: number;
   priority?: Priority;
   status?: TicketStatusFilter;
+  scope?: TicketScope;
   sort: SortField;
   order: SortOrder;
   page: number;
@@ -183,7 +195,8 @@ export function parseTicketListQuery(query: Record<string, unknown>): TicketList
   const searchResult = parseSearch(query.search);
   const categoryIdResult = parseCategoryId(query.categoryId);
   const priorityResult = parseEnumParam('priority', query.priority, PRIORITIES, 'priority must be one of LOW, MEDIUM, HIGH.');
-  const statusResult = parseEnumParam('status', query.status, TICKET_STATUSES, 'status must be NEW.');
+  const statusResult = parseEnumParam('status', query.status, TICKET_STATUSES, 'status must be one of NEW, OPEN, IN_PROGRESS, WAITING_FOR_REQUESTER, RESOLVED, CLOSED, REOPENED, CANCELLED.');
+  const scopeResult = parseEnumParam('scope', query.scope, TICKET_SCOPES, 'scope must be one of open, recent, recently-resolved.');
   const sortResult = parseEnumParam('sort', query.sort, SORT_FIELDS, 'sort must be one of createdAt, updatedAt, ticketNumber.');
   const orderResult = parseEnumParam('order', query.order, SORT_ORDERS, 'order must be one of asc, desc.');
   const pageResult = parsePage(query.page);
@@ -194,6 +207,7 @@ export function parseTicketListQuery(query: Record<string, unknown>): TicketList
   if (!categoryIdResult.ok) errors.push(categoryIdResult.error);
   if (!priorityResult.ok) errors.push(priorityResult.error);
   if (!statusResult.ok) errors.push(statusResult.error);
+  if (!scopeResult.ok) errors.push(scopeResult.error);
   if (!sortResult.ok) errors.push(sortResult.error);
   if (!orderResult.ok) errors.push(orderResult.error);
   if (!pageResult.ok) errors.push(pageResult.error);
@@ -208,6 +222,7 @@ export function parseTicketListQuery(query: Record<string, unknown>): TicketList
   const categoryId = (categoryIdResult as Extract<typeof categoryIdResult, { ok: true }>).value;
   const priority = (priorityResult as Extract<typeof priorityResult, { ok: true }>).value;
   const status = (statusResult as Extract<typeof statusResult, { ok: true }>).value;
+  const scope = (scopeResult as Extract<typeof scopeResult, { ok: true }>).value;
   const sort = (sortResult as Extract<typeof sortResult, { ok: true }>).value ?? DEFAULT_SORT;
   const order = (orderResult as Extract<typeof orderResult, { ok: true }>).value ?? DEFAULT_ORDER;
   const page = (pageResult as Extract<typeof pageResult, { ok: true }>).value ?? DEFAULT_PAGE;
@@ -215,6 +230,6 @@ export function parseTicketListQuery(query: Record<string, unknown>): TicketList
 
   return {
     ok: true,
-    value: { search, categoryId, priority, status, sort, order, page, pageSize },
+    value: { search, categoryId, priority, status, scope, sort, order, page, pageSize },
   };
 }
