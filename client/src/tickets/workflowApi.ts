@@ -23,26 +23,3 @@ export async function fetchStatusHistory(
   }
   return response.json();
 }
-
-/**
- * The slice of an Action Taken (api-spec.md §2.1) the resolution checklist
- * needs. The Actions Taken card itself is a separate screen concern.
- */
-export interface ActionSummary {
-  id: number;
-  status: string;
-}
-
-/** `GET /api/tickets/:id/actions-taken`, read only to compute the resolution checklist. */
-export async function fetchActionSummaries(
-  ticketId: number,
-): Promise<ActionSummary[]> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/tickets/${ticketId}/actions-taken`,
-    { credentials: "include" },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to load actions taken (status ${response.status})`);
-  }
-  return response.json();
-}

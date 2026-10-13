@@ -77,3 +77,30 @@ export function formatDateTimeWithYear(iso: string): string {
   const { day, month, year, hour, minute } = toBangkokParts(iso);
   return `${day} ${month} ${year}, ${hour}:${minute}`;
 }
+
+/**
+ * `YYYY-MM-DDTHH:mm` in Asia/Bangkok for a `datetime-local` input, so the
+ * Actions Taken form reads and writes the same wall clock the rest of the
+ * screen displays (`formatDateTime`).
+ */
+export function toBangkokInputValue(date: Date | string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(typeof date === "string" ? new Date(date) : date);
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
+/** Inverse of `toBangkokInputValue`: the ISO instant, or `null` when the value is not a complete date-time. */
+export function fromBangkokInputValue(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
+  const date = new Date(`${value}${value.length === 16 ? ":00" : ""}+07:00`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}

@@ -50,12 +50,9 @@ import {
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
-import {
-  fetchActionSummaries,
-  fetchStatusHistory,
-  type ActionSummary,
-  type StatusChangeEntry,
-} from "../tickets/workflowApi";
+import { fetchStatusHistory, type StatusChangeEntry } from "../tickets/workflowApi";
+import { ActionsNotFoundError, fetchActions, type ActionTaken } from "../tickets/actionsApi";
+import { ActionsTakenCard } from "../components/ActionsTakenCard";
 import { saveBlob } from "../tickets/downloadFile";
 import {
   formatDateTime,
@@ -435,7 +432,9 @@ export function StaffTicketDetailScreen() {
   const [history, setHistory] = useState<
     StatusChangeEntry[] | "loading" | "error"
   >("loading");
-  const [actions, setActions] = useState<ActionSummary[] | null>(null);
+  const [actions, setActions] = useState<
+    ActionTaken[] | "loading" | "error" | "unavailable"
+  >("loading");
   // STALE_UPDATE on status, owner or IT Priority (one shared callout), and
   // RESOLUTION_BLOCKED from the status route.
   const [staleNotice, setStaleNotice] = useState(false);
@@ -522,15 +521,26 @@ export function StaffTicketDetailScreen() {
   }
 
   function loadActions(ticketId: number) {
-    fetchActionSummaries(ticketId)
+    // Keeps the rows on screen while re-reading, so an open form never loses its list.
+    fetchActions(ticketId)
       .then(setActions)
-      .catch(() => setActions(null));
+      .catch((error: unknown) =>
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error"),
+      );
+  }
+
+  /** Re-reads the Ticket in place (no loading phase), e.g. after it was closed under an open form. */
+  function refreshTicket() {
+    if (!validId) return;
+    fetchTicketDetail(parsedId)
+      .then((ticket) => setState({ phase: "loaded", ticket }))
+      .catch(() => {});
   }
 
   useEffect(() => {
     if (!validId) return;
     setHistory("loading");
-    setActions(null);
+    setActions("loading");
     loadHistory(parsedId);
     loadActions(parsedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -643,7 +653,7 @@ export function StaffTicketDetailScreen() {
    * while Resolved is a permitted next step, once the Actions are loaded.
    */
   const checklist = useMemo(() => {
-    if (!currentStatus || !actions) return null;
+    if (!currentStatus || !Array.isArray(actions)) return null;
     if (!STATUS_TRANSITIONS[currentStatus]?.includes("RESOLVED")) return null;
     const openCount = actions.filter(
       (a) => a.status === "PLANNED" || a.status === "IN_PROGRESS",
@@ -1350,8 +1360,21 @@ export function StaffTicketDetailScreen() {
             </section>
           </div>
 
-          {/* ui-spec.md §5.1: Status history card, after Actions Taken
-              (a separate card, Issue #96) and before Public Comments. */}
+          {/* ui-spec.md §5.1: Actions Taken, then Status history, then
+              Public Comments and Internal Notes. */}
+          <ActionsTakenCard
+            ticketId={state.ticket.id}
+            ticketNumber={state.ticket.ticketNumber}
+            ticketStatus={state.ticket.status}
+            ticketCreatedAt={state.ticket.createdAt}
+            actions={actions}
+            assignableUsers={assignableUsers}
+            currentUserName={user?.name ?? ""}
+            onReload={() => loadActions(state.ticket.id)}
+            onTicketChanged={refreshTicket}
+          />
+
+
           <section
             className="zen-staff-detail__card"
             aria-labelledby="staff-status-history-heading"

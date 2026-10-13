@@ -1,0 +1,40 @@
+.zen-action-status {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.zen-action-status--planned {
+  background: var(--zen-action-planned-bg);
+  color: var(--zen-action-planned-text);
+}
+
+.zen-action-status--progress {
+  background: var(--zen-action-progress-bg);
+  color: var(--zen-action-progress-text);
+}
+
+.zen-action-status--done {
+  background: var(--zen-action-done-bg);
+  color: var(--zen-action-done-text);
+}
+
+.zen-action-status--cancelled {
+  background: var(--zen-action-cancelled-bg);
+  color: var(--zen-action-cancelled-text);
+}
+
+.zen-follow-up-tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--zen-warning-bg);
+  color: var(--zen-warning);
+  white-space: nowrap;
+}
