@@ -928,3 +928,297 @@ describe("Conflicts on create", () => {
     expect(within(alert).getByRole("button", { name: "Reload actions" })).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Edit
+// ---------------------------------------------------------------------------
+
+async function openEditForm(who: AuthUser = STAFF) {
+  const card = await openCard(who);
+  fireEvent.click(within(card).getByRole("button", { name: /^Edit action from / }));
+  return card;
+}
+
+const editForm = (card: HTMLElement) => form(card, "Edit action");
+
+function statusOptions(card: HTMLElement): string[] {
+  return within(within(editForm(card)).getByLabelText(/^Status/))
+    .getAllByRole("option")
+    .map((o) => o.textContent ?? "");
+}
+
+describe("Edit form", () => {
+  it("is prefilled, keeps Performed by static, and sends only the changed field with version", async () => {
+    const fetchMock = mockFetch({
+      actions: () =>
+        res(200, [
+          action(1, {
+            description: "Original",
+            attachmentNotes: "Look at log",
+            performedBy: { id: 4, name: "Priya Natarajan", role: "IT_STAFF" },
+            version: 4,
+          }),
+        ]),
+      patch: (id) => res(200, action(id, { description: "Changed", version: 5 })),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Original");
+    expect((within(f).getByLabelText(/^Attachment notes/) as HTMLTextAreaElement).value).toBe("Look at log");
+    expect(within(f).getByText("Priya Natarajan")).toBeTruthy();
+    typeInto(within(f).getByLabelText(/^Description/), "Changed");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+
+    expect(await within(card).findByText("Action saved.")).toBeTruthy();
+    const call = writes(fetchMock, "PATCH")[0];
+    expect(call[0]).toBe(actionUrl(1));
+    expect(sentBody(call)).toEqual({ version: 4, description: "Changed" });
+    expect(document.activeElement).toBe(within(card).getByRole("button", { name: /^Edit action from / }));
+  });
+
+  it("closes without a request when nothing changed", async () => {
+    const fetchMock = mockFetch({ actions: () => res(200, [action(1)]) });
+    const card = await openEditForm();
+    fireEvent.click(within(editForm(card)).getByRole("button", { name: "Save action" }));
+    expect(within(card).queryByRole("form")).toBeNull();
+    expect(writes(fetchMock, "PATCH")).toHaveLength(0);
+  });
+
+  it("clearing the follow-up box sends followUpRequired false and no note", async () => {
+    const fetchMock = mockFetch({
+      actions: () => res(200, [action(1, { followUpRequired: true, followUpNote: "Old note" })]),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    expect((within(f).getByLabelText(/^Follow-up note/) as HTMLTextAreaElement).value).toBe("Old note");
+    fireEvent.click(within(f).getByLabelText(/^Follow-up required/));
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(1));
+    expect(sentBody(writes(fetchMock, "PATCH")[0])).toEqual({ version: 1, followUpRequired: false });
+  });
+
+  it("sends a new assignee only when it was changed", async () => {
+    const fetchMock = mockFetch({
+      assignable: [{ id: 8, name: "Carlos Mendes", role: "IT_STAFF" }],
+      actions: () => res(200, [action(1)]),
+    });
+    const card = await openEditForm();
+    typeInto(within(editForm(card)).getByLabelText("Assignee"), "8");
+    fireEvent.click(within(editForm(card)).getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(1));
+    expect(sentBody(writes(fetchMock, "PATCH")[0])).toEqual({ version: 1, assigneeId: 8 });
+  });
+
+  it("keeps an assignee who is no longer in the pool selectable", async () => {
+    mockFetch({ actions: () => res(200, [action(1, { assignee: { id: 77, name: "Former Colleague" } })]) });
+    const card = await openEditForm();
+    const select = within(editForm(card)).getByLabelText("Assignee") as HTMLSelectElement;
+    expect(select.value).toBe("77");
+    expect(within(select).getByRole("option", { name: "Former Colleague" })).toBeTruthy();
+  });
+});
+
+describe("C-18 Action status control", () => {
+  it("PLANNED offers itself, In progress and Cancelled only", async () => {
+    mockFetch({ actions: () => res(200, [action(1, { status: "PLANNED" })]) });
+    const card = await openEditForm();
+    expect(statusOptions(card)).toEqual(["Planned", "In progress", "Cancelled"]);
+  });
+
+  it("IN_PROGRESS offers itself, Completed and Cancelled only", async () => {
+    mockFetch({ actions: () => res(200, [action(1, { status: "IN_PROGRESS" })]) });
+    const card = await openEditForm();
+    expect(statusOptions(card)).toEqual(["In progress", "Completed", "Cancelled"]);
+  });
+
+  it("moving to Completed needs a result, then sends status and result", async () => {
+    const fetchMock = mockFetch({ actions: () => res(200, [action(1, { status: "IN_PROGRESS" })]) });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Status/), "COMPLETED");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    expect(errorUnder(within(f).getByLabelText(/^Result/))).toBe("Enter the result to complete this action.");
+    expect(writes(fetchMock, "PATCH")).toHaveLength(0);
+    typeInto(within(f).getByLabelText(/^Result/), "All good");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(1));
+    expect(sentBody(writes(fetchMock, "PATCH")[0])).toEqual({
+      version: 1,
+      status: "COMPLETED",
+      result: "All good",
+    });
+  });
+
+  it("Cancelled opens a confirm dialog that traps focus and restores it; nothing is sent until confirmed", async () => {
+    const fetchMock = mockFetch({
+      actions: () => res(200, [action(1, { status: "PLANNED", version: 2 })]),
+      patch: (id) => res(200, action(id, { status: "CANCELLED", version: 3 })),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Status/), "CANCELLED");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Cancel this action?")).toBeTruthy();
+    expect(writes(fetchMock, "PATCH")).toHaveLength(0);
+
+    const [dismiss, confirm] = within(dialog).getAllByRole("button");
+    expect(document.activeElement).toBe(dismiss);
+    confirm.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(dismiss);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(confirm);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(within(f).getByRole("button", { name: "Save action" }));
+    expect(writes(fetchMock, "PATCH")).toHaveLength(0);
+
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const again = await screen.findByRole("dialog");
+    fireEvent.click(within(again).getByRole("button", { name: "Cancel action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(1));
+    expect(sentBody(writes(fetchMock, "PATCH")[0])).toEqual({ version: 2, status: "CANCELLED" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("INVALID_ACTION_TRANSITION shows a callout, keeps the form open and re-reads the list", async () => {
+    const fetchMock = mockFetch({
+      actions: () => res(200, [action(1, { status: "PLANNED" })]),
+      patch: () => res(409, { error: "INVALID_ACTION_TRANSITION" }),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Status/), "IN_PROGRESS");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const alert = await within(f).findByRole("alert");
+    expect(alert.textContent).toMatch(/status change isn't allowed/);
+    expect((within(f).getByLabelText(/^Status/) as HTMLSelectElement).value).toBe("IN_PROGRESS");
+    expect(listReads(fetchMock).length).toBe(2);
+  });
+
+  it("ACTION_LOCKED shows the locked callout and turns the form read-only with values visible", async () => {
+    mockFetch({
+      actions: () => res(200, [action(1)]),
+      patch: () => res(409, { error: "ACTION_LOCKED" }),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Description/), "Edited too late");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const alert = await within(f).findByRole("alert");
+    expect(alert.textContent).toContain("This action can no longer be edited.");
+    const description = within(f).getByLabelText(/^Description/) as HTMLTextAreaElement;
+    expect(description.value).toBe("Edited too late");
+    expect(description.readOnly).toBe(true);
+    expect(within(f).queryByRole("button", { name: "Save action" })).toBeNull();
+    expect(within(f).getByRole("button", { name: "Close" })).toBeTruthy();
+  });
+});
+
+describe("C-15 Stale callout", () => {
+  const current = () =>
+    action(1, {
+      description: "Original",
+      result: "Theirs",
+      assignee: { id: 8, name: "Carlos Mendes" },
+      lastUpdatedBy: { id: 8, name: "Carlos Mendes" },
+      updatedAt: "2026-10-12T04:02:40.000Z",
+      version: 2,
+    });
+
+  it("names the editor and time, shows the current values, and keeps the typed edit", async () => {
+    mockFetch({
+      actions: () => res(200, [action(1, { description: "Original" })]),
+      patch: () => res(409, { error: "STALE_UPDATE", current: current() }),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Description/), "Mine");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+
+    const alert = await within(f).findByRole("alert");
+    expect(alert.textContent).toContain("This action was changed by Carlos Mendes at 12 Oct, 11:02.");
+    expect(document.activeElement).toBe(alert);
+    const latest = within(f).getByLabelText("Latest version");
+    expect(within(latest).getByText("Theirs")).toBeTruthy();
+    expect(within(latest).getByText("Carlos Mendes")).toBeTruthy();
+    expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Mine");
+  });
+
+  it("Use latest version adopts the new version and untouched fields, keeps edits; next Save sends version 2", async () => {
+    let attempt = 0;
+    const fetchMock = mockFetch({
+      actions: () => res(200, [action(1, { description: "Original" })]),
+      patch: () => {
+        attempt += 1;
+        return attempt === 1
+          ? res(409, { error: "STALE_UPDATE", current: current() })
+          : res(200, action(1, { description: "Mine", version: 3 }));
+      },
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Description/), "Mine");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const alert = await within(f).findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Use latest version (keep my edits)" }));
+
+    expect(within(f).queryByLabelText("Latest version")).toBeNull();
+    expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Mine");
+    expect((within(f).getByLabelText(/^Result/) as HTMLTextAreaElement).value).toBe("Theirs");
+    expect((within(f).getByLabelText("Assignee") as HTMLSelectElement).value).toBe("8");
+
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(2));
+    expect(sentBody(writes(fetchMock, "PATCH")[1])).toEqual({ version: 2, description: "Mine" });
+    expect(await within(card).findByText("Action saved.")).toBeTruthy();
+  });
+
+  it("if the other editor completed the action, using the latest version makes the form read-only", async () => {
+    mockFetch({
+      actions: () => res(200, [action(1)]),
+      patch: () =>
+        res(409, { error: "STALE_UPDATE", current: { ...current(), status: "COMPLETED" } }),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Description/), "Mine");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const alert = await within(f).findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: /Use latest version/ }));
+    expect(within(f).getByRole("alert").textContent).toContain("This action can no longer be edited.");
+    expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Mine");
+    expect(within(f).queryByRole("button", { name: "Save action" })).toBeNull();
+  });
+});
+
+describe("Ticket Cancel cascade (BR-41)", () => {
+  it("after Cancelling the ticket the card shows the cancelled rows and no Add action", async () => {
+    let cancelled = false;
+    mockFetch({
+      ticket: () => res(200, ticketBody({ status: cancelled ? "CANCELLED" : "OPEN" })),
+      actions: () =>
+        res(200, [action(1, { status: cancelled ? "CANCELLED" : "PLANNED" })]),
+    });
+    const fetchMock = vi.mocked(fetch);
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      if (input === URLS.status && init?.method === "PATCH") {
+        cancelled = true;
+        return res(200, ticketBody({ status: "CANCELLED", version: 4 }));
+      }
+      return base(input as never, init as never);
+    });
+    const card = await openCard();
+    expect(within(card).getByRole("button", { name: /^Edit action/ })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Current Status"), { target: { value: "CANCELLED" } });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel ticket" }));
+    await waitFor(() => expect(within(card).getAllByText("Cancelled").length).toBeGreaterThan(0));
+    expect(within(card).queryByRole("button", { name: "Add action" })).toBeNull();
+    expect(within(card).queryByRole("button", { name: /^Edit action/ })).toBeNull();
+  });
+});
