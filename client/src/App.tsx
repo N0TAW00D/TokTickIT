@@ -5,6 +5,7 @@ import { RequireRole } from "./routes/RequireRole";
 import { RoleLandingRedirect } from "./routes/RoleLandingRedirect";
 import { LoginScreen } from "./screens/LoginScreen";
 import { ChangePasswordScreen } from "./screens/ChangePasswordScreen";
+import { DashboardScreen } from "./screens/DashboardScreen";
 import { MyTicketsScreen } from "./screens/MyTicketsScreen";
 import { CreateTicketScreen } from "./screens/CreateTicketScreen";
 import { TicketDetailScreen } from "./screens/TicketDetailScreen";
@@ -17,34 +18,16 @@ import { UserManagementScreen } from "./screens/UserManagementScreen";
  * `AuthProvider` wraps everything so `AppShell`'s `UserBadge` always has
  * real context to read.
  *
- * Issue #70 rewires the Requester ticket routes (`/tickets`, `/tickets/new`,
- * `/tickets/:id`) off the Lab 2 Development Requester selector
- * (`RequesterProvider`/`RequireRequester`, both deleted) and onto real
- * session identity: `RequireRole(['REQUESTER'])` already wraps `RequireAuth`
- * internally (see RequireRole.tsx), so no session -> Login, a session with
- * the wrong role -> the forbidden state, and only an authenticated
- * Requester ever reaches these screens. `/select-requester` is gone with
- * the selector it served.
- *
- * `/staff/tickets` (ui-spec.md §9) follows the identical
- * `RequireRole(['IT_STAFF'])` pattern — an unauthenticated caller lands on
- * Login (via `RequireRole`'s internal `RequireAuth`) and an authenticated
- * non-IT_STAFF caller sees the forbidden state (ui-spec.md §4.3), never
- * `StaffTicketQueueScreen` itself.
- *
- * `/staff/tickets/:id` (ui-spec.md §10, Issue #72) is `IT_STAFF`-only in
- * the UI, same as `/staff/tickets` above: the role-specific navigation
- * table (ui-spec.md §4.2) gives Administrator exactly one destination
- * (User Management), this screen is titled "Screen: IT Staff Ticket
- * Detail" and appears in no Administrator nav, and §4.3 says a role that
- * reaches a route it may not use gets the forbidden state, not the
- * screen. Don't conflate this with `GET /api/tickets/:id` also serving
- * ADMINISTRATOR reads (api-spec.md §5) — that's a fact about the read
- * API, not a grant of this UI route, and conflating the two is exactly
- * how an Administrator previously ended up on a screen whose Ticket
- * Owner/Status controls are IT_STAFF-only server-side and 403 on submit.
- * Everyone else (including an unauthenticated caller, or a REQUESTER) is
- * handled by `RequireRole` exactly as above.
+ * - `/dashboard` (lab-04 ui-spec.md §2) is one route for every role behind
+ *   `RequireAuth`; `DashboardScreen` picks the Requester or staff variant
+ *   from the session. `/` redirects there (D-12).
+ * - Requester routes (`/tickets`, `/tickets/new`, `/tickets/:id`) are
+ *   `RequireRole(['REQUESTER'])`: no session -> Login, the wrong role -> the
+ *   forbidden state, and only a Requester ever mounts those screens.
+ * - `/staff/tickets` and `/staff/tickets/:id` allow `IT_STAFF` and
+ *   `ADMINISTRATOR` (lab-04 D-13: an Administrator reads the queue and opens
+ *   a Ticket; status, claim and notes stay IT-Staff-only server-side).
+ * - `/admin/users` is `ADMINISTRATOR` only.
  */
 function App() {
   return (
@@ -60,6 +43,14 @@ function App() {
           }
         />
         <Route path="/" element={<RoleLandingRedirect />} />
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth>
+              <DashboardScreen />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/tickets"
           element={
@@ -87,7 +78,7 @@ function App() {
         <Route
           path="/staff/tickets"
           element={
-            <RequireRole allowedRoles={["IT_STAFF"]}>
+            <RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}>
               <StaffTicketQueueScreen />
             </RequireRole>
           }
@@ -95,7 +86,7 @@ function App() {
         <Route
           path="/staff/tickets/:id"
           element={
-            <RequireRole allowedRoles={["IT_STAFF"]}>
+            <RequireRole allowedRoles={["IT_STAFF", "ADMINISTRATOR"]}>
               <StaffTicketDetailScreen />
             </RequireRole>
           }
