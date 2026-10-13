@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, configure, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
 
@@ -102,6 +102,12 @@ function renderScreen() {
     </MemoryRouter>,
   );
 }
+
+// The screen reads the Ticket first and only then Actions Taken and history, so a
+// cold first render under CPU contention needs longer than the 1 s default.
+beforeAll(() => {
+  configure({ asyncUtilTimeout: 5000 });
+});
 
 afterEach(() => {
   cleanup();

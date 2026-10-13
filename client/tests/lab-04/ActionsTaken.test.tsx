@@ -661,7 +661,10 @@ describe("C-12 Validation placement", () => {
     await waitFor(() =>
       expect(errorUnder(within(f).getByLabelText(/^Description/))).toBe("Description is required."),
     );
-    expect(document.activeElement).toBe(within(f).getByLabelText(/^Description/));
+    // Focus is requested in an effect after the error render, so it lands one commit later.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(f).getByLabelText(/^Description/)),
+    );
     expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("typed text");
     expect((within(f).getByLabelText(/^Attachment notes/) as HTMLTextAreaElement).value).toBe("see log");
   });
@@ -973,7 +976,9 @@ describe("Edit form", () => {
     const call = writes(fetchMock, "PATCH")[0];
     expect(call[0]).toBe(actionUrl(1));
     expect(sentBody(call)).toEqual({ version: 4, description: "Changed" });
-    expect(document.activeElement).toBe(within(card).getByRole("button", { name: /^Edit action from / }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(card).getByRole("button", { name: /^Edit action from / })),
+    );
   });
 
   it("closes without a request when nothing changed", async () => {
@@ -1141,7 +1146,7 @@ describe("C-15 Stale callout", () => {
 
     const alert = await within(f).findByRole("alert");
     expect(alert.textContent).toContain("This action was changed by Carlos Mendes at 12 Oct, 11:02.");
-    expect(document.activeElement).toBe(alert);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
     const latest = within(f).getByLabelText("Latest version");
     expect(within(latest).getByText("Theirs")).toBeTruthy();
     expect(within(latest).getByText("Carlos Mendes")).toBeTruthy();
