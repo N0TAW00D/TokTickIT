@@ -239,7 +239,7 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     const ticket = await createTicket(requester.id);
     const row = await createActionRow(ticket.id, staff.id);
     const messages = new Set<string>();
-    for (const assigneeId of [inactive.id, requester.id, 2_000_000_000]) {
+    for (const assigneeId of [inactive.id, requester.id, 2_000_000_000, 2_147_483_648, 1e300, 0, -1]) {
       const c = await post(ticket.id, staffCookie, { description: 'x', assigneeId });
       expect(c.status).toBe(409);
       expect(c.body.error).toBe('INVALID_ASSIGNEE');
@@ -338,7 +338,11 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     );
     expect(results.filter((r) => r.status === 201)).toHaveLength(1);
     const others = results.filter((r) => r.status !== 201);
-    expect(others.every((r) => r.status === 409 && r.body.error === 'IDEMPOTENCY_CONFLICT' || r.status === 200)).toBe(true);
+    expect(others).toHaveLength(5);
+    for (const r of others) {
+      expect(r.status).toBe(409);
+      expect(r.body.error).toBe('IDEMPOTENCY_CONFLICT');
+    }
     expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(1);
   });
 
@@ -371,6 +375,30 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     const clientRequestId = randomUUID();
     expect((await post(a.id, staffCookie, { description: 'x', clientRequestId })).status).toBe(201);
     expect((await post(b.id, staffCookie, { description: 'x', clientRequestId })).status).toBe(201);
+  });
+
+  it('BR-34: invalid body 400 precedes the access lookup (Requester 403, unknown Ticket 404)', async () => {
+    const ticket = await createTicket(requester.id);
+    const asRequester = await post(ticket.id, requesterCookie, { description: '' });
+    expect(asRequester.status).toBe(400);
+    expect(asRequester.body.error).toBe('VALIDATION_FAILED');
+    const unknownTicket = await post(999_999_999, staffCookie, { description: '' });
+    expect(unknownTicket.status).toBe(400);
+    const validAsRequester = await post(ticket.id, requesterCookie, { description: 'x' });
+    expect(validAsRequester.status).toBe(403);
+    const validUnknown = await post(999_999_999, staffCookie, { description: 'x' });
+    expect(validUnknown.status).toBe(404);
+    expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
+  });
+
+  it('BR-35: clientRequestId that is not a UUID v4 is 400, nothing written', async () => {
+    const ticket = await createTicket(requester.id);
+    for (const clientRequestId of ['6ba7b810-9dad-11d1-80b4-00c04fd430c8', '3f2b8c1e-5a4d-1e6f-9b7a-1c2d3e4f5a6b', 'x']) {
+      const res = await post(ticket.id, staffCookie, { description: 'x', clientRequestId });
+      expect(res.status, clientRequestId).toBe(400);
+      expect(res.body.fields.map((f: { field: string }) => f.field)).toContain('clientRequestId');
+    }
+    expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
   });
 
   it('404 for a nonexistent or non-integer Ticket id; 400 MALFORMED_BODY for a non-object body', async () => {
@@ -479,6 +507,45 @@ describe('PATCH /api/tickets/:id/actions-taken/:actionId', () => {
     const stored = await prisma.actionTaken.findUniqueOrThrow({ where: { id: created.body.id } });
     expect(stored.description).toBe('first writer');
     expect(stored.version).toBe(2);
+  });
+
+  it('BR-34: body shape 400 precedes STALE_UPDATE; record-dependent 400 precedes it too; valid stale still 409', async () => {
+    const ticket = await createTicket(requester.id);
+    const row = await createActionRow(ticket.id, staff.id);
+    const badShapes: Record<string, unknown>[] = [
+      { version: 7, description: '' },
+      { version: 7, status: 'DONE' },
+      { version: 7, assigneeId: 'x' },
+      { version: 7, attachmentNotes: 'a'.repeat(501) },
+      { version: 7, actionAt: 'not-a-date' },
+    ];
+    for (const body of badShapes) {
+      const res = await patch(ticket.id, row.id, staffCookie, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(res.body.error).toBe('VALIDATION_FAILED');
+    }
+    const beforeCreation = await patch(ticket.id, row.id, staffCookie, {
+      version: 7,
+      actionAt: new Date(ticket.createdAt.getTime() - 86_400_000).toISOString(),
+    });
+    expect(beforeCreation.status).toBe(400);
+    expect(beforeCreation.body.fields.map((f: { field: string }) => f.field)).toContain('actionAt');
+    const noResult = await patch(ticket.id, row.id, staffCookie, { version: 7, status: 'COMPLETED' });
+    expect(noResult.status).toBe(400);
+    const stale = await patch(ticket.id, row.id, staffCookie, { version: 7, description: 'fine' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe('STALE_UPDATE');
+  });
+
+  it('BR-34: PATCH body shape 400 precedes the access lookup (Requester 403, unknown Ticket 404)', async () => {
+    const ticket = await createTicket(requester.id);
+    const row = await createActionRow(ticket.id, staff.id);
+    const asRequester = await patch(ticket.id, row.id, requesterCookie, { version: 1, description: '' });
+    expect(asRequester.status).toBe(400);
+    const unknownTicket = await patch(999_999_999, row.id, staffCookie, { version: 1, description: '' });
+    expect(unknownTicket.status).toBe(400);
+    const validAsRequester = await patch(ticket.id, row.id, requesterCookie, { version: 1, description: 'x' });
+    expect(validAsRequester.status).toBe(403);
   });
 
   it('API-14: stale check precedes domain conflicts (locked Action with old version -> STALE_UPDATE)', async () => {
