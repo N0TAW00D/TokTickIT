@@ -17,6 +17,8 @@ import type { FieldError } from '../validation/ticketFields.ts';
 // domain checks and only then writes - so a rejected request leaves nothing
 // behind. Rules themselves live in `validation/actionRules.ts`.
 
+const PG_INT4_MAX = 2_147_483_647;
+
 export const ACTION_INCLUDE = {
   performedBy: { select: { id: true, name: true, role: true } },
   assignee: { select: { id: true, name: true } },
@@ -79,6 +81,9 @@ const isTicketClosed = (status: string) => status === 'CLOSED' || status === 'CA
 
 /** BR-08: an assignee must be an active IT Staff or Administrator. */
 async function assigneeIsValid(tx: Tx, assigneeId: number): Promise<boolean> {
+  // An id outside the INT4 key range cannot name a user (and would make
+  // Postgres throw); it is the same INVALID_ASSIGNEE answer as an unknown id.
+  if (assigneeId < 1 || assigneeId > PG_INT4_MAX) return false;
   const user = await tx.user.findFirst({
     where: { id: assigneeId, isActive: true, role: { in: ['IT_STAFF', 'ADMINISTRATOR'] } },
     select: { id: true },
@@ -188,7 +193,7 @@ async function resolveAfterUniqueViolation(
 }
 
 /**
- * PATCH: lock -> read -> compare version -> merge/validate -> TICKET_CLOSED ->
+ * PATCH: lock -> read -> merge/validate -> compare version -> TICKET_CLOSED ->
  * ACTION_LOCKED -> INVALID_ACTION_TRANSITION -> INVALID_ASSIGNEE -> write
  * (`UPDATE ... WHERE id AND version`, belt and braces).
  */
@@ -206,11 +211,6 @@ export async function updateAction(params: {
     const stored = await tx.actionTaken.findFirst({ where: { id: actionId, ticketId }, include: ACTION_INCLUDE });
     if (!stored) return { kind: 'not-found' };
 
-    // `version` is shape-checked by the route before the transaction; here it
-    // is compared. A body whose version is not a number cannot reach this.
-    const requestedVersion = body.version as number;
-    if (requestedVersion !== stored.version) return { kind: 'stale', current: stored };
-
     const merged = mergeActionUpdate(
       {
         description: stored.description,
@@ -226,6 +226,10 @@ export async function updateAction(params: {
       { ticketCreatedAt: ticket.createdAt, now: new Date() },
     );
     if (!merged.ok) return { kind: 'validation', errors: merged.errors };
+
+    // BR-34: record-dependent 400 precedes STALE_UPDATE. `version` is
+    // shape-checked by the route; a non-number cannot reach this.
+    if ((body.version as number) !== stored.version) return { kind: 'stale', current: stored };
 
     if (isTicketClosed(ticket.status)) return { kind: 'ticket-closed' };
     if (stored.status === 'COMPLETED' || stored.status === 'CANCELLED') return { kind: 'action-locked' };

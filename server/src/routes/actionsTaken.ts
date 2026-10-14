@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { prisma } from '../lib/prisma.ts';
-import { validateActionCreateBody, validateVersion } from '../validation/actionRules.ts';
+import { validateActionCreateBody, validateActionUpdateShape } from '../validation/actionRules.ts';
 import { hashActionCreateBody } from '../services/actionRequestHash.ts';
 import {
   actionToJson,
@@ -16,7 +16,7 @@ import type { FieldError } from '../validation/ticketFields.ts';
 // PATCH /api/tickets/:id/actions-taken/:actionId (docs/lab-04/api-spec.md §2;
 // specification.md BR-01..BR-15, BR-33..BR-39). Check order is BR-34:
 // 415 -> 401 -> password gate -> malformed id 404 -> body shape 400 -> access
-// 404/403 -> (inside the Ticket lock) record-dependent 400 / STALE_UPDATE /
+// 404/403 -> (inside the Ticket lock) record-dependent 400 -> STALE_UPDATE ->
 // business 409s.
 export const actionsTakenRouter: Router = Router({ mergeParams: true });
 
@@ -147,6 +147,12 @@ actionsTakenRouter.post(
       return;
     }
     const body = req.body;
+    // BR-34: body shape 400 comes before the access lookup.
+    const shape = validateActionCreateBody(body, null);
+    if (!shape.ok) {
+      validationFailed(res, shape.errors);
+      return;
+    }
     try {
       const access = await resolveAccess(ticketId, req.authUser!);
       if (access === 'not-found') {
@@ -189,9 +195,9 @@ actionsTakenRouter.patch(
       return;
     }
     const body = req.body;
-    const version = validateVersion(body.version);
-    if (!version.ok) {
-      validationFailed(res, [version.error]);
+    const shapeErrors = validateActionUpdateShape(body);
+    if (shapeErrors.length > 0) {
+      validationFailed(res, shapeErrors);
       return;
     }
     try {

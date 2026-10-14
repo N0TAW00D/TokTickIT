@@ -19,7 +19,7 @@ const RESULT_MAX = 2000;
 const FOLLOW_UP_NOTE_MAX = 1000;
 const ATTACHMENT_NOTES_MAX = 500;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // ISO 8601 date-time that carries an explicit offset (api-spec §2.3).
 const ISO_WITH_OFFSET_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;
@@ -143,7 +143,7 @@ export function validateVersion(raw: unknown): FieldResult<number> {
 export function validateClientRequestId(raw: unknown): FieldResult<string | null> {
   if (raw === undefined || raw === null) return { ok: true, value: null };
   if (typeof raw !== 'string' || !UUID_RE.test(raw)) {
-    return fail('clientRequestId', 'clientRequestId must be a UUID.');
+    return fail('clientRequestId', 'clientRequestId must be a UUID v4.');
   }
   return { ok: true, value: raw };
 }
@@ -214,9 +214,11 @@ function collect(errors: FieldError[], r: FieldResult<unknown>): void {
 
 /**
  * Validates a POST body (api-spec §2.3). Server-owned keys are ignored.
- * `actionAt` defaults to `ctx.now`. Collects every field error.
+ * `actionAt` defaults to `ctx.now`. Collects every field error. Pass
+ * `ctx = null` for the shape-only pass that runs before the access lookup
+ * (BR-34); the full pass then adds the record-dependent `actionAt` bounds.
  */
-export function validateActionCreateBody(body: Body, ctx: ActionRuleContext): RulesResult<ValidatedCreate> {
+export function validateActionCreateBody(body: Body, ctx: ActionRuleContext | null): RulesResult<ValidatedCreate> {
   const errors: FieldError[] = [];
 
   const description = validateActionDescription(body.description);
@@ -232,13 +234,14 @@ export function validateActionCreateBody(body: Body, ctx: ActionRuleContext): Ru
 
   let actionAt: Date | null = null;
   if (body.actionAt === undefined || body.actionAt === null) {
-    actionAt = ctx.now;
+    actionAt = ctx ? ctx.now : new Date(0);
   } else {
     const parsed = parseInstant(body.actionAt);
     if (!parsed.ok) errors.push(parsed.error);
     else actionAt = parsed.value;
   }
-  if (actionAt && status.ok) collect(errors, checkActionAtBounds(actionAt, status.value, ctx));
+  // `ctx === null` is the shape-only pass (BR-34): the bounds need the Ticket.
+  if (ctx && actionAt && status.ok) collect(errors, checkActionAtBounds(actionAt, status.value, ctx));
 
   const assignee = validateAssigneeId(body.assigneeId);
   collect(errors, assignee);
@@ -264,6 +267,38 @@ export function validateActionCreateBody(body: Body, ctx: ActionRuleContext): Ru
       clientRequestId: (clientRequestId as { value: string | null }).value,
     },
   };
+}
+
+/**
+ * Shape-only check of a PATCH body (BR-34: runs before the access lookup, so
+ * nothing here may need the stored Action). Everything that depends on the
+ * stored state - the follow-up pair, a result required to complete, the
+ * `actionAt` bounds - is judged later by `mergeActionUpdate`.
+ */
+export function validateActionUpdateShape(body: Body): FieldError[] {
+  const errors: FieldError[] = [];
+  collect(errors, validateVersion(body.version));
+  if (!UPDATABLE.some((k) => k in body && body[k] !== undefined)) {
+    errors.push({ field: 'body', message: 'At least one field to change is required.' });
+  }
+  const has = (k: (typeof UPDATABLE)[number]) => body[k] !== undefined;
+  if (has('description')) collect(errors, validateActionDescription(body.description));
+  if (has('status')) collect(errors, parseStatus(body.status, ACTION_STATUSES));
+  if (has('result')) collect(errors, validateActionResult(body.result));
+  if (has('actionAt')) collect(errors, parseInstant(body.actionAt));
+  if (has('assigneeId')) collect(errors, validateAssigneeId(body.assigneeId));
+  if (has('attachmentNotes')) collect(errors, validateAttachmentNotes(body.attachmentNotes));
+  if (has('followUpRequired') && typeof body.followUpRequired !== 'boolean') {
+    errors.push({ field: 'followUpRequired', message: 'followUpRequired must be true or false.' });
+  }
+  if (has('followUpNote') && body.followUpNote !== null) {
+    if (typeof body.followUpNote !== 'string') {
+      errors.push({ field: 'followUpNote', message: 'followUpNote must be text.' });
+    } else if (body.followUpNote.trim().length > FOLLOW_UP_NOTE_MAX) {
+      errors.push({ field: 'followUpNote', message: `followUpNote must be at most ${FOLLOW_UP_NOTE_MAX} characters.` });
+    }
+  }
+  return errors;
 }
 
 const UPDATABLE = [
