@@ -6,6 +6,7 @@ import {
   validateActionCreateBody,
   validateActionDescription,
   validateActionResult,
+  validateActionUpdateShape,
   validateAttachmentNotes,
   validateClientRequestId,
   validateFollowUp,
@@ -247,12 +248,33 @@ describe('UNIT-09 version validator (BR-33)', () => {
   });
 });
 
+describe('BR-34 shape-only passes', () => {
+  it('create with ctx null skips the record-dependent actionAt bounds but keeps shape errors', () => {
+    const early = { description: 'x', actionAt: '2000-01-01T00:00:00Z', status: 'COMPLETED', result: 'ok' };
+    expect(validateActionCreateBody(early, null).ok).toBe(true);
+    expect(validateActionCreateBody(early, ctx).ok).toBe(false);
+    const bad = validateActionCreateBody({ description: '', clientRequestId: 'x' }, null);
+    expect(bad.ok).toBe(false);
+  });
+
+  it('update shape pass reports version and field shapes without a stored Action', () => {
+    expect(validateActionUpdateShape({ version: 1, description: 'x' })).toEqual([]);
+    expect(validateActionUpdateShape({ version: 1, status: 'COMPLETED' })).toEqual([]);
+    const fields = validateActionUpdateShape({ version: 0, description: '', followUpRequired: 'yes' }).map((e) => e.field);
+    expect(fields).toEqual(expect.arrayContaining(['version', 'description', 'followUpRequired']));
+    expect(validateActionUpdateShape({ version: 1 }).map((e) => e.field)).toEqual(['body']);
+  });
+});
+
 describe('UNIT-10 clientRequestId validator and body hash (BR-35)', () => {
   it('UNIT-10 UUID accepted, malformed rejected, omitted accepted', () => {
     const id = '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b';
     expect(validateClientRequestId(id)).toEqual({ ok: true, value: id });
     expect(validateClientRequestId(id.toUpperCase()).ok).toBe(true);
-    for (const raw of ['', 'abc', '3f2b8c1e5a4d4e6f9b7a1c2d3e4f5a6b', 12, true, {}]) {
+    // v1 and v7 are well-formed UUIDs but not v4; a v4 id with a bad variant is rejected too.
+    const rejected = ['', 'abc', '3f2b8c1e5a4d4e6f9b7a1c2d3e4f5a6b', 12, true, {},
+      '6ba7b810-9dad-11d1-80b4-00c04fd430c8', '01890a5d-ac96-774b-bcce-b302099a8057', '3f2b8c1e-5a4d-4e6f-1b7a-1c2d3e4f5a6b'];
+    for (const raw of rejected) {
       const r = validateClientRequestId(raw);
       expect(r.ok, JSON.stringify(raw)).toBe(false);
       if (!r.ok) expect(r.error.field).toBe('clientRequestId');
