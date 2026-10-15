@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { connect } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
@@ -57,6 +59,18 @@ function patch(ticketId: number, actionId: number | string, cookie: string, body
     .set('Cookie', cookie)
     .set('Content-Type', 'application/json')
     .send(body as object);
+}
+/** A request with a JSON Content-Type but neither Content-Length nor Transfer-Encoding (no body at all). */
+function rawBodiless(method: 'POST' | 'PATCH', path: string, cookie: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const { port } = testServer.server.address() as AddressInfo;
+    const socket = connect(port, '127.0.0.1');
+    let data = '';
+    socket.on('data', (c) => (data += c.toString()));
+    socket.on('error', reject);
+    socket.on('close', () => resolve({ status: Number(data.split(' ')[1]), body: data.split('\r\n\r\n').slice(1).join('') }));
+    socket.write(`${method} ${path} HTTP/1.1\r\nHost: x\r\nCookie: ${cookie}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n`);
+  });
 }
 function list(ticketId: number, cookie: string) {
   return request(testServer.server).get(base(ticketId)).set('Cookie', cookie);
@@ -401,6 +415,82 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
   });
 
+  it('BR-34: malformed JSON is a body-shape 400 after 401 and the path-id 404, before access', async () => {
+    const ticket = await createTicket(requester.id);
+    const raw = (url: string, cookie?: string) => {
+      const r = request(testServer.server).post(url).set('Content-Type', 'application/json');
+      return (cookie ? r.set('Cookie', cookie) : r).send('{"description": ');
+    };
+    expect((await raw(base(ticket.id))).status).toBe(401);
+    expect((await raw('/api/tickets/abc/actions-taken', staffCookie)).status).toBe(404);
+    const malformed = await raw(base(ticket.id), staffCookie);
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error).toBe('MALFORMED_BODY');
+    const asRequester = await raw(base(ticket.id), requesterCookie);
+    expect(asRequester.status).toBe(400);
+    expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
+  });
+
+  it('BR-34: a JSON Content-Type with no body is a 400 field-level answer, not 415; no Content-Type stays 415', async () => {
+    const ticket = await createTicket(requester.id);
+    const noBody = await request(testServer.server).post(base(ticket.id)).set('Cookie', staffCookie).set('Content-Type', 'application/json');
+    expect(noBody.status).toBe(400);
+    expect(noBody.body.error).toBe('VALIDATION_FAILED');
+    expect(noBody.body.fields.map((f: { field: string }) => f.field)).toContain('description');
+    const trulyBodiless = await rawBodiless('POST', base(ticket.id), staffCookie);
+    expect(trulyBodiless.status).toBe(400);
+    expect(JSON.parse(trulyBodiless.body).error).not.toBe('UNSUPPORTED_MEDIA_TYPE');
+    const charset = await request(testServer.server).post(base(ticket.id)).set('Cookie', staffCookie).set('Content-Type', 'application/json; charset=utf-8');
+    expect(charset.status).toBe(400);
+    const none = await request(testServer.server).post(base(ticket.id)).set('Cookie', staffCookie);
+    expect(none.status).toBe(415);
+  });
+
+  it('BR-04: impossible calendar dates are 400, real ones (leap day, offsets) are kept', async () => {
+    const ticket = await createTicket(requester.id);
+    for (const actionAt of ['2026-02-31T10:00:00Z', '2026-04-31T10:00:00+07:00', '2025-02-29T10:00:00Z', '2026-10-12T24:00:00Z']) {
+      const res = await post(ticket.id, staffCookie, { description: 'x', status: 'PLANNED', actionAt });
+      expect(res.status, actionAt).toBe(400);
+      expect(res.body.fields.map((f: { field: string }) => f.field)).toContain('actionAt');
+    }
+    expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
+    const leap = await post(ticket.id, staffCookie, { description: 'x', status: 'PLANNED', actionAt: '2096-02-29T10:00:00+07:00' });
+    expect(leap.status).toBe(201);
+    expect(new Date(leap.body.actionAt).toISOString()).toBe('2096-02-29T03:00:00.000Z');
+  });
+
+  it('BR-35: the same clientRequestId in another letter case is the same key', async () => {
+    const ticket = await createTicket(requester.id);
+    const id = randomUUID();
+    const first = await post(ticket.id, staffCookie, { description: 'Case', clientRequestId: id });
+    const second = await post(ticket.id, staffCookie, { description: 'Case', clientRequestId: id.toUpperCase() });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.body.id).toBe(first.body.id);
+    const other = await post(ticket.id, staffCookie, { description: 'Different', clientRequestId: id.toUpperCase() });
+    expect(other.status).toBe(409);
+    expect(other.body.error).toBe('IDEMPOTENCY_CONFLICT');
+    const rows = await prisma.actionTaken.findMany({ where: { ticketId: ticket.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].clientRequestId).toBe(id);
+  });
+
+  it('BR-07: attachmentNotes keeps its text as sent; blank is none; the limit counts the sent text', async () => {
+    const ticket = await createTicket(requester.id);
+    const padded = '  See vpn-error.png  \n';
+    const kept = await post(ticket.id, staffCookie, { description: 'x', attachmentNotes: padded });
+    expect(kept.status).toBe(201);
+    expect(kept.body.attachmentNotes).toBe(padded);
+    const blank = await post(ticket.id, staffCookie, { description: 'x', attachmentNotes: '   ' });
+    expect(blank.status).toBe(201);
+    expect(blank.body.attachmentNotes).toBeNull();
+    const over = await post(ticket.id, staffCookie, { description: 'x', attachmentNotes: `${'a'.repeat(500)} ` });
+    expect(over.status).toBe(400);
+    const patched = await patch(ticket.id, kept.body.id, staffCookie, { version: 1, attachmentNotes: ' new note ' });
+    expect(patched.status).toBe(200);
+    expect(patched.body.attachmentNotes).toBe(' new note ');
+  });
+
   it('404 for a nonexistent or non-integer Ticket id; 400 MALFORMED_BODY for a non-object body', async () => {
     expect((await post(99999999, staffCookie, { description: 'x' })).status).toBe(404);
     const bad = await request(testServer.server).post('/api/tickets/abc/actions-taken').set('Cookie', staffCookie).set('Content-Type', 'application/json').send({ description: 'x' });
@@ -582,6 +672,29 @@ describe('PATCH /api/tickets/:id/actions-taken/:actionId', () => {
     const stored = await prisma.actionTaken.findUniqueOrThrow({ where: { id: row.id } });
     expect(stored.description).toBe('Seeded action');
     expect(stored.version).toBe(1);
+  });
+
+  it('BR-34: PATCH malformed JSON / bodiless JSON request order matches POST', async () => {
+    const ticket = await createTicket(requester.id);
+    const row = await createActionRow(ticket.id, staff.id);
+    const raw = (url: string, cookie?: string) => {
+      const r = request(testServer.server).patch(url).set('Content-Type', 'application/json');
+      return (cookie ? r.set('Cookie', cookie) : r).send('{"version": ');
+    };
+    expect((await raw(`${base(ticket.id)}/${row.id}`)).status).toBe(401);
+    expect((await raw(`${base(ticket.id)}/abc`, staffCookie)).status).toBe(404);
+    const malformed = await raw(`${base(ticket.id)}/${row.id}`, staffCookie);
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error).toBe('MALFORMED_BODY');
+    const noBody = await request(testServer.server).patch(`${base(ticket.id)}/${row.id}`).set('Cookie', staffCookie).set('Content-Type', 'application/json');
+    expect(noBody.status).toBe(400);
+    expect(noBody.body.error).toBe('VALIDATION_FAILED');
+    expect(noBody.body.fields.map((f: { field: string }) => f.field)).toContain('version');
+    const trulyBodiless = await rawBodiless('PATCH', `${base(ticket.id)}/${row.id}`, staffCookie);
+    expect(trulyBodiless.status).toBe(400);
+    const bad = await patch(ticket.id, row.id, staffCookie, { version: 1, actionAt: '2026-02-31T10:00:00Z' });
+    expect(bad.status).toBe(400);
+    expect((await prisma.actionTaken.findUniqueOrThrow({ where: { id: row.id } })).version).toBe(1);
   });
 
   it('404 when the Action is on another Ticket, does not exist, or ids are not integers', async () => {

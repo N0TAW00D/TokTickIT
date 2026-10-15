@@ -248,6 +248,24 @@ describe('UNIT-09 version validator (BR-33)', () => {
   });
 });
 
+describe('actionAt calendar validity and attachmentNotes text', () => {
+  it('rejects dates the Date constructor would roll over; accepts leap days and offsets', () => {
+    const at = (actionAt: string) => validateActionCreateBody({ description: 'x', actionAt }, null).ok;
+    for (const bad of ['2026-02-31T10:00:00Z', '2026-04-31T10:00:00Z', '2025-02-29T10:00:00Z', '2026-10-12T24:00:00Z', '2026-10-12T10:00:00+25:00', '2026-00-10T10:00:00Z', '2026-10-00T10:00:00Z']) {
+      expect(at(bad), bad).toBe(false);
+    }
+    for (const good of ['2024-02-29T10:00:00Z', '2026-12-31T23:59:59.999Z', '2026-10-12T10:00:00+07:00', '2026-10-12T10:00Z']) {
+      expect(at(good), good).toBe(true);
+    }
+  });
+
+  it('attachmentNotes: blank is none, non-blank is kept as sent, limit counts the sent text', () => {
+    expect(validateAttachmentNotes('  see a.png ')).toEqual({ ok: true, value: '  see a.png ' });
+    expect(validateAttachmentNotes('   ')).toEqual({ ok: true, value: null });
+    expect(validateAttachmentNotes(`${'a'.repeat(500)} `).ok).toBe(false);
+  });
+});
+
 describe('BR-34 shape-only passes', () => {
   it('create with ctx null skips the record-dependent actionAt bounds but keeps shape errors', () => {
     const early = { description: 'x', actionAt: '2000-01-01T00:00:00Z', status: 'COMPLETED', result: 'ok' };
@@ -270,7 +288,8 @@ describe('UNIT-10 clientRequestId validator and body hash (BR-35)', () => {
   it('UNIT-10 UUID accepted, malformed rejected, omitted accepted', () => {
     const id = '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b';
     expect(validateClientRequestId(id)).toEqual({ ok: true, value: id });
-    expect(validateClientRequestId(id.toUpperCase()).ok).toBe(true);
+    // Canonical form is lower case, so an upper-case key is the same key.
+    expect(validateClientRequestId(id.toUpperCase())).toEqual({ ok: true, value: id });
     // v1 and v7 are well-formed UUIDs but not v4; a v4 id with a bad variant is rejected too.
     const rejected = ['', 'abc', '3f2b8c1e5a4d4e6f9b7a1c2d3e4f5a6b', 12, true, {},
       '6ba7b810-9dad-11d1-80b4-00c04fd430c8', '01890a5d-ac96-774b-bcce-b302099a8057', '3f2b8c1e-5a4d-4e6f-1b7a-1c2d3e4f5a6b'];
