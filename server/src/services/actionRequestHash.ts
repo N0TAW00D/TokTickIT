@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 // The canonical form contains only the client-controllable create-body
 // fields. Server-owned fields (performedBy, createdAt, lastUpdatedBy,
 // ticketId, id, version) and clientRequestId itself are ignored. Text is
-// trimmed and an empty optional text becomes null; defaults are applied
+// trimmed (attachmentNotes verbatim) and an empty optional text becomes null; defaults are applied
 // (status PLANNED, followUpRequired false, every optional field null);
 // actionAt is normalised to ISO-8601 UTC, or null when the client omitted it
 // (the server's "now" default would make a genuine retry hash differently).
@@ -22,6 +22,11 @@ function text(value: unknown): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+/** Like `text` but a non-blank value is kept as sent (attachmentNotes, BR-07). */
+function verbatim(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
 function instant(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const d = new Date(value as string | number | Date);
@@ -33,7 +38,7 @@ export function canonicaliseActionCreateBody(body: Body): string {
   const canonical = {
     actionAt: instant(body.actionAt),
     assigneeId: typeof body.assigneeId === 'number' ? body.assigneeId : null,
-    attachmentNotes: text(body.attachmentNotes),
+    attachmentNotes: verbatim(body.attachmentNotes),
     description: text(body.description) ?? '',
     followUpNote: followUpRequired ? text(body.followUpNote) : null,
     followUpRequired,

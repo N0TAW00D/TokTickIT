@@ -92,15 +92,18 @@ export function validateActionResult(raw: unknown): FieldResult<string | null> {
   return { ok: true, value: trimmed };
 }
 
-/** `attachmentNotes`: optional text <= 500, absent/null/blank = none (BR-07). */
+/**
+ * `attachmentNotes`: optional text <= 500, absent/null/blank = none (BR-07).
+ * Blankness is judged on the trimmed text, but a non-blank note is kept and
+ * length-checked verbatim (stored "as text", tests.md API-06).
+ */
 export function validateAttachmentNotes(raw: unknown): FieldResult<string | null> {
   if (isBlank(raw)) return { ok: true, value: null };
   if (typeof raw !== 'string') return fail('attachmentNotes', 'attachmentNotes must be text.');
-  const trimmed = raw.trim();
-  if (trimmed.length > ATTACHMENT_NOTES_MAX) {
+  if (raw.length > ATTACHMENT_NOTES_MAX) {
     return fail('attachmentNotes', `attachmentNotes must be at most ${ATTACHMENT_NOTES_MAX} characters.`);
   }
-  return { ok: true, value: trimmed };
+  return { ok: true, value: raw };
 }
 
 /**
@@ -139,13 +142,16 @@ export function validateVersion(raw: unknown): FieldResult<number> {
   return { ok: true, value: raw };
 }
 
-/** `clientRequestId`: optional UUID string (BR-35); omitted/null -> `null`. */
+/**
+ * `clientRequestId`: optional UUID v4 string (BR-35); omitted/null -> `null`.
+ * Returned lower-cased so the same key in a different case is one key.
+ */
 export function validateClientRequestId(raw: unknown): FieldResult<string | null> {
   if (raw === undefined || raw === null) return { ok: true, value: null };
   if (typeof raw !== 'string' || !UUID_RE.test(raw)) {
     return fail('clientRequestId', 'clientRequestId must be a UUID v4.');
   }
-  return { ok: true, value: raw };
+  return { ok: true, value: raw.toLowerCase() };
 }
 
 /** `assigneeId`: shape only - integer or null. Role/active check is the DB's (BR-08). */
@@ -169,9 +175,21 @@ function parseInstant(raw: unknown): FieldResult<Date> {
   if (typeof raw !== 'string' || !ISO_WITH_OFFSET_RE.test(raw)) {
     return fail('actionAt', 'actionAt must be an ISO 8601 date-time with an offset.');
   }
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return fail('actionAt', 'actionAt must be a valid date-time.');
-  return { ok: true, value: d };
+  // `new Date` rolls impossible dates over (2026-02-31 -> 2026-03-03, 24:00 ->
+  // next day), so the calendar parts are checked before the instant is built.
+  const [, y, mo, d, h, mi] = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/) as RegExpMatchArray;
+  const daysInMonth = new Date(Date.UTC(Number(y), Number(mo), 0)).getUTCDate();
+  const offset = raw.match(/([+-])(\d{2}):?(\d{2})$/);
+  if (
+    Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > daysInMonth ||
+    Number(h) > 23 || Number(mi) > 59 ||
+    (offset !== null && (Number(offset[2]) > 23 || Number(offset[3]) > 59))
+  ) {
+    return fail('actionAt', 'actionAt must be a valid date-time.');
+  }
+  const instant = new Date(raw);
+  if (Number.isNaN(instant.getTime())) return fail('actionAt', 'actionAt must be a valid date-time.');
+  return { ok: true, value: instant };
 }
 
 /**
