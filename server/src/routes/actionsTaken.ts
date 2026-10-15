@@ -1,4 +1,4 @@
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { authenticate, passwordChangeGate, requireRole } from '../middleware/authContext.ts';
 import { prisma } from '../lib/prisma.ts';
 import { validateActionCreateBody, validateActionUpdateShape } from '../validation/actionRules.ts';
@@ -28,12 +28,44 @@ function parseId(raw: string): number | null {
   return Number.isInteger(id) && id > 0 && id <= PG_INT4_MAX ? id : null;
 }
 
+// `req.is()` answers null for a request with no body, which would turn a
+// bodiless request that declares JSON into 415; the header is judged alone.
+const JSON_CONTENT_TYPE_RE = /^application\/json\s*(;|$)/i;
+
 function requireJsonContentType(req: Request, res: Response, next: NextFunction): void {
-  if (!req.is('application/json')) {
+  if (!JSON_CONTENT_TYPE_RE.test(req.headers['content-type'] ?? '')) {
     res.status(415).json({ error: 'UNSUPPORTED_MEDIA_TYPE', message: 'Content-Type must be application/json.' });
     return;
   }
   next();
+}
+
+const parseJson = express.json();
+
+/**
+ * Parses the JSON body here rather than in the global parser (app.ts) so an
+ * unparsable body is a body-shape 400 that comes after 401/403/path-id 404
+ * (BR-34). Answers and returns false on failure.
+ */
+function readJsonBody(req: Request, res: Response): Promise<boolean> {
+  return new Promise((resolve) => {
+    parseJson(req, res, (err?: unknown) => {
+      if (!err) {
+        resolve(true);
+        return;
+      }
+      const status = (err as { status?: number }).status;
+      if (err instanceof SyntaxError || status === 400) {
+        res.status(400).json({ error: 'MALFORMED_BODY', message: 'Request body must be valid JSON.' });
+      } else if (status === 413) {
+        res.status(413).json({ error: 'PAYLOAD_TOO_LARGE', message: 'Request body is too large.' });
+      } else {
+        console.error('Error reading JSON body:', err);
+        res.status(500).json({ error: 'INTERNAL', message: 'An unexpected error occurred.' });
+      }
+      resolve(false);
+    });
+  });
 }
 
 function notFound(res: Response): void {
@@ -142,6 +174,7 @@ actionsTakenRouter.post(
       notFound(res);
       return;
     }
+    if (!(await readJsonBody(req, res))) return;
     if (!isPlainBody(req.body)) {
       res.status(400).json({ error: 'MALFORMED_BODY', message: 'Request body must be a JSON object.' });
       return;
@@ -190,6 +223,7 @@ actionsTakenRouter.patch(
       notFound(res);
       return;
     }
+    if (!(await readJsonBody(req, res))) return;
     if (!isPlainBody(req.body)) {
       res.status(400).json({ error: 'MALFORMED_BODY', message: 'Request body must be a JSON object.' });
       return;

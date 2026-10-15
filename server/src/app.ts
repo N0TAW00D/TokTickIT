@@ -45,6 +45,10 @@ app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
 // NOT be added — it needs to keep going through the parser below.
 const JSON_PARSING_SKIP_ROUTES: ReadonlyArray<{ method: string; pattern: RegExp }> = [
   { method: 'POST', pattern: /^\/api\/tickets\/[^/]+\/attachments\/?$/ },
+  // Actions Taken parse their own JSON after authentication and the path-id
+  // check, so a malformed body cannot pre-empt 401/403/404 (BR-34).
+  { method: 'POST', pattern: /^\/api\/tickets\/[^/]+\/actions-taken\/?$/ },
+  { method: 'PATCH', pattern: /^\/api\/tickets\/[^/]+\/actions-taken\/[^/]+\/?$/ },
 ];
 
 function skipsJsonParsing(req: Request): boolean {
