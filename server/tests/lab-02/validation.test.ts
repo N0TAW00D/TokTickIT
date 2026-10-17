@@ -279,7 +279,7 @@ describe('parseTicketListQuery (UNIT-05)', () => {
       expect.objectContaining({ ok: true, value: expect.objectContaining({ priority: 'HIGH' }) })
     );
 
-    expect(parseTicketListQuery({ status: 'CLOSED' }).ok).toBe(false);
+    expect(parseTicketListQuery({ status: 'BOGUS' }).ok).toBe(false);
     expect(parseTicketListQuery({ status: 'NEW' })).toEqual(
       expect.objectContaining({ ok: true, value: expect.objectContaining({ status: 'NEW' }) })
     );
