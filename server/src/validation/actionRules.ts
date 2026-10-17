@@ -177,13 +177,12 @@ function parseInstant(raw: unknown): FieldResult<Date> {
   }
   // `new Date` rolls impossible dates over (2026-02-31 -> 2026-03-03, 24:00 ->
   // next day), so the calendar parts are checked before the instant is built.
+  // An out-of-range offset (+25:00, +05:99) already makes `new Date` invalid.
   const [, y, mo, d, h, mi] = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/) as RegExpMatchArray;
   const daysInMonth = new Date(Date.UTC(Number(y), Number(mo), 0)).getUTCDate();
-  const offset = raw.match(/([+-])(\d{2}):?(\d{2})$/);
   if (
     Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > daysInMonth ||
-    Number(h) > 23 || Number(mi) > 59 ||
-    (offset !== null && (Number(offset[2]) > 23 || Number(offset[3]) > 59))
+    Number(h) > 23 || Number(mi) > 59
   ) {
     return fail('actionAt', 'actionAt must be a valid date-time.');
   }
