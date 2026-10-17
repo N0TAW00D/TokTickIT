@@ -475,6 +475,28 @@ describe('POST /api/tickets/:id/actions-taken', () => {
     expect(rows[0].clientRequestId).toBe(id);
   });
 
+  it('BR-35: same clientRequestId with attachmentNotes that differ only in trailing whitespace is a conflict, as sent', async () => {
+    const ticket = await createTicket(requester.id);
+    const key = randomUUID();
+    const body = (attachmentNotes: string) => JSON.stringify({ description: 'Check the relay', clientRequestId: key, attachmentNotes });
+    const a = await post(ticket.id, staffCookie, body('see vpn-error.png '));
+    const b = await post(ticket.id, staffCookie, body('see vpn-error.png'));
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(409);
+    expect(b.body.error).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('413 PAYLOAD_TOO_LARGE for an oversized JSON body once authenticated; 401 first without a session', async () => {
+    const ticket = await createTicket(requester.id);
+    const big = JSON.stringify({ description: 'x', attachmentNotes: 'a'.repeat(200_000) });
+    const authed = await post(ticket.id, staffCookie, big);
+    expect(authed.status).toBe(413);
+    expect(authed.body.error).toBe('PAYLOAD_TOO_LARGE');
+    const anon = await request(testServer.server).post(base(ticket.id)).set('Content-Type', 'application/json').send(big);
+    expect(anon.status).toBe(401);
+    expect(await prisma.actionTaken.count({ where: { ticketId: ticket.id } })).toBe(0);
+  });
+
   it('BR-07: attachmentNotes keeps its text as sent; blank is none; the limit counts the sent text', async () => {
     const ticket = await createTicket(requester.id);
     const padded = '  See vpn-error.png  \n';
