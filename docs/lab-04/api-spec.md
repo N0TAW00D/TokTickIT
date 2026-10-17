@@ -28,6 +28,12 @@ The Administrator now has a read path to the staff queue and Ticket Detail (`spe
 
 **Order of checks** (`specification.md` BR-34, same as the Lab 3 code): 415 non-JSON `Content-Type` (before authentication, L3-BR-40) → 401 → password-change gate 403 → malformed path id 404 → request-body shape 400 → access lookup (404 / 403 as in the table) → record-dependent 400 → `409 STALE_UPDATE` → business 409s. Role-gated collections (the dashboards) answer 403 immediately after the gate.
 
+A write request that declares `Content-Type: application/json` but carries no body is read as an empty object, so it
+answers `400 VALIDATION_FAILED` with the missing required fields in `fields` (not `415`, and not `MALFORMED_BODY`).
+`MALFORMED_BODY` keeps its Lab 3 meaning, "the body is not a JSON object" (unparsable JSON, or a top-level array, `null`
+or primitive). On the Actions Taken routes the body is parsed after authentication and the path-id check, so an
+unparsable body is a body-shape `400` that comes after `401` and the path-id `404`.
+
 ### 1.2 Error envelope and status codes
 
 Same envelope as Lab 3 §1.3 (`error`, `message`, optional `fields`). Lab 4 adds two optional members,
@@ -423,6 +429,7 @@ Lab 3 §8 codes are reused unchanged (`UNAUTHENTICATED`, `FORBIDDEN`, `PASSWORD_
 | `INVALID_ACTION_TRANSITION` | 409 | Action status pair not permitted, incl. no-op (BR-09). |
 | `STALE_UPDATE` | 409 | Outdated `version` on a guarded write; carries `current` (BR-33). |
 | `IDEMPOTENCY_CONFLICT` | 409 | Action create reusing a `clientRequestId` with a different body (§1.4). |
+| `PAYLOAD_TOO_LARGE` | 413 | JSON request body over the 100 kB limit on an Actions Taken write, after authentication. Lab 3 reserves `413` for an oversized attachment file; this is a separate code. |
 | `RESOLUTION_BLOCKED` | 409 | Resolved requested while the gate fails, or Closed while Actions are open; carries `reasons` (BR-17, BR-40). |
 
 `reasons[].code` values: `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN`.
