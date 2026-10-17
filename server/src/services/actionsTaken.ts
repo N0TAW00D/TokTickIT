@@ -8,6 +8,7 @@ import {
   type ValidatedCreate,
 } from '../validation/actionRules.ts';
 import type { FieldError } from '../validation/ticketFields.ts';
+import { runHook, type HookScope } from '../lib/testHooks.ts';
 
 // Actions Taken persistence (docs/lab-04/api-spec.md §1.3, §1.4, §2;
 // specification.md BR-12, BR-15, BR-33..BR-35, BR-39).
@@ -69,11 +70,21 @@ export type ActionWriteResult =
   | { kind: 'invalid-transition' }
   | { kind: 'invalid-assignee' };
 
-type Tx = Prisma.TransactionClient;
+export type Tx = Prisma.TransactionClient;
+
+/**
+ * Takes the Ticket row lock (BR-39) and then runs the test-only after-lock
+ * hook. Shared by every Ticket-lock transaction (Action writes and status
+ * changes) so the lock-then-read order lives in one place.
+ */
+export async function acquireTicketLock(tx: Tx, ticketId: number, scope: HookScope): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "Ticket" WHERE id = ${ticketId} FOR UPDATE`;
+  await runHook('after-lock', scope);
+}
 
 /** Takes the Ticket row lock; returns the Ticket as read under it, or null. */
-async function lockTicket(tx: Tx, ticketId: number) {
-  await tx.$queryRaw`SELECT id FROM "Ticket" WHERE id = ${ticketId} FOR UPDATE`;
+async function lockTicket(tx: Tx, ticketId: number, scope: HookScope) {
+  await acquireTicketLock(tx, ticketId, scope);
   return tx.ticket.findUnique({ where: { id: ticketId }, select: { id: true, status: true, createdAt: true } });
 }
 
@@ -129,7 +140,7 @@ export async function createAction(params: {
 
   const run = () =>
     prisma.$transaction(async (tx): Promise<ActionWriteResult> => {
-      const ticket = await lockTicket(tx, ticketId);
+      const ticket = await lockTicket(tx, ticketId, 'action-create');
       if (!ticket) return { kind: 'not-found' };
 
       const parsed = validate(ticket.createdAt);
@@ -206,7 +217,7 @@ export async function updateAction(params: {
   const { ticketId, actionId, actorId, body } = params;
 
   return prisma.$transaction(async (tx): Promise<ActionWriteResult> => {
-    const ticket = await lockTicket(tx, ticketId);
+    const ticket = await lockTicket(tx, ticketId, 'action-update');
     if (!ticket) return { kind: 'not-found' };
     const stored = await tx.actionTaken.findFirst({ where: { id: actionId, ticketId }, include: ACTION_INCLUDE });
     if (!stored) return { kind: 'not-found' };

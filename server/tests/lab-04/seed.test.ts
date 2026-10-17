@@ -341,7 +341,7 @@ describe('Lab 4 seed', () => {
       .patch(`/api/tickets/${viaHttp.id}/status`)
       .set('Content-Type', 'application/json')
       .set('Cookie', cookie)
-      .send({ status: 'IN_PROGRESS' });
+      .send({ status: 'IN_PROGRESS', version: viaHttp.version }); // D-18: version is required
     expect(patch.status, JSON.stringify(patch.body)).toBe(200);
 
     // (b) direct SQL mimicking the Lab 4 contract: status + version + history row.

@@ -192,6 +192,8 @@ describe('GET /api/tickets/:id', () => {
       // deliberately absent — a Requester never sees it (ui-spec.md §7).
       owner: null,
       requesterResolvedAt: null,
+      // Lab 4 (api-spec §3.1, D-18): the Ticket's optimistic-concurrency version.
+      version: 1,
       attachments: [
         {
           id: active.id,

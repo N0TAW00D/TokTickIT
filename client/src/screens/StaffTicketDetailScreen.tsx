@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -6,7 +13,11 @@ import { LoadingState } from "../components/LoadingState";
 import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
-import { getStatusLabel, type StatusValue } from "../components/StatusBadge";
+import {
+  getStatusLabel,
+  StatusBadge,
+  type StatusValue,
+} from "../components/StatusBadge";
 import { AttachmentList } from "../components/AttachmentList";
 import { ImagePreviewDialog } from "../components/ImagePreviewDialog";
 import { ConfirmStatusChangeDialog } from "../components/ConfirmStatusChangeDialog";
@@ -30,12 +41,21 @@ import {
   patchTicketStatus,
   postComment,
   postTicketNote,
+  ResolutionBlockedError,
+  StaleTicketError,
   StatusTransitionConflictError,
   TicketNotFoundError,
   type RequestedPriority,
+  type ResolutionBlockReason,
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
+import {
+  fetchActionSummaries,
+  fetchStatusHistory,
+  type ActionSummary,
+  type StatusChangeEntry,
+} from "../tickets/workflowApi";
 import { saveBlob } from "../tickets/downloadFile";
 import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./StaffTicketDetailScreen.css";
@@ -116,7 +136,7 @@ const STATUS_CONFIRM_COPY: Record<
   },
   CANCELLED: {
     title: "Cancel this ticket?",
-    body: "This action cannot be undone — a cancelled ticket can't be reopened or moved to any other status.",
+    body: "This action cannot be undone — a cancelled ticket can't be reopened or moved to any other status. Open actions on this ticket will be cancelled.",
     confirmLabel: "Cancel ticket",
   },
 };
@@ -335,6 +355,7 @@ export function StaffTicketDetailScreen() {
     undefined,
   );
   const [statusSaved, setStatusSaved] = useState(false);
+  const [statusSavedLabel, setStatusSavedLabel] = useState("");
   const statusSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -346,6 +367,21 @@ export function StaffTicketDetailScreen() {
   // see the effect below and restoreStatusFocus's own doc comment for why
   // this indirection is needed only on those two paths.
   const restoreStatusFocusAfterSaveRef = useRef(false);
+
+  // Lab 4 workflow data (ui-spec.md §6): the Status history card and the
+  // Actions Taken rows the resolution checklist is computed from. Both are
+  // best-effort reads — a failure never breaks the rest of the screen.
+  const [history, setHistory] = useState<
+    StatusChangeEntry[] | "loading" | "error"
+  >("loading");
+  const [actions, setActions] = useState<ActionSummary[] | null>(null);
+  // STALE_UPDATE on status, owner or IT Priority (one shared callout), and
+  // RESOLUTION_BLOCKED from the status route.
+  const [staleNotice, setStaleNotice] = useState(false);
+  const [blocked, setBlocked] = useState<{
+    message: string;
+    reasons: ResolutionBlockReason[];
+  } | null>(null);
 
   // Download/preview wiring for AttachmentList (copied from
   // AttachmentSection's own handleDownload/handlePreview — see this file's
@@ -385,6 +421,27 @@ export function StaffTicketDetailScreen() {
     return () => {
       cancelled = true;
     };
+  }, [parsedId, validId, reloadToken]);
+
+  function loadHistory(ticketId: number) {
+    fetchStatusHistory(ticketId)
+      .then(setHistory)
+      .catch(() => setHistory("error"));
+  }
+
+  function loadActions(ticketId: number) {
+    fetchActionSummaries(ticketId)
+      .then(setActions)
+      .catch(() => setActions(null));
+  }
+
+  useEffect(() => {
+    if (!validId) return;
+    setHistory("loading");
+    setActions(null);
+    loadHistory(parsedId);
+    loadActions(parsedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedId, validId, reloadToken]);
 
   useEffect(() => {
@@ -485,6 +542,33 @@ export function StaffTicketDetailScreen() {
     ];
   }, [currentStatus]);
 
+  /**
+   * Resolution checklist (ui-spec.md §6): guidance only, computed from the
+   * loaded owner and Actions Taken; the server stays the authority. Shown
+   * while Resolved is a permitted next step, once the Actions are loaded.
+   */
+  const checklist = useMemo(() => {
+    if (!currentStatus || !actions) return null;
+    if (!STATUS_TRANSITIONS[currentStatus]?.includes("RESOLVED")) return null;
+    const openCount = actions.filter(
+      (a) => a.status === "PLANNED" || a.status === "IN_PROGRESS",
+    ).length;
+    return [
+      { text: "Ticket has an owner", met: currentOwner !== null },
+      {
+        text: "At least one action is completed",
+        met: actions.some((a) => a.status === "COMPLETED"),
+      },
+      {
+        text:
+          openCount > 0
+            ? `No action is planned or in progress (${openCount} remaining)`
+            : "No action is planned or in progress",
+        met: openCount === 0,
+      },
+    ];
+  }, [currentStatus, actions, currentOwner]);
+
   function handleRetry() {
     setReloadToken((token) => token + 1);
   }
@@ -515,19 +599,28 @@ export function StaffTicketDetailScreen() {
     if (state.phase !== "loaded") return;
     setOwnerSaving(true);
     setOwnerError(undefined);
+    setStaleNotice(false);
 
-    patchTicketOwner(state.ticket.id, nextOwnerId)
+    patchTicketOwner(state.ticket.id, nextOwnerId, state.ticket.version)
       .then((updated) => {
         setState((previous) => {
           if (previous.phase !== "loaded") return previous;
           return {
             phase: "loaded",
-            ticket: { ...previous.ticket, owner: updated.owner },
+            ticket: {
+              ...previous.ticket,
+              owner: updated.owner,
+              version: updated.version ?? previous.ticket.version,
+            },
           };
         });
         showOwnerSavedTick();
       })
       .catch((error: unknown) => {
+        if (error instanceof StaleTicketError) {
+          setStaleNotice(true);
+          return;
+        }
         setOwnerError(
           error instanceof InvalidOwnerError
             ? error.message
@@ -578,19 +671,28 @@ export function StaffTicketDetailScreen() {
     if (state.phase !== "loaded") return;
     setItPrioritySaving(true);
     setItPriorityError(undefined);
+    setStaleNotice(false);
 
-    patchTicketItPriority(state.ticket.id, nextItPriority)
+    patchTicketItPriority(state.ticket.id, nextItPriority, state.ticket.version)
       .then((updated) => {
         setState((previous) => {
           if (previous.phase !== "loaded") return previous;
           return {
             phase: "loaded",
-            ticket: { ...previous.ticket, itPriority: updated.itPriority },
+            ticket: {
+              ...previous.ticket,
+              itPriority: updated.itPriority,
+              version: updated.version ?? previous.ticket.version,
+            },
           };
         });
         showItPrioritySavedTick();
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (error instanceof StaleTicketError) {
+          setStaleNotice(true);
+          return;
+        }
         setItPriorityError(
           "Could not update the IT priority. Please check your connection and try again.",
         );
@@ -629,24 +731,50 @@ export function StaffTicketDetailScreen() {
     if (state.phase !== "loaded") return;
     setStatusSaving(true);
     setStatusError(undefined);
+    setStatusConflictMessage(null);
+    setStaleNotice(false);
+    setBlocked(null);
 
-    patchTicketStatus(state.ticket.id, nextStatus)
+    const ticketId = state.ticket.id;
+    patchTicketStatus(ticketId, nextStatus, state.ticket.version)
       .then((updated) => {
         setState((previous) => {
           if (previous.phase !== "loaded") return previous;
           return {
             phase: "loaded",
-            ticket: { ...previous.ticket, status: updated.status },
+            ticket: {
+              ...previous.ticket,
+              status: updated.status,
+              version: updated.version ?? previous.ticket.version,
+            },
           };
         });
         setPendingStatus(null);
+        setStatusSavedLabel(getStatusLabel(updated.status));
         showStatusSavedTick();
+        // The summary badge and permitted list follow `state.ticket`; the
+        // history card and (after a cancel cascade) the Actions rows are
+        // re-read so nothing needs a page reload.
+        loadHistory(ticketId);
+        loadActions(ticketId);
         // Deferred to the effect above — statusSaving is still `true` here
         // (only .finally() below clears it), so the select is still
         // `disabled` in the committed DOM and can't take focus yet.
         restoreStatusFocusAfterSaveRef.current = true;
       })
       .catch((error: unknown) => {
+        if (error instanceof StaleTicketError) {
+          setPendingStatus(null);
+          setStaleNotice(true);
+          restoreStatusFocusAfterSaveRef.current = true;
+          return;
+        }
+        if (error instanceof ResolutionBlockedError) {
+          setPendingStatus(null);
+          setBlocked({ message: error.message, reasons: error.reasons });
+          restoreStatusFocusAfterSaveRef.current = true;
+          return;
+        }
         if (error instanceof StatusTransitionConflictError) {
           setPendingStatus(null);
           setStatusConflictMessage(error.message);
@@ -717,6 +845,21 @@ export function StaffTicketDetailScreen() {
     handleRetry();
   }
 
+  function handleStaleRefresh() {
+    setStaleNotice(false);
+    setBlocked(null);
+    handleRetry();
+  }
+
+  function handleGoToActions(event: MouseEvent<HTMLAnchorElement>) {
+    const target = document.getElementById("actions-taken");
+    if (target) {
+      event.preventDefault();
+      target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      target.focus?.();
+    }
+  }
+
   async function handleDownload(attachment: TicketAttachment) {
     setDownloadError(null);
     try {
@@ -784,6 +927,35 @@ export function StaffTicketDetailScreen() {
         </div>
       )}
 
+      {staleNotice && (
+        <div role="alert" className="zen-staff-detail__conflict-banner">
+          <span>
+            This ticket was changed by someone else. Review its current state.
+          </span>
+          <Button variant="secondary" onClick={handleStaleRefresh}>
+            Refresh
+          </Button>
+        </div>
+      )}
+
+      {blocked && (
+        <div role="alert" className="zen-staff-detail__blocked-callout">
+          <p className="zen-staff-detail__blocked-title">
+            <span aria-hidden="true">⚠</span> {blocked.message}
+          </p>
+          {blocked.reasons.length > 0 && (
+            <ul>
+              {blocked.reasons.map((reason) => (
+                <li key={reason.code}>{reason.message}</li>
+              ))}
+            </ul>
+          )}
+          <a href="#actions-taken" onClick={handleGoToActions}>
+            Go to Actions Taken
+          </a>
+        </div>
+      )}
+
       {state.phase === "loading" && <LoadingState label="Loading ticket…" />}
 
       {state.phase === "error" && (
@@ -823,6 +995,16 @@ export function StaffTicketDetailScreen() {
             <div className="zen-staff-detail__readonly-column">
               <section className="zen-staff-detail__card">
                 <h2>Ticket information</h2>
+
+                {/* Summary badge (ui-spec.md §6): follows `state.ticket.status`,
+                    so a successful status change updates it in place. Kept
+                    out of the read-only field grid on purpose. */}
+                <p className="zen-staff-detail__summary-status">
+                  <span>Status</span>{" "}
+                  <span data-testid="summary-status">
+                    <StatusBadge value={state.ticket.status} />
+                  </span>
+                </p>
 
                 <div className="zen-staff-detail__grid">
                   <StaticField
@@ -952,7 +1134,27 @@ export function StaffTicketDetailScreen() {
                   {statusSaved && (
                     <span role="status" className="zen-staff-detail__save-tick">
                       <span aria-hidden="true">✓</span> Saved
+                      <span className="zen-staff-detail__save-detail">
+                        {" "}
+                        Status changed to {statusSavedLabel}.
+                      </span>
                     </span>
+                  )}
+                  {checklist && (
+                    <ul
+                      aria-label="Resolution checklist"
+                      className="zen-staff-detail__checklist"
+                    >
+                      {checklist.map((item) => (
+                        <li key={item.text}>
+                          <span aria-hidden="true">{item.met ? "✓" : "✗"}</span>{" "}
+                          <span className="zen-staff-detail__sr-only">
+                            {item.met ? "Met: " : "Not met: "}
+                          </span>
+                          {item.text}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
 
@@ -994,6 +1196,50 @@ export function StaffTicketDetailScreen() {
               </div>
             </section>
           </div>
+
+          {/* ui-spec.md §5.1: Status history card, after Actions Taken
+              (a separate card, Issue #96) and before Public Comments. */}
+          <section
+            className="zen-staff-detail__card"
+            aria-labelledby="staff-status-history-heading"
+          >
+            <h2 id="staff-status-history-heading">Status history</h2>
+            {history === "loading" && <p>Loading status history…</p>}
+            {history === "error" && (
+              <p>
+                Status history could not be loaded.{" "}
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setHistory("loading");
+                    loadHistory(state.ticket.id);
+                  }}
+                >
+                  Retry
+                </Button>
+              </p>
+            )}
+            {Array.isArray(history) && history.length === 0 && (
+              <p>No status changes yet.</p>
+            )}
+            {Array.isArray(history) && history.length > 0 && (
+              <ol className="zen-staff-detail__history">
+                {history.map((entry) => (
+                  <li key={entry.id}>
+                    {entry.fromStatus && (
+                      <>
+                        <StatusBadge value={entry.fromStatus} />{" "}
+                      </>
+                    )}
+                    <span aria-hidden="true">→</span>
+                    <span className="zen-staff-detail__sr-only"> to </span>{" "}
+                    <StatusBadge value={entry.toStatus} /> ·{" "}
+                    {entry.changedBy.name} · {formatDateTime(entry.changedAt)}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
 
           {/* ui-spec.md §8/§10: Public Comments card, then Internal Notes
               card, in that order — "the internal card second." */}

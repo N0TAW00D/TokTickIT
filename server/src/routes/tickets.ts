@@ -20,6 +20,10 @@ import type { Prisma } from '../generated/prisma/client.ts';
 // generated Prisma enum directly, so the eight permitted strings and the
 // transition matrix's keys can never drift out of sync with schema.prisma.
 import { TicketStatus } from '../generated/prisma/client.ts';
+import { ALL_TICKET_STATUSES } from '../validation/ticketTransitions.ts';
+import { validateVersion } from '../validation/actionRules.ts';
+import { changeTicketStatus } from '../services/ticketStatus.ts';
+import { updateGuardedTicketFields, type GuardedWriteResult } from '../services/ticketGuardedFields.ts';
 
 // POST /api/tickets — api-spec.md §3.1 (BR-01, BR-02, BR-04, BR-12, BR-24,
 // BR-25, BR-26, BR-28, BR-36; AC-01, AC-11..AC-14, AC-16, AC-43).
@@ -351,6 +355,30 @@ const TICKET_DETAIL_INCLUDE = {
   },
 } satisfies Prisma.TicketInclude;
 
+type StaffTicketRow = Prisma.TicketGetPayload<{ include: typeof TICKET_DETAIL_INCLUDE }>;
+
+/** The staff ticket-detail shape (Lab 3 §5 plus `version`, Lab 4 §3.1). */
+function staffTicketJson(ticket: StaffTicketRow) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    requester: ticket.requester,
+    category: ticket.category,
+    relatedSystem: ticket.relatedSystem,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    summary: ticket.summary,
+    description: ticket.description,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    attachments: ticket.attachments,
+    owner: ticket.owner,
+    requesterResolvedAt: ticket.requesterResolvedAt,
+    version: ticket.version,
+  };
+}
+
 ticketsRouter.get(
   '/:id',
   authenticate,
@@ -417,6 +445,8 @@ ticketsRouter.get(
         // BR-26: null until the Requester has indicated the problem appears
         // resolved; never cleared by this route.
         requesterResolvedAt: ticket.requesterResolvedAt,
+        // api-spec.md §3.1 (BR-33): the optimistic-concurrency token.
+        version: ticket.version,
       });
     } catch (error) {
       console.error('Error fetching ticket:', error);
@@ -851,6 +881,35 @@ function invalidOwner(res: Response): void {
   });
 }
 
+function staleUpdate(res: Response, current: unknown): void {
+  res.status(409).json({
+    error: 'STALE_UPDATE',
+    message: 'This record was changed by someone else. Review the current version and try again.',
+    current,
+  });
+}
+
+/** Sends the response for an owner / IT Priority guarded write (api-spec.md §3.3). */
+function sendGuardedResult(res: Response, result: GuardedWriteResult<ReturnType<typeof staffTicketJson>>): void {
+  switch (result.kind) {
+    case 'not-found':
+      ticketNotFound(res);
+      return;
+    case 'stale':
+      staleUpdate(res, result.current);
+      return;
+    case 'rejected':
+      invalidOwner(res);
+      return;
+    case 'updated':
+      res.status(200).json(result.ticket);
+      return;
+  }
+}
+
+const readStaffTicket = (ticketId: number) => async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) =>
+  staffTicketJson(await tx.ticket.findUniqueOrThrow({ where: { id: ticketId }, include: TICKET_DETAIL_INCLUDE }));
+
 /**
  * Shape-validates the `ownerId` field for `PATCH /api/tickets/:id/owner`:
  * unlike `validateReferenceIdShape` above (required, always an int), this
@@ -896,9 +955,13 @@ ticketsRouter.patch(
       return;
     }
 
+    const shapeErrors: FieldError[] = [];
     const ownerIdError = validateOwnerIdShape(req.body.ownerId);
-    if (ownerIdError) {
-      validationFailed(res, [ownerIdError]);
+    if (ownerIdError) shapeErrors.push(ownerIdError);
+    const version = validateVersion(req.body.version);
+    if (!version.ok) shapeErrors.push(version.error);
+    if (shapeErrors.length > 0 || !version.ok) {
+      validationFailed(res, shapeErrors);
       return;
     }
     // Shape check above guarantees this is `number | null`.
@@ -927,57 +990,30 @@ ticketsRouter.patch(
         return;
       }
 
-      if (requestedOwnerId !== null) {
-        // Out-of-int4-range ids cannot reference any row (User.id is int4);
-        // querying with one would raise a driver-level range error instead
-        // of a clean "not found", same as categoryId/relatedSystemId in
-        // POST /api/tickets above. Per api-spec.md §1.4's 403/404-precedence
-        // framing, an id that can't reference any row is indistinguishable
-        // from a nonexistent candidate, so it short-circuits straight to the
-        // same 409 INVALID_OWNER below rather than reaching findUnique.
-        if (Math.abs(requestedOwnerId) > PG_INT4_MAX) {
-          invalidOwner(res);
-          return;
-        }
+      // Out-of-int4-range ids cannot reference any row (User.id is int4);
+      // querying with one would raise a driver-level range error, so they
+      // are the same INVALID_OWNER as a nonexistent candidate - but only
+      // after the version compare (BR-34: STALE_UPDATE first).
+      const outOfRange = requestedOwnerId !== null && Math.abs(requestedOwnerId) > PG_INT4_MAX;
 
-        const candidate = await prisma.user.findUnique({
-          where: { id: requestedOwnerId },
-          select: { role: true, isActive: true },
-        });
-        // BR-19/BR-20: the candidate must exist, be active, and not be a
-        // Requester (a Ticket Owner may only be an active IT Staff or
-        // Administrator user) — any failure of the three is the identical
-        // 409 INVALID_OWNER, checked together so no branch can leak which
-        // one it was.
-        if (!candidate || !candidate.isActive || candidate.role === 'REQUESTER') {
-          invalidOwner(res);
-          return;
-        }
-      }
-
-      const ticket = await prisma.ticket.update({
-        where: { id: ticketId },
+      const result = await updateGuardedTicketFields({
+        ticketId,
+        version: version.value,
         data: { ownerId: requestedOwnerId },
-        include: TICKET_DETAIL_INCLUDE,
+        // BR-19/BR-20: the candidate must exist, be active, and not be a
+        // Requester - the identical 409 INVALID_OWNER for all three.
+        accept: async (tx) => {
+          if (requestedOwnerId === null) return true;
+          if (outOfRange) return false;
+          const candidate = await tx.user.findUnique({
+            where: { id: requestedOwnerId },
+            select: { role: true, isActive: true },
+          });
+          return !!candidate && candidate.isActive && candidate.role !== 'REQUESTER';
+        },
+        readTicket: readStaffTicket(ticketId),
       });
-
-      res.status(200).json({
-        id: ticket.id,
-        ticketNumber: ticket.ticketNumber,
-        requester: ticket.requester,
-        category: ticket.category,
-        relatedSystem: ticket.relatedSystem,
-        requestedPriority: ticket.requestedPriority,
-        itPriority: ticket.itPriority,
-        status: ticket.status,
-        summary: ticket.summary,
-        description: ticket.description,
-        createdAt: ticket.createdAt,
-        updatedAt: ticket.updatedAt,
-        attachments: ticket.attachments,
-        owner: ticket.owner,
-        requesterResolvedAt: ticket.requesterResolvedAt,
-      });
+      sendGuardedResult(res, result);
     } catch (error) {
       console.error('Error updating ticket owner:', error);
       internalError(res);
@@ -1030,9 +1066,13 @@ ticketsRouter.patch(
       return;
     }
 
+    const shapeErrors: FieldError[] = [];
     const itPriorityError = validateItPriorityShape(req.body.itPriority);
-    if (itPriorityError) {
-      validationFailed(res, [itPriorityError]);
+    if (itPriorityError) shapeErrors.push(itPriorityError);
+    const version = validateVersion(req.body.version);
+    if (!version.ok) shapeErrors.push(version.error);
+    if (shapeErrors.length > 0 || !version.ok) {
+      validationFailed(res, shapeErrors);
       return;
     }
     // Shape check above guarantees this is one of the three Priority values.
@@ -1054,29 +1094,13 @@ ticketsRouter.patch(
       // only), api-spec.md §5.2/BR-22 lets BOTH IT Staff and Administrator
       // perform this write — the one staff-write route where the two roles
       // do not diverge — so there is no further role check.
-      const ticket = await prisma.ticket.update({
-        where: { id: ticketId },
+      const result = await updateGuardedTicketFields({
+        ticketId,
+        version: version.value,
         data: { itPriority: requestedItPriority },
-        include: TICKET_DETAIL_INCLUDE,
+        readTicket: readStaffTicket(ticketId),
       });
-
-      res.status(200).json({
-        id: ticket.id,
-        ticketNumber: ticket.ticketNumber,
-        requester: ticket.requester,
-        category: ticket.category,
-        relatedSystem: ticket.relatedSystem,
-        requestedPriority: ticket.requestedPriority,
-        itPriority: ticket.itPriority,
-        status: ticket.status,
-        summary: ticket.summary,
-        description: ticket.description,
-        createdAt: ticket.createdAt,
-        updatedAt: ticket.updatedAt,
-        attachments: ticket.attachments,
-        owner: ticket.owner,
-        requesterResolvedAt: ticket.requesterResolvedAt,
-      });
+      sendGuardedResult(res, result);
     } catch (error) {
       console.error('Error updating ticket IT priority:', error);
       internalError(res);
@@ -1087,46 +1111,6 @@ ticketsRouter.patch(
 // ---------------------------------------------------------------------------
 // PATCH /api/tickets/:id/status (api-spec.md §5.3)
 // ---------------------------------------------------------------------------
-
-/**
- * The status transition matrix (specification.md §5.1): an explicit map of
- * every status to the list of statuses it may move to directly. A pair not
- * present here — including a status mapped to itself, which no row lists —
- * is rejected as `409 INVALID_TRANSITION` (BR-23), so a same-state "no-op"
- * request is not silently accepted as a 200.
- *
- * Keyed off the generated Prisma `TicketStatus` enum (not a hand-rolled
- * list, unlike `staffTicketQueueQuery.ts`'s `STAFF_QUEUE_STATUSES`) so this
- * matrix can never fall out of sync with schema.prisma — `Record<TicketStatus,
- * TicketStatus[]>` also means TypeScript itself enforces that every enum
- * member has a row.
- */
-const TICKET_STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  [TicketStatus.NEW]: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED],
-  [TicketStatus.OPEN]: [
-    TicketStatus.IN_PROGRESS,
-    TicketStatus.WAITING_FOR_REQUESTER,
-    TicketStatus.RESOLVED,
-    TicketStatus.CANCELLED,
-  ],
-  [TicketStatus.IN_PROGRESS]: [TicketStatus.WAITING_FOR_REQUESTER, TicketStatus.RESOLVED, TicketStatus.CANCELLED],
-  [TicketStatus.WAITING_FOR_REQUESTER]: [TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CANCELLED],
-  [TicketStatus.RESOLVED]: [TicketStatus.CLOSED, TicketStatus.REOPENED],
-  [TicketStatus.CLOSED]: [TicketStatus.REOPENED],
-  [TicketStatus.REOPENED]: [
-    TicketStatus.IN_PROGRESS,
-    TicketStatus.WAITING_FOR_REQUESTER,
-    TicketStatus.RESOLVED,
-    TicketStatus.CANCELLED,
-  ],
-  // Terminal (specification.md §5.1): no row lists CANCELLED as a
-  // destination back out of it, so this list is empty rather than absent —
-  // absent would make `TICKET_STATUS_TRANSITIONS[access.ticket.status]`
-  // `undefined` and require a separate branch below just for this one case.
-  [TicketStatus.CANCELLED]: [],
-};
-
-const ALL_TICKET_STATUSES: readonly string[] = Object.values(TicketStatus);
 
 /**
  * Shape-validates the `status` field for `PATCH /api/tickets/:id/status`:
@@ -1184,9 +1168,14 @@ ticketsRouter.patch(
       return;
     }
 
+    // BR-34: body shape first (status enum, version) - nothing here needs the record.
+    const shapeErrors: FieldError[] = [];
     const statusError = validateStatusShape(req.body.status);
-    if (statusError) {
-      validationFailed(res, [statusError]);
+    if (statusError) shapeErrors.push(statusError);
+    const version = validateVersion(req.body.version);
+    if (!version.ok) shapeErrors.push(version.error);
+    if (shapeErrors.length > 0 || !version.ok) {
+      validationFailed(res, shapeErrors);
       return;
     }
     // Shape check above guarantees this is one of the eight enum values.
@@ -1196,67 +1185,105 @@ ticketsRouter.patch(
       const access = await resolveTicketAccess(ticketId, req.authUser!);
 
       // api-spec.md §5.3: a Requester never gets a write path here,
-      // regardless of ownership — same collapse as PATCH /:id/owner and
-      // /:id/it-priority — both the 'not-found' and 'owner' classifications
-      // resolveTicketAccess can produce for a REQUESTER caller become the
-      // identical 404 here.
+      // regardless of ownership - same collapse as PATCH /:id/owner and
+      // /:id/it-priority.
       if (access.kind === 'not-found' || access.kind === 'owner') {
         ticketNotFound(res);
         return;
       }
 
-      // access.kind === 'staff' here: like PATCH /:id/owner (and unlike
-      // /:id/it-priority), status is IT Staff only — an Administrator
-      // already has a read path to this ticket (GET /api/tickets/:id), so
-      // this is a safe 403, never a 404.
+      // Status is IT Staff only (BR-16); an Administrator can read the
+      // ticket, so this is a safe 403, never a 404.
       if (req.authUser!.role === 'ADMINISTRATOR') {
         forbidden(res);
         return;
       }
 
-      // BR-23/AC-39: checked against the ticket's CURRENT status, including
-      // the same-state case (no row lists a status as its own successor, so
-      // that pair is simply absent from the list below too).
-      const permittedNextStatuses = TICKET_STATUS_TRANSITIONS[access.ticket.status];
-      if (!permittedNextStatuses.includes(requestedStatus)) {
-        invalidTransition(res);
-        return;
-      }
-
-      // BR-24/AC-40: OWNER_REQUIRED only applies once the transition itself
-      // is otherwise valid per the matrix above — checked second, and only
-      // for the one destination status (IN_PROGRESS) it governs, regardless
-      // of which row supplied the otherwise-valid transition.
-      if (requestedStatus === TicketStatus.IN_PROGRESS && access.ticket.ownerId === null) {
-        ownerRequired(res);
-        return;
-      }
-
-      const ticket = await prisma.ticket.update({
-        where: { id: ticketId },
-        data: { status: requestedStatus },
-        include: TICKET_DETAIL_INCLUDE,
+      // Lock -> read -> version -> matrix -> owner -> gate -> write, in one
+      // transaction (BR-39; services/ticketStatus.ts).
+      const result = await changeTicketStatus({
+        ticketId,
+        actorId: req.authUser!.id,
+        requestedStatus,
+        version: version.value,
+        readTicket: async (tx) =>
+          staffTicketJson(await tx.ticket.findUniqueOrThrow({ where: { id: ticketId }, include: TICKET_DETAIL_INCLUDE })),
       });
 
-      res.status(200).json({
-        id: ticket.id,
-        ticketNumber: ticket.ticketNumber,
-        requester: ticket.requester,
-        category: ticket.category,
-        relatedSystem: ticket.relatedSystem,
-        requestedPriority: ticket.requestedPriority,
-        itPriority: ticket.itPriority,
-        status: ticket.status,
-        summary: ticket.summary,
-        description: ticket.description,
-        createdAt: ticket.createdAt,
-        updatedAt: ticket.updatedAt,
-        attachments: ticket.attachments,
-        owner: ticket.owner,
-        requesterResolvedAt: ticket.requesterResolvedAt,
-      });
+      switch (result.kind) {
+        case 'not-found':
+          ticketNotFound(res);
+          return;
+        case 'stale':
+          staleUpdate(res, result.current);
+          return;
+        case 'invalid-transition':
+          invalidTransition(res);
+          return;
+        case 'owner-required':
+          ownerRequired(res);
+          return;
+        case 'resolution-blocked':
+          res.status(409).json({
+            error: 'RESOLUTION_BLOCKED',
+            message: result.closing ? "This ticket can't be closed yet." : "This ticket can't be resolved yet.",
+            reasons: result.reasons,
+          });
+          return;
+        case 'updated':
+          res.status(200).json(result.ticket);
+          return;
+      }
     } catch (error) {
       console.error('Error updating ticket status:', error);
+      internalError(res);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/:id/status-history (api-spec.md §3.4; BR-13, BR-14, BR-19)
+// ---------------------------------------------------------------------------
+// Read-only: no POST/PATCH/DELETE exists, so those fall through to the 404.
+
+ticketsRouter.get(
+  '/:id/status-history',
+  authenticate,
+  passwordChangeGate,
+  requireRole('REQUESTER', 'IT_STAFF', 'ADMINISTRATOR'),
+  async (req: Request, res: Response) => {
+    const ticketId = parseTicketIdParam(String(req.params.id));
+    if (ticketId === null) {
+      ticketNotFound(res);
+      return;
+    }
+
+    try {
+      // BR-13: the owning Requester, any IT Staff and any Administrator; any
+      // other Requester gets the same 404 as a nonexistent Ticket.
+      const access = await resolveTicketAccess(ticketId, req.authUser!);
+      if (access.kind === 'not-found') {
+        ticketNotFound(res);
+        return;
+      }
+
+      const rows = await prisma.ticketStatusChange.findMany({
+        where: { ticketId },
+        orderBy: [{ changedAt: 'asc' }, { id: 'asc' }],
+        include: { changedBy: { select: { id: true, name: true, role: true } } },
+      });
+
+      res.status(200).json(
+        rows.map((row) => ({
+          id: row.id,
+          fromStatus: row.fromStatus,
+          toStatus: row.toStatus,
+          changedBy: row.changedBy,
+          changedAt: row.changedAt,
+        })),
+      );
+    } catch (error) {
+      console.error('Error listing status history:', error);
       internalError(res);
     }
   },
