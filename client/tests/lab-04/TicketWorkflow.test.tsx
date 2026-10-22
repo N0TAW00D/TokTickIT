@@ -415,7 +415,7 @@ describe("Resolution checklist and blocked callout", () => {
 });
 
 describe("Stale Ticket write", () => {
-  it("C-25: STALE_UPDATE on status shows the callout, reverts the select and Refresh loads the current Ticket", async () => {
+  it("C-25: STALE_UPDATE on status shows the callout, keeps the attempted value and Refresh loads the current Ticket", async () => {
     let reads = 0;
     const fetchMock = mockFetch({
       ticket: () => {
@@ -435,12 +435,34 @@ describe("Stale Ticket write", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("This ticket was changed by someone else. Review its current state.");
-    expect(statusSelect().value).toBe("OPEN");
+    expect(statusSelect().value).toBe("IN_PROGRESS");
+    expect(screen.getByText("Current: Waiting for Requester")).toBeInTheDocument();
+    expect(calls(fetchMock, URLS.status, "PATCH")).toHaveLength(1);
 
     fireEvent.click(within(alert).getByRole("button", { name: "Refresh" }));
     await vi.waitFor(() => expect(statusSelect().value).toBe("WAITING_FOR_REQUESTER"));
     expect(calls(fetchMock, URLS.ticket)).toHaveLength(2);
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/^Current: /)).toBeNull();
+    // Refresh never resubmits the attempted change.
+    expect(calls(fetchMock, URLS.status, "PATCH")).toHaveLength(1);
+  });
+
+  it("C-25: STALE_UPDATE on a confirm-dialog destination keeps the attempted status too", async () => {
+    mockFetch({
+      patchStatus: () =>
+        res(409, { error: "STALE_UPDATE", current: ticketBody({ status: "WAITING_FOR_REQUESTER", version: 9 }) }),
+    });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "CANCELLED" } });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel ticket" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(statusSelect().value).toBe("CANCELLED");
+    expect(screen.getByText("Current: Waiting for Requester")).toBeInTheDocument();
   });
 
   it("C-25: STALE_UPDATE on owner and on IT Priority shows the same callout", async () => {
@@ -455,7 +477,8 @@ describe("Stale Ticket write", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This ticket was changed by someone else. Review its current state.",
     );
-    expect((screen.getByLabelText("Ticket Owner") as HTMLSelectElement).value).toBe("9");
+    expect((screen.getByLabelText("Ticket Owner") as HTMLSelectElement).value).toBe("unassigned");
+    expect(screen.getByText("Current owner: Jordan Lee")).toBeInTheDocument();
     cleanup();
 
     mockFetch({
@@ -467,7 +490,9 @@ describe("Stale Ticket write", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This ticket was changed by someone else. Review its current state.",
     );
-    expect(screen.getByRole("radio", { name: "High" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Low" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "High" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Current: High")).toBeInTheDocument();
   });
 });
 
