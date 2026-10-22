@@ -133,6 +133,37 @@ describe('WF-02: forbidden transitions and the owner rule', () => {
   );
 });
 
+describe('WF-02b: role x current status x target status', () => {
+  const PAIRS: Array<[TicketStatus, TicketStatus]> = ALL.flatMap((from) =>
+    ALL.map((to): [TicketStatus, TicketStatus] => [from, to]),
+  );
+
+  // Refused roles never reach the gate or the transition check, so no gate setup is needed.
+  async function refusedAndUnchanged(from: TicketStatus, to: TicketStatus, cookie: string | null) {
+    const ticket = await owned(from);
+    const res = await patchStatus(ticket.id, cookie, { status: to, version: 1 });
+    expect(await getTicket(ticket.id)).toMatchObject({ status: from, version: 1 });
+    expect(await historyOf(ticket.id)).toHaveLength(0);
+    return res;
+  }
+
+  it.each(PAIRS)('Administrator %s -> %s is 403', async (from, to) => {
+    expect((await refusedAndUnchanged(from, to, adminCookie)).status).toBe(403);
+  });
+
+  it.each(PAIRS)('owning Requester %s -> %s is 404', async (from, to) => {
+    expect((await refusedAndUnchanged(from, to, requesterCookie)).status).toBe(404);
+  });
+
+  it.each(PAIRS)('other Requester %s -> %s is 404', async (from, to) => {
+    expect((await refusedAndUnchanged(from, to, requester2Cookie)).status).toBe(404);
+  });
+
+  it.each(PAIRS)('unauthenticated %s -> %s is 401', async (from, to) => {
+    expect((await refusedAndUnchanged(from, to, null)).status).toBe(401);
+  });
+});
+
 describe('WF-03..WF-06: the resolution gate', () => {
   const codes = (body: { reasons: { code: string }[] }) => body.reasons.map((r) => r.code);
 
