@@ -57,7 +57,10 @@ import {
   type StatusChangeEntry,
 } from "../tickets/workflowApi";
 import { saveBlob } from "../tickets/downloadFile";
-import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
+import {
+  formatDateTime,
+  formatDateTimeWithYear,
+} from "../tickets/formatDateTime";
 import "./StaffTicketDetailScreen.css";
 
 /**
@@ -76,6 +79,30 @@ const SAVED_TICK_DURATION_MS = 2000;
  * (`PriorityBadge.tsx`) so the segmented control's labels never drift from
  * the badge shown elsewhere for the same values.
  */
+function getItPriorityLabel(value: RequestedPriority | null): string {
+  return IT_PRIORITY_OPTIONS.find((o) => o.value === value)?.label ?? "Not set";
+}
+
+/**
+ * The stored values a STALE_UPDATE 409 reported (its `current` body), falling
+ * back to the ticket the screen had loaded when the body wasn't parseable.
+ */
+function storedSnapshot(
+  error: StaleTicketError,
+  fallback: {
+    status: string;
+    owner: { name: string } | null;
+    itPriority: RequestedPriority | null;
+  },
+) {
+  const source = error.current ?? fallback;
+  return {
+    status: source.status,
+    ownerName: source.owner?.name ?? null,
+    itPriority: source.itPriority ?? null,
+  };
+}
+
 const IT_PRIORITY_OPTIONS: SegmentedControlOption[] = [
   { value: "LOW", label: "Low" },
   { value: "MEDIUM", label: "Medium" },
@@ -351,9 +378,7 @@ export function StaffTicketDetailScreen() {
   // `TicketDetailScreen.tsx`'s own `conflictMessage`/`RequesterResolvedConflictError`
   // handling, since it's the same "the record moved on, refresh" concept).
   const [statusSaving, setStatusSaving] = useState(false);
-  const [statusError, setStatusError] = useState<string | undefined>(
-    undefined,
-  );
+  const [statusError, setStatusError] = useState<string | undefined>(undefined);
   const [statusSaved, setStatusSaved] = useState(false);
   const [statusSavedLabel, setStatusSavedLabel] = useState("");
   const statusSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -378,6 +403,21 @@ export function StaffTicketDetailScreen() {
   // STALE_UPDATE on status, owner or IT Priority (one shared callout), and
   // RESOLUTION_BLOCKED from the status route.
   const [staleNotice, setStaleNotice] = useState(false);
+  // The one field whose write came back STALE_UPDATE, with the value the
+  // user tried to set (BR-36: the callout "keeps the user's input") and the
+  // stored value the 409 reported. The three controls show `attempt` over
+  // the loaded ticket until Refresh, a new attempt or a successful save
+  // clears it; it is never resubmitted on its own.
+  const [staleAttempt, setStaleAttempt] = useState<{
+    status?: string;
+    owner?: number | null;
+    itPriority?: RequestedPriority;
+    stored: {
+      status: string;
+      ownerName: string | null;
+      itPriority: RequestedPriority | null;
+    };
+  } | null>(null);
   const [blocked, setBlocked] = useState<{
     message: string;
     reasons: ResolutionBlockReason[];
@@ -400,6 +440,7 @@ export function StaffTicketDetailScreen() {
 
     let cancelled = false;
     setState({ phase: "loading" });
+    setStaleAttempt(null);
 
     fetchTicketDetail(parsedId)
       .then((ticket) => {
@@ -538,7 +579,10 @@ export function StaffTicketDetailScreen() {
     const permitted = STATUS_TRANSITIONS[currentStatus] ?? [];
     return [
       { value: currentStatus, label: getStatusLabel(currentStatus) },
-      ...permitted.map((next) => ({ value: next, label: getStatusLabel(next) })),
+      ...permitted.map((next) => ({
+        value: next,
+        label: getStatusLabel(next),
+      })),
     ];
   }, [currentStatus]);
 
@@ -600,7 +644,9 @@ export function StaffTicketDetailScreen() {
     setOwnerSaving(true);
     setOwnerError(undefined);
     setStaleNotice(false);
+    setStaleAttempt(null);
 
+    const ticketBefore = state.ticket;
     patchTicketOwner(state.ticket.id, nextOwnerId, state.ticket.version)
       .then((updated) => {
         setState((previous) => {
@@ -619,6 +665,10 @@ export function StaffTicketDetailScreen() {
       .catch((error: unknown) => {
         if (error instanceof StaleTicketError) {
           setStaleNotice(true);
+          setStaleAttempt({
+            owner: nextOwnerId,
+            stored: storedSnapshot(error, ticketBefore),
+          });
           return;
         }
         setOwnerError(
@@ -637,7 +687,10 @@ export function StaffTicketDetailScreen() {
     const currentValue = state.ticket.owner
       ? String(state.ticket.owner.id)
       : UNASSIGNED_OWNER_VALUE;
-    if (value === currentValue) return;
+    if (value === currentValue) {
+      setStaleAttempt(null);
+      return;
+    }
     saveOwner(value === UNASSIGNED_OWNER_VALUE ? null : Number(value));
   }
 
@@ -672,7 +725,9 @@ export function StaffTicketDetailScreen() {
     setItPrioritySaving(true);
     setItPriorityError(undefined);
     setStaleNotice(false);
+    setStaleAttempt(null);
 
+    const ticketBefore = state.ticket;
     patchTicketItPriority(state.ticket.id, nextItPriority, state.ticket.version)
       .then((updated) => {
         setState((previous) => {
@@ -691,6 +746,10 @@ export function StaffTicketDetailScreen() {
       .catch((error: unknown) => {
         if (error instanceof StaleTicketError) {
           setStaleNotice(true);
+          setStaleAttempt({
+            itPriority: nextItPriority,
+            stored: storedSnapshot(error, ticketBefore),
+          });
           return;
         }
         setItPriorityError(
@@ -704,7 +763,10 @@ export function StaffTicketDetailScreen() {
 
   function handleItPriorityChange(value: string) {
     if (state.phase !== "loaded") return;
-    if (value === state.ticket.itPriority) return;
+    if (value === state.ticket.itPriority) {
+      setStaleAttempt(null);
+      return;
+    }
     saveItPriority(value as RequestedPriority);
   }
 
@@ -733,8 +795,10 @@ export function StaffTicketDetailScreen() {
     setStatusError(undefined);
     setStatusConflictMessage(null);
     setStaleNotice(false);
+    setStaleAttempt(null);
     setBlocked(null);
 
+    const ticketBefore = state.ticket;
     const ticketId = state.ticket.id;
     patchTicketStatus(ticketId, nextStatus, state.ticket.version)
       .then((updated) => {
@@ -766,6 +830,10 @@ export function StaffTicketDetailScreen() {
         if (error instanceof StaleTicketError) {
           setPendingStatus(null);
           setStaleNotice(true);
+          setStaleAttempt({
+            status: nextStatus,
+            stored: storedSnapshot(error, ticketBefore),
+          });
           restoreStatusFocusAfterSaveRef.current = true;
           return;
         }
@@ -797,6 +865,7 @@ export function StaffTicketDetailScreen() {
    */
   function handleStatusSelectChange(value: string) {
     if (state.phase !== "loaded") return;
+    setStaleAttempt(null);
     if (value === state.ticket.status) return;
     if (STATUS_CONFIRM_REQUIRED.has(value)) {
       setStatusError(undefined);
@@ -847,6 +916,7 @@ export function StaffTicketDetailScreen() {
 
   function handleStaleRefresh() {
     setStaleNotice(false);
+    setStaleAttempt(null);
     setBlocked(null);
     handleRetry();
   }
@@ -1101,12 +1171,20 @@ export function StaffTicketDetailScreen() {
                   <SegmentedControl
                     id="staff-it-priority"
                     label="IT Priority"
-                    value={state.ticket.itPriority ?? ""}
+                    value={
+                      staleAttempt?.itPriority ?? state.ticket.itPriority ?? ""
+                    }
                     onChange={handleItPriorityChange}
                     options={IT_PRIORITY_OPTIONS}
                     disabled={itPrioritySaving}
                     error={itPriorityError}
                   />
+                  {staleNotice && staleAttempt?.itPriority && (
+                    <span className="zen-staff-detail__save-detail">
+                      Current:{" "}
+                      {getItPriorityLabel(staleAttempt.stored.itPriority)}
+                    </span>
+                  )}
                   {itPrioritySaved && (
                     <span role="status" className="zen-staff-detail__save-tick">
                       <span aria-hidden="true">✓</span> Saved
@@ -1125,12 +1203,17 @@ export function StaffTicketDetailScreen() {
                   <SelectField
                     id="staff-ticket-status"
                     label="Current Status"
-                    value={state.ticket.status}
+                    value={staleAttempt?.status ?? state.ticket.status}
                     onChange={handleStatusSelectChange}
                     options={statusOptions}
                     disabled={statusSaving || statusOptions.length <= 1}
                     error={statusError}
                   />
+                  {staleNotice && staleAttempt?.status && (
+                    <span className="zen-staff-detail__save-detail">
+                      Current: {getStatusLabel(staleAttempt.stored.status)}
+                    </span>
+                  )}
                   {statusSaved && (
                     <span role="status" className="zen-staff-detail__save-tick">
                       <span aria-hidden="true">✓</span> Saved
@@ -1168,9 +1251,13 @@ export function StaffTicketDetailScreen() {
                       id="staff-ticket-owner"
                       label="Ticket Owner"
                       value={
-                        state.ticket.owner
-                          ? String(state.ticket.owner.id)
-                          : UNASSIGNED_OWNER_VALUE
+                        staleAttempt && staleAttempt.owner !== undefined
+                          ? staleAttempt.owner === null
+                            ? UNASSIGNED_OWNER_VALUE
+                            : String(staleAttempt.owner)
+                          : state.ticket.owner
+                            ? String(state.ticket.owner.id)
+                            : UNASSIGNED_OWNER_VALUE
                       }
                       onChange={handleOwnerSelectChange}
                       options={ownerOptions}
@@ -1187,6 +1274,12 @@ export function StaffTicketDetailScreen() {
                       </Button>
                     )}
                   </div>
+                  {staleNotice && staleAttempt?.owner !== undefined && (
+                    <span className="zen-staff-detail__save-detail">
+                      Current owner:{" "}
+                      {staleAttempt.stored.ownerName ?? "Unassigned"}
+                    </span>
+                  )}
                   {ownerSaved && (
                     <span role="status" className="zen-staff-detail__save-tick">
                       <span aria-hidden="true">✓</span> Saved
