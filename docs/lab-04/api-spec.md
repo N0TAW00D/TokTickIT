@@ -86,7 +86,8 @@ notes, `requester-resolved`, Action create.
 `(ticketId, clientRequestId)` is unique: a repeat with an **identical** body returns the existing Action with `200`
 and writes nothing; the same key with a **different** body is `409 IDEMPOTENCY_CONFLICT` and writes
 nothing. "Identical" is the SHA-256 of the canonicalised create body (text trimmed, defaults applied,
-server-owned fields ignored), stored with the row, so a later edit of the Action does not make a genuine
+server-owned fields ignored; the one exception is `attachmentNotes`, which is hashed exactly as sent when
+non-blank, so two bodies differing only in its surrounding whitespace conflict; a blank value counts as `null`), stored with the row, so a later edit of the Action does not make a genuine
 retry conflict. Without a key there is no deduplication. A malformed key is `400 VALIDATION_FAILED`.
 
 ---
