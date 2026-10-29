@@ -85,10 +85,17 @@ notes, `requester-resolved`, Action create.
 `POST …/actions-taken` accepts an optional `clientRequestId` (UUID v4 string). The pair
 `(ticketId, clientRequestId)` is unique: a repeat with an **identical** body returns the existing Action with `200`
 and writes nothing; the same key with a **different** body is `409 IDEMPOTENCY_CONFLICT` and writes
-nothing. "Identical" is the SHA-256 of the canonicalised create body (text trimmed, defaults applied,
-server-owned fields ignored; the one exception is `attachmentNotes`, which is hashed exactly as sent when
-non-blank, so two bodies differing only in its surrounding whitespace conflict; a blank value counts as `null`), stored with the row, so a later edit of the Action does not make a genuine
-retry conflict. Without a key there is no deduplication. A malformed key is `400 VALIDATION_FAILED`.
+nothing. Without a key there is no deduplication. A malformed key is `400 VALIDATION_FAILED`.
+
+"Identical" is the SHA-256 of the canonicalised create body, stored with the row (`clientRequestHash`) so a later
+edit of the Action does not make a genuine retry conflict. Canonicalisation:
+
+- **Text fields** (`description`, `result`, `followUpNote`) are **trimmed**; an empty optional text counts as `null`.
+- **Defaults are applied** (`status` `PLANNED`, `followUpRequired` `false`, every other optional field `null`) and **server-owned fields are ignored** (BR-03). `actionAt` is normalised to UTC; an omitted one stays `null` (the server's "now" default is not hashed, so a genuine retry hashes the same).
+- **Exception — `attachmentNotes` is not trimmed.** A non-blank value is hashed **exactly as sent**, so two bodies
+  that differ only in leading/trailing whitespace of `attachmentNotes` are *different* requests and the second is
+  `409 IDEMPOTENCY_CONFLICT`. A blank value (absent, `null`, empty or whitespace-only) counts as `null`. This matches
+  how the field is stored (§2.3, BR-07): the note is kept verbatim, never trimmed.
 
 ---
 
@@ -140,7 +147,7 @@ retry conflict. Without a key there is no deduplication. A malformed key is `400
 | `assigneeId` | no | integer or `null`; active IT Staff/Administrator (BR-08) |
 | `followUpRequired` | no | boolean, default `false` |
 | `followUpNote` | iff `followUpRequired` | 1–1000 trimmed; must be absent/`null` when `followUpRequired` is `false` (BR-06) |
-| `attachmentNotes` | no | string ≤ 500, or `null` (BR-07) |
+| `attachmentNotes` | no | string ≤ 500, or `null` (BR-07). Stored and hashed **as sent** (not trimmed); a blank value is stored as `null` |
 | `clientRequestId` | no | UUID string (§1.4) |
 
 `performedBy`, `createdAt`, `lastUpdatedBy`, `ticketId`, `id` and `version` in the body are ignored (BR-03).
