@@ -122,12 +122,21 @@ async function seedTicket(overrides: SeedTicketOverrides = {}) {
   });
 }
 
-function patchStatus(ticketId: number | string, body: unknown, cookie?: string) {
+// Lab 4 D-18: `version` is required on this route. These Lab 3 cases are not
+// about concurrency, so the helper sends the ticket's current version unless
+// the body already carries one.
+async function patchStatus(ticketId: number | string, body: unknown, cookie?: string) {
+  let payload = body;
+  if (typeof body === 'object' && body !== null && !Array.isArray(body) && !('version' in body)) {
+    const current =
+      typeof ticketId === 'number' ? await prisma.ticket.findUnique({ where: { id: ticketId } }) : null;
+    payload = { ...body, version: current?.version ?? 1 };
+  }
   const req = request(testServer.server)
     .patch(`/api/tickets/${ticketId}/status`)
     .set('Content-Type', 'application/json');
   const withCookie = cookie === undefined ? req : req.set('Cookie', cookie);
-  return withCookie.send(body as object);
+  return withCookie.send(payload as object);
 }
 
 // specification.md §5.1 — the permitted transition matrix, source of truth
@@ -190,6 +199,20 @@ describe('PATCH /api/tickets/:id/status (api-spec.md §5.3)', () => {
   // -------------------------------------------------------------------
   it.each(PERMITTED_TRANSITIONS)('%s -> %s succeeds with 200 and the new status', async (from, to) => {
     const ticket = await seedTicket({ status: from, ownerId: staffAId });
+    if (to === 'RESOLVED') {
+      // Lab 4 D-06/D-27: the resolution gate needs one COMPLETED Action (Owner already present).
+      await prisma.actionTaken.create({
+        data: {
+          ticketId: ticket.id,
+          performedById: staffAId,
+          lastUpdatedById: staffAId,
+          description: 'Seeded completed action',
+          result: 'Done',
+          status: 'COMPLETED',
+          actionAt: new Date(),
+        },
+      });
+    }
 
     const res = await patchStatus(ticket.id, { status: to }, staffCookie);
 

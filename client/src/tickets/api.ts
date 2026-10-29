@@ -222,6 +222,12 @@ export interface TicketDetailResponse extends CreateTicketResponse {
   owner: { id: number; name: string } | null;
   requesterResolvedAt: string | null;
   itPriority?: RequestedPriority;
+  /**
+   * Optimistic-concurrency counter (lab-04/api-spec.md §1.3). The guarded
+   * `PATCH` routes below require the value last read and answer `409
+   * STALE_UPDATE` when it is outdated.
+   */
+  version: number;
 }
 
 /**
@@ -729,6 +735,82 @@ export async function postRequesterResolved(ticketId: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Thrown by the three guarded Ticket writes on a `409 STALE_UPDATE`
+ * (lab-04/api-spec.md §1.3): the `version` sent is outdated. `current` is the
+ * Ticket as it is now, when the server supplied it.
+ */
+export class StaleTicketError extends Error {
+  readonly current: TicketDetailResponse | null;
+
+  constructor(current: TicketDetailResponse | null) {
+    super("This ticket was changed by someone else. Review its current state.");
+    this.name = "StaleTicketError";
+    this.current = current;
+  }
+}
+
+/** One failed resolution-gate condition (api-spec.md §3.2). */
+export interface ResolutionBlockReason {
+  code: string;
+  message: string;
+  count?: number;
+}
+
+/**
+ * Thrown by `patchTicketStatus` on a `409 RESOLUTION_BLOCKED`: Resolved was
+ * requested while the gate fails, or Closed while Actions are still open.
+ * `message` is the server's ("This ticket can't be resolved yet." / "…closed
+ * yet."); `reasons` is the ordered list of every failed condition.
+ */
+export class ResolutionBlockedError extends Error {
+  readonly reasons: ResolutionBlockReason[];
+
+  constructor(message: string | undefined, reasons: ResolutionBlockReason[]) {
+    super(message ?? "This ticket can't be resolved yet.");
+    this.name = "ResolutionBlockedError";
+    this.reasons = reasons;
+  }
+}
+
+function throwIfStale(body: unknown): void {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    (body as Record<string, unknown>).error === "STALE_UPDATE"
+  ) {
+    const current = (body as Record<string, unknown>).current;
+    throw new StaleTicketError(
+      typeof current === "object" && current !== null
+        ? (current as TicketDetailResponse)
+        : null,
+    );
+  }
+}
+
+function throwIfResolutionBlocked(body: unknown): void {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    (body as Record<string, unknown>).error !== "RESOLUTION_BLOCKED"
+  ) {
+    return;
+  }
+  const record = body as Record<string, unknown>;
+  const reasons = Array.isArray(record.reasons)
+    ? (record.reasons as unknown[]).filter(
+        (reason): reason is ResolutionBlockReason =>
+          typeof reason === "object" &&
+          reason !== null &&
+          typeof (reason as Record<string, unknown>).message === "string",
+      )
+    : [];
+  throw new ResolutionBlockedError(
+    typeof record.message === "string" ? record.message : undefined,
+    reasons,
+  );
+}
+
+/**
  * Thrown by `patchTicketOwner` on a `409 INVALID_OWNER` (api-spec.md §5.1) —
  * the given `ownerId` names an inactive user, a Requester, or a user that
  * does not exist. The server intentionally doesn't say which (BR-20,
@@ -754,17 +836,19 @@ export class InvalidOwnerError extends Error {
 export async function patchTicketOwner(
   ticketId: number,
   ownerId: number | null,
+  version: number,
 ): Promise<TicketDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/owner`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ownerId }),
+    body: JSON.stringify({ ownerId, version }),
   });
 
   if (!response.ok) {
     if (response.status === 409) {
       const body = await readErrorBody(response);
+      throwIfStale(body);
       throw new InvalidOwnerError(extractSafeMessage(body));
     }
     throw new Error(`Failed to update ticket owner (status ${response.status})`);
@@ -786,15 +870,17 @@ export async function patchTicketOwner(
 export async function patchTicketItPriority(
   ticketId: number,
   itPriority: RequestedPriority,
+  version: number,
 ): Promise<TicketDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/it-priority`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itPriority }),
+    body: JSON.stringify({ itPriority, version }),
   });
 
   if (!response.ok) {
+    if (response.status === 409) throwIfStale(await readErrorBody(response));
     throw new Error(`Failed to update IT priority (status ${response.status})`);
   }
 
@@ -850,17 +936,20 @@ export class StatusTransitionConflictError extends Error {
 export async function patchTicketStatus(
   ticketId: number,
   status: string,
+  version: number,
 ): Promise<TicketDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/tickets/${ticketId}/status`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, version }),
   });
 
   if (!response.ok) {
     if (response.status === 409) {
       const body = await readErrorBody(response);
+      throwIfStale(body);
+      throwIfResolutionBlocked(body);
       const code =
         typeof body === "object" &&
         body !== null &&

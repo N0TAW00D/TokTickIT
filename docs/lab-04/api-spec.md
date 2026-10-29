@@ -193,8 +193,8 @@ Requester never sees `itPriority`.
 
 ### 3.2 `PATCH /api/tickets/:id/status`
 
-- **Auth:** IT Staff only. Administrator → `403`; a Requester → `403` on their own Ticket and `404` on
-  anyone else's (Lab 3 §1.4 case 3 / case 2, unchanged).
+- **Auth:** IT Staff only. Administrator → `403`; a Requester → `404` on any Ticket, their own included (the Lab 3
+  behavior, unchanged: a Requester has no path to this route).
 - **Body:** `{ "status": <one of the eight>, "version": integer }` — `version` is now required (D-18).
 - **200:** the updated Ticket (Lab 3 shape plus `version`), after the transaction wrote the Ticket and
   one `TicketStatusChange` row.

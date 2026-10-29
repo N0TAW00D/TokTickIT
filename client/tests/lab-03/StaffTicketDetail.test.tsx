@@ -909,7 +909,7 @@ describe("IT Priority control (ui-spec.md §10)", () => {
     expect(JSON.parse(init.body as string)).toEqual({ itPriority: "HIGH" });
   });
 
-  it("a failed save (500) restores the previous value and shows an error", async () => {
+  it("a failed save (500) keeps the attempted value (BR-36) and shows an error beside it", async () => {
     mockFetch({
       ticket: () => jsonResponse(200, baseTicket({ itPriority: "MEDIUM" })),
       patchItPriority: () => jsonResponse(500, { error: "INTERNAL" }),
@@ -923,10 +923,12 @@ describe("IT Priority control (ui-spec.md §10)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not update the IT priority. Please check your connection and try again.",
     );
-    expect(highOption).toHaveAttribute("aria-checked", "false");
+    // Lab 4 BR-36: the unsaved input survives the failure instead of
+    // snapping back to the stored value.
+    expect(highOption).toHaveAttribute("aria-checked", "true");
     expect(
       screen.getByRole("radio", { name: "Medium" }),
-    ).toHaveAttribute("aria-checked", "true");
+    ).toHaveAttribute("aria-checked", "false");
   });
 });
 
