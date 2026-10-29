@@ -168,11 +168,13 @@ npm run test:all                  # everything, from the repository root
 | C-19 | UI component | AC-08 | Invalid assignee message | `INVALID_ASSIGNEE` renders on the Assignee field with the entered values kept | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-20 | UI component | AC-13 | Closed Ticket | CLOSED/CANCELLED hides Add action and shows the closed notice; RESOLVED keeps it | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-21 | UI component | AC-15 | Administrator view | Actions Taken fully usable; owner select, status control, comment and note composers not rendered; IT Priority editable | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
-| C-22 | UI component | AC-26, AC-49, FR-09 | Permitted transitions only | For each of the eight statuses the status control lists exactly the §5.1 targets; the Cancel confirm dialog shows "Open actions on this ticket will be cancelled."; after a successful cancel the Actions list reloads and shows the open Actions as CANCELLED | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
+| C-22 | UI component | AC-26, AC-49, FR-09 | Permitted transitions only | For each of the eight statuses the status control lists exactly the §5.1 targets; the Cancel confirm dialog shows "Open actions on this ticket will be cancelled."; Resolved saves with no confirm dialog while Closed, Reopened and Cancelled open one; after a successful cancel the Actions list reloads and shows the open Actions as CANCELLED | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
 | C-23 | UI component | AC-26 | Success refreshes the summary | After a successful change the summary `StatusBadge`, permitted list and history card update without reload | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
 | C-24 | UI component | AC-20, AC-21, AC-22, AC-48 | Resolution checklist and blocked callout | Checklist ✓/✗ matches loaded owner/Actions; `RESOLUTION_BLOCKED` shows the returned reasons in an `role="alert"` callout and leaves status unchanged; closing with open Actions shows the same callout worded "closed yet" with only the open-actions reason | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
-| C-25 | UI component | AC-25 | Stale Ticket write | `STALE_UPDATE` shows the callout, reverts the select, Refresh loads the current Ticket | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
+| C-25 | UI component | AC-25 | Stale Ticket write | `STALE_UPDATE` shows the callout and "Current: …", keeps the attempted value in the control, Refresh loads the current Ticket without resubmitting | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
 | C-26 | UI component | AC-24 | Status history card | Oldest first with from→to text and `StatusBadge`s; empty message for no history | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
+| C-31 | UI component | AC-25, AC-38 | Draft kept on Refresh | After `STALE_UPDATE` on owner or IT Priority, Refresh reloads the Ticket and the control still shows the attempted value with no callout and no second PATCH; a status draft the reloaded Ticket no longer permits is dropped | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
+| C-32 | UI component | AC-38 | Draft kept on network failure | A failed (network) status, owner or IT Priority write shows its error beside the control, which keeps the attempted value; cancelling the confirm dialog discards it | `client/tests/lab-04/TicketWorkflow.test.tsx` | Planned |
 | C-27 | UI component | AC-39, FR-06 | Requester Ticket Detail | Actions Taken (all fields) and status history visible; no Add/Edit/status controls; no Internal Note content; no IT Priority | `client/tests/lab-04/RequesterActionsView.test.tsx` | Planned |
 | C-28 | UI component | AC-45 | Safe failure | A failing Actions list/dashboard shows `ErrorState` with Retry and no raw error text | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-29 | UI component | AC-52 | Result required only for Completed | Selecting Completed with an empty Result shows the message below the field and keeps values; Planned/In progress save without a result; the `*` toggles with the Status select | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
@@ -251,7 +253,7 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-22 | UNIT-06, WF-05, C-24, E2E-07 |
 | AC-23 | WF-07, E2E-08 |
 | AC-24 | API-16, WF-08, WF-09, C-26, E2E-09 |
-| AC-25 | UNIT-09, WF-10, WF-11, WF-12, WF-13, C-25, E2E-10 |
+| AC-25 | UNIT-09, WF-10, WF-11, WF-12, WF-13, C-25, C-31, E2E-10 |
 | AC-26 | C-22, C-23, E2E-07 |
 | AC-27 | UNIT-08, API-17, API-19, E2E-12 |
 | AC-28 | API-23, C-04, E2E-11 |
@@ -264,7 +266,7 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-35 | C-01, C-02, E2E-15 |
 | AC-36 | C-03, C-06, C-08, C-09, S-03, A11Y-06, E2E-16 |
 | AC-37 | C-10, C-11, S-05, S-06, R-03, E2E-01 |
-| AC-38 | C-14, C-15, C-16, C-30, E2E-05, E2E-06 |
+| AC-38 | C-14, C-15, C-16, C-30, C-31, C-32, E2E-05, E2E-06 |
 | AC-39 | C-27, S-06, R-04, A11Y-04, E2E-09 |
 | AC-40 | MIG-01, MIG-02, MIG-03, MIG-04, MIG-05, MIG-09 |
 | AC-41 | MIG-06, MIG-06b, MIG-06c, MIG-06d, MIG-06e, MIG-07, MIG-08 |
@@ -303,6 +305,7 @@ and a search for the forbidden-state links.
 | Seed one `COMPLETED` Action (with an Owner already present) on the Ticket before the transition into Resolved (BR-17, D-06, D-27); a following Resolved→Closed then passes BR-40 because no Action is open | D-06, D-27 | `server/tests/lab-03/ticket-status.api.test.ts` `PERMITTED_TRANSITIONS` rows `OPEN→RESOLVED` (:143), `IN_PROGRESS→RESOLVED` (:146), `WAITING_FOR_REQUESTER→RESOLVED` (:149), `REOPENED→RESOLVED` (:156), exercised by the `it.each` at :191; `e2e/lab-03/submission-evidence.spec.ts:670-686` (OPEN→RESOLVED→CLOSED through the UI). The seeded-RESOLVED rows `RESOLVED→CLOSED/REOPENED` (:151-152) and `CLOSED→REOPENED` (:153) need no edit, and `NEW→RESOLVED` (:234) still expects `409 INVALID_TRANSITION` |
 | Send `version` on `PATCH …/status`, `/owner`, `/it-priority` | D-18 | `server/tests/lab-03/ticket-status.api.test.ts`, `ticket-owner.api.test.ts`, `ticket-it-priority.api.test.ts`, and any E2E helper that calls them |
 | Administrator may read the staff queue | D-13 | `server/tests/lab-03/staff-queue.api.test.ts`, `staff-assignable-users.api.test.ts` Administrator `403` cases become `200` |
+| A failed (network/500) IT Priority or owner save keeps the attempted value instead of reverting (BR-36); `INVALID_OWNER` still reverts | BR-36 | `client/tests/lab-03/StaffTicketDetail.test.tsx` "a failed save (500) keeps the attempted value…" (IT Priority); the `INVALID_OWNER` test is unchanged |
 | `GET /api/tickets/:id` returns `version` (api-spec §3.1, D-18), so the Lab 2 whole-body `toEqual` gains `version: 1` | D-18 | `server/tests/lab-02/ticket-detail.api.test.ts:177` (API-19) |
 | My Tickets `status` filter accepts all eight statuses, so the Lab 2 rejection example `status: 'CLOSED'` becomes an invalid value (`'BOGUS'`) | api-spec §6.1, §7 | `server/tests/lab-02/validation.test.ts:282` (`parseTicketListQuery` UNIT-05) |
 

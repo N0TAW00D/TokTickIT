@@ -253,6 +253,28 @@ describe("Permitted transitions only", () => {
   });
 });
 
+describe("Confirm dialogs (ui-spec.md §6)", () => {
+  it("C-22: Resolved saves immediately with no confirm dialog, while Closed asks first", async () => {
+    const fetchMock = mockFetch({
+      ticket: () => res(200, ticketBody({ status: "RESOLVED", owner: { id: 9, name: "Jordan Lee" } })),
+    });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "CLOSED" } });
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(calls(fetchMock, URLS.status, "PATCH")).toHaveLength(0);
+    cleanup();
+
+    const resolveMock = mockFetch();
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "RESOLVED" } });
+    await vi.waitFor(() => expect(calls(resolveMock, URLS.status, "PATCH")).toHaveLength(1));
+    expect(sentBody(calls(resolveMock, URLS.status, "PATCH")[0]).status).toBe("RESOLVED");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("Success refreshes the summary", () => {
   it("C-23: after a status change the summary badge, permitted list and history card update without reload", async () => {
     let changed = false;
@@ -440,12 +462,63 @@ describe("Stale Ticket write", () => {
     expect(calls(fetchMock, URLS.status, "PATCH")).toHaveLength(1);
 
     fireEvent.click(within(alert).getByRole("button", { name: "Refresh" }));
-    await vi.waitFor(() => expect(statusSelect().value).toBe("WAITING_FOR_REQUESTER"));
+    // The summary follows the reloaded Ticket; the control keeps the draft.
+    await vi.waitFor(() => expect(summaryBadge()).toHaveTextContent("Waiting for Requester"));
     expect(calls(fetchMock, URLS.ticket)).toHaveLength(2);
+    expect(statusSelect().value).toBe("IN_PROGRESS");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/^Current: /)).toBeNull();
     // Refresh never resubmits the attempted change.
     expect(calls(fetchMock, URLS.status, "PATCH")).toHaveLength(1);
+  });
+
+  it("C-31: Refresh keeps an owner or IT Priority draft apart from the reloaded Ticket", async () => {
+    let reads = 0;
+    const fetchMock = mockFetch({
+      ticket: () => {
+        reads += 1;
+        return res(200, ticketBody({ version: reads === 1 ? 3 : 8 }));
+      },
+      patchOwner: () => res(409, { error: "STALE_UPDATE", current: ticketBody({ version: 8 }) }),
+      patchPriority: () => res(409, { error: "STALE_UPDATE", current: ticketBody({ version: 8 }) }),
+    });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Low" }));
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Refresh" }));
+    await vi.waitFor(() => expect(calls(fetchMock, URLS.ticket)).toHaveLength(2));
+    await screen.findByText("TKT-2026-000021");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("radio", { name: "Low" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText(/^Current: /)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Ticket Owner"), { target: { value: "unassigned" } });
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Refresh" }));
+    await vi.waitFor(() => expect(calls(fetchMock, URLS.ticket)).toHaveLength(3));
+    await screen.findByText("TKT-2026-000021");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByLabelText("Ticket Owner") as HTMLSelectElement).value).toBe("unassigned");
+    expect(calls(fetchMock, URLS.owner, "PATCH")).toHaveLength(1);
+  });
+
+  it("C-31: Refresh drops a status draft the reloaded Ticket no longer permits", async () => {
+    let reads = 0;
+    mockFetch({
+      ticket: () => {
+        reads += 1;
+        return res(200, reads === 1 ? ticketBody() : ticketBody({ status: "RESOLVED", version: 9 }));
+      },
+      patchStatus: () =>
+        res(409, { error: "STALE_UPDATE", current: ticketBody({ status: "RESOLVED", version: 9 }) }),
+    });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "IN_PROGRESS" } });
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Refresh" }));
+
+    await vi.waitFor(() => expect(summaryBadge()).toHaveTextContent("Resolved"));
+    expect(statusSelect().value).toBe("RESOLVED");
   });
 
   it("C-25: STALE_UPDATE on a confirm-dialog destination keeps the attempted status too", async () => {
@@ -493,6 +566,58 @@ describe("Stale Ticket write", () => {
     expect(screen.getByRole("radio", { name: "Low" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "High" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText("Current: High")).toBeInTheDocument();
+  });
+});
+
+describe("Unsaved input survives a failed write (BR-36)", () => {
+  const NETWORK_DOWN = () => Promise.reject(new TypeError("Failed to fetch"));
+
+  it("C-32: a network failure on IT Priority keeps the attempted value and shows the error beside it", async () => {
+    const fetchMock = mockFetch({ patchPriority: NETWORK_DOWN });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.click(screen.getByRole("radio", { name: "Low" }));
+
+    expect(await screen.findByText(/Could not update the IT priority/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Low" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "High" })).toHaveAttribute("aria-checked", "false");
+    expect(calls(fetchMock, URLS.priority, "PATCH")).toHaveLength(1);
+  });
+
+  it("C-32: a network failure on the owner keeps the attempted owner", async () => {
+    mockFetch({ patchOwner: NETWORK_DOWN });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(screen.getByLabelText("Ticket Owner"), { target: { value: "unassigned" } });
+
+    expect(await screen.findByText(/Could not update the ticket owner/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Ticket Owner") as HTMLSelectElement).value).toBe("unassigned");
+  });
+
+  it("C-32: a network failure on an immediate status change keeps the attempted status", async () => {
+    mockFetch({ patchStatus: NETWORK_DOWN });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "IN_PROGRESS" } });
+
+    expect(await screen.findByText(/Could not update the ticket status/)).toBeInTheDocument();
+    expect(statusSelect().value).toBe("IN_PROGRESS");
+    expect(summaryBadge()).toHaveTextContent("Open");
+  });
+
+  it("C-32: cancelling the confirm dialog discards the draft", async () => {
+    mockFetch({ patchStatus: NETWORK_DOWN });
+    renderScreen();
+    await screen.findByText("TKT-2026-000021");
+    fireEvent.change(statusSelect(), { target: { value: "CANCELLED" } });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel ticket" }));
+    await screen.findAllByText(/Could not update the ticket status/);
+    expect(statusSelect().value).toBe("CANCELLED");
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(statusSelect().value).toBe("OPEN");
   });
 });
 

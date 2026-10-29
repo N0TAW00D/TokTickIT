@@ -92,7 +92,7 @@ function storedSnapshot(
   fallback: {
     status: string;
     owner: { name: string } | null;
-    itPriority: RequestedPriority | null;
+    itPriority?: RequestedPriority | null;
   },
 ) {
   const source = error.current ?? fallback;
@@ -101,6 +101,39 @@ function storedSnapshot(
     ownerName: source.owner?.name ?? null,
     itPriority: source.itPriority ?? null,
   };
+}
+
+/**
+ * What survives a Refresh of a failed write's draft: the attempted value is
+ * dropped once the reloaded ticket already holds it, and a status draft is
+ * also dropped when the matrix no longer permits it from the new status.
+ */
+function reconcileDraft(
+  draft: {
+    status?: string;
+    owner?: number | null;
+    itPriority?: RequestedPriority;
+  },
+  ticket: {
+    status: string;
+    owner: { id: number } | null;
+    itPriority?: RequestedPriority | null;
+  },
+) {
+  const { stored: _stored, ...attempt } = draft as typeof draft & {
+    stored?: unknown;
+  };
+  if (attempt.status !== undefined) {
+    const permitted = STATUS_TRANSITIONS[ticket.status as StatusValue] ?? [];
+    return permitted.includes(attempt.status as StatusValue) ? attempt : null;
+  }
+  if (attempt.owner !== undefined) {
+    return attempt.owner === (ticket.owner?.id ?? null) ? null : attempt;
+  }
+  if (attempt.itPriority !== undefined) {
+    return attempt.itPriority === (ticket.itPriority ?? null) ? null : attempt;
+  }
+  return null;
 }
 
 const IT_PRIORITY_OPTIONS: SegmentedControlOption[] = [
@@ -403,16 +436,20 @@ export function StaffTicketDetailScreen() {
   // STALE_UPDATE on status, owner or IT Priority (one shared callout), and
   // RESOLUTION_BLOCKED from the status route.
   const [staleNotice, setStaleNotice] = useState(false);
-  // The one field whose write came back STALE_UPDATE, with the value the
-  // user tried to set (BR-36: the callout "keeps the user's input") and the
-  // stored value the 409 reported. The three controls show `attempt` over
-  // the loaded ticket until Refresh, a new attempt or a successful save
-  // clears it; it is never resubmitted on its own.
-  const [staleAttempt, setStaleAttempt] = useState<{
+  // The one field whose last write failed, with the value the user tried to
+  // set (BR-36: the user's unsaved input survives a stale, validation or
+  // network failure). The three controls show the draft over the loaded
+  // ticket; a new attempt, a successful save, cancelling the confirm dialog
+  // or opening another ticket clears it, and Refresh keeps it apart from the
+  // reloaded server state (it is dropped only once the reloaded ticket makes
+  // it moot). `stored` is the value a STALE_UPDATE 409 reported, shown in
+  // the "Current: …" detail; other failures leave it unset. A draft is never
+  // resubmitted on its own.
+  const [draft, setDraft] = useState<{
     status?: string;
     owner?: number | null;
     itPriority?: RequestedPriority;
-    stored: {
+    stored?: {
       status: string;
       ownerName: string | null;
       itPriority: RequestedPriority | null;
@@ -440,11 +477,17 @@ export function StaffTicketDetailScreen() {
 
     let cancelled = false;
     setState({ phase: "loading" });
-    setStaleAttempt(null);
 
     fetchTicketDetail(parsedId)
       .then((ticket) => {
-        if (!cancelled) setState({ phase: "loaded", ticket });
+        if (cancelled) return;
+        setState({ phase: "loaded", ticket });
+        // Refresh keeps the user's draft; drop only what the reloaded
+        // ticket has made moot (already saved by someone else, or a status
+        // the matrix no longer permits from the new status).
+        setDraft((previous) =>
+          previous ? reconcileDraft(previous, ticket) : previous,
+        );
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -463,6 +506,11 @@ export function StaffTicketDetailScreen() {
       cancelled = true;
     };
   }, [parsedId, validId, reloadToken]);
+
+  // A draft belongs to one ticket; opening another one starts clean.
+  useEffect(() => {
+    setDraft(null);
+  }, [parsedId]);
 
   function loadHistory(ticketId: number) {
     fetchStatusHistory(ticketId)
@@ -644,7 +692,7 @@ export function StaffTicketDetailScreen() {
     setOwnerSaving(true);
     setOwnerError(undefined);
     setStaleNotice(false);
-    setStaleAttempt(null);
+    setDraft(null);
 
     const ticketBefore = state.ticket;
     patchTicketOwner(state.ticket.id, nextOwnerId, state.ticket.version)
@@ -665,16 +713,21 @@ export function StaffTicketDetailScreen() {
       .catch((error: unknown) => {
         if (error instanceof StaleTicketError) {
           setStaleNotice(true);
-          setStaleAttempt({
+          setDraft({
             owner: nextOwnerId,
             stored: storedSnapshot(error, ticketBefore),
           });
           return;
         }
+        if (error instanceof InvalidOwnerError) {
+          // The server refused this very user, so there is nothing to keep:
+          // the select reverts and the message says why (Lab 3 behaviour).
+          setOwnerError(error.message);
+          return;
+        }
+        setDraft({ owner: nextOwnerId });
         setOwnerError(
-          error instanceof InvalidOwnerError
-            ? error.message
-            : "Could not update the ticket owner. Please check your connection and try again.",
+          "Could not update the ticket owner. Please check your connection and try again.",
         );
       })
       .finally(() => {
@@ -688,7 +741,7 @@ export function StaffTicketDetailScreen() {
       ? String(state.ticket.owner.id)
       : UNASSIGNED_OWNER_VALUE;
     if (value === currentValue) {
-      setStaleAttempt(null);
+      setDraft(null);
       return;
     }
     saveOwner(value === UNASSIGNED_OWNER_VALUE ? null : Number(value));
@@ -725,7 +778,7 @@ export function StaffTicketDetailScreen() {
     setItPrioritySaving(true);
     setItPriorityError(undefined);
     setStaleNotice(false);
-    setStaleAttempt(null);
+    setDraft(null);
 
     const ticketBefore = state.ticket;
     patchTicketItPriority(state.ticket.id, nextItPriority, state.ticket.version)
@@ -746,12 +799,13 @@ export function StaffTicketDetailScreen() {
       .catch((error: unknown) => {
         if (error instanceof StaleTicketError) {
           setStaleNotice(true);
-          setStaleAttempt({
+          setDraft({
             itPriority: nextItPriority,
             stored: storedSnapshot(error, ticketBefore),
           });
           return;
         }
+        setDraft({ itPriority: nextItPriority });
         setItPriorityError(
           "Could not update the IT priority. Please check your connection and try again.",
         );
@@ -764,7 +818,7 @@ export function StaffTicketDetailScreen() {
   function handleItPriorityChange(value: string) {
     if (state.phase !== "loaded") return;
     if (value === state.ticket.itPriority) {
-      setStaleAttempt(null);
+      setDraft(null);
       return;
     }
     saveItPriority(value as RequestedPriority);
@@ -795,7 +849,7 @@ export function StaffTicketDetailScreen() {
     setStatusError(undefined);
     setStatusConflictMessage(null);
     setStaleNotice(false);
-    setStaleAttempt(null);
+    setDraft(null);
     setBlocked(null);
 
     const ticketBefore = state.ticket;
@@ -830,7 +884,7 @@ export function StaffTicketDetailScreen() {
         if (error instanceof StaleTicketError) {
           setPendingStatus(null);
           setStaleNotice(true);
-          setStaleAttempt({
+          setDraft({
             status: nextStatus,
             stored: storedSnapshot(error, ticketBefore),
           });
@@ -849,6 +903,7 @@ export function StaffTicketDetailScreen() {
           restoreStatusFocusAfterSaveRef.current = true;
           return;
         }
+        setDraft({ status: nextStatus });
         setStatusError(
           "Could not update the ticket status. Please check your connection and try again.",
         );
@@ -865,7 +920,7 @@ export function StaffTicketDetailScreen() {
    */
   function handleStatusSelectChange(value: string) {
     if (state.phase !== "loaded") return;
-    setStaleAttempt(null);
+    setDraft(null);
     if (value === state.ticket.status) return;
     if (STATUS_CONFIRM_REQUIRED.has(value)) {
       setStatusError(undefined);
@@ -906,6 +961,7 @@ export function StaffTicketDetailScreen() {
     if (statusSaving) return;
     setPendingStatus(null);
     setStatusError(undefined);
+    setDraft(null);
     restoreStatusFocus();
   }
 
@@ -916,7 +972,6 @@ export function StaffTicketDetailScreen() {
 
   function handleStaleRefresh() {
     setStaleNotice(false);
-    setStaleAttempt(null);
     setBlocked(null);
     handleRetry();
   }
@@ -1171,18 +1226,15 @@ export function StaffTicketDetailScreen() {
                   <SegmentedControl
                     id="staff-it-priority"
                     label="IT Priority"
-                    value={
-                      staleAttempt?.itPriority ?? state.ticket.itPriority ?? ""
-                    }
+                    value={draft?.itPriority ?? state.ticket.itPriority ?? ""}
                     onChange={handleItPriorityChange}
                     options={IT_PRIORITY_OPTIONS}
                     disabled={itPrioritySaving}
                     error={itPriorityError}
                   />
-                  {staleNotice && staleAttempt?.itPriority && (
+                  {staleNotice && draft?.stored && draft.itPriority && (
                     <span className="zen-staff-detail__save-detail">
-                      Current:{" "}
-                      {getItPriorityLabel(staleAttempt.stored.itPriority)}
+                      Current: {getItPriorityLabel(draft.stored.itPriority)}
                     </span>
                   )}
                   {itPrioritySaved && (
@@ -1203,15 +1255,15 @@ export function StaffTicketDetailScreen() {
                   <SelectField
                     id="staff-ticket-status"
                     label="Current Status"
-                    value={staleAttempt?.status ?? state.ticket.status}
+                    value={draft?.status ?? state.ticket.status}
                     onChange={handleStatusSelectChange}
                     options={statusOptions}
                     disabled={statusSaving || statusOptions.length <= 1}
                     error={statusError}
                   />
-                  {staleNotice && staleAttempt?.status && (
+                  {staleNotice && draft?.stored && draft.status && (
                     <span className="zen-staff-detail__save-detail">
-                      Current: {getStatusLabel(staleAttempt.stored.status)}
+                      Current: {getStatusLabel(draft.stored.status)}
                     </span>
                   )}
                   {statusSaved && (
@@ -1251,10 +1303,10 @@ export function StaffTicketDetailScreen() {
                       id="staff-ticket-owner"
                       label="Ticket Owner"
                       value={
-                        staleAttempt && staleAttempt.owner !== undefined
-                          ? staleAttempt.owner === null
+                        draft && draft.owner !== undefined
+                          ? draft.owner === null
                             ? UNASSIGNED_OWNER_VALUE
-                            : String(staleAttempt.owner)
+                            : String(draft.owner)
                           : state.ticket.owner
                             ? String(state.ticket.owner.id)
                             : UNASSIGNED_OWNER_VALUE
@@ -1274,12 +1326,13 @@ export function StaffTicketDetailScreen() {
                       </Button>
                     )}
                   </div>
-                  {staleNotice && staleAttempt?.owner !== undefined && (
-                    <span className="zen-staff-detail__save-detail">
-                      Current owner:{" "}
-                      {staleAttempt.stored.ownerName ?? "Unassigned"}
-                    </span>
-                  )}
+                  {staleNotice &&
+                    draft?.stored &&
+                    draft.owner !== undefined && (
+                      <span className="zen-staff-detail__save-detail">
+                        Current owner: {draft.stored.ownerName ?? "Unassigned"}
+                      </span>
+                    )}
                   {ownerSaved && (
                     <span role="status" className="zen-staff-detail__save-tick">
                       <span aria-hidden="true">✓</span> Saved

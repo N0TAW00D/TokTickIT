@@ -203,7 +203,9 @@ On Staff Ticket Detail (IT Staff only; Administrator sees status as read-only te
 
 - **Cancel confirm dialog** adds: "Open actions on this ticket will be cancelled." (BR-41); after success the Actions list reloads.
 - **Status control** (Lab 3 §10 select): lists only the transitions `specification.md` §5.1 permits
-  from the current status; Resolved, Closed, Reopened and Cancelled keep their confirm dialogs. A
+  from the current status; Closed, Reopened and Cancelled open a confirm dialog first (as in Lab 3 §10);
+  Resolved saves immediately — the resolution checklist and the `RESOLUTION_BLOCKED` callout are its guard and
+  Reopened undoes it. Every other destination also saves immediately. A
   transition the matrix forbids is never offered.
 - **Resolution checklist** (`ResolutionChecklist`): when Resolved is selected, a list appears under the
   control — "✓ / ✗ Ticket has an owner", "✓ / ✗ At least one action is completed", "✓ / ✗ No action is
@@ -213,8 +215,16 @@ On Staff Ticket Detail (IT Staff only; Administrator sees status as read-only te
   returned `reasons` in plain language, with a link that scrolls to Actions Taken; status unchanged.
 - **Success:** the summary `StatusBadge`, `version`, status-history card and the permitted-transition
   list refresh without a page reload; inline success tick + "Status changed to *X*."
+- **Unsaved input (BR-36):** after a `STALE_UPDATE` or a network/server failure on status, owner or IT Priority,
+  the control keeps the value the user tried to set and shows the failure beside it; it is never
+  resubmitted on its own. (`INVALID_OWNER` is the exception: the server refused that very user, so the select
+  reverts and the message says why, as in Lab 3.) A new selection, a successful save, cancelling the confirm dialog or opening another
+  Ticket clears it.
 - **`STALE_UPDATE`** (status, owner or IT Priority): callout "This ticket was changed by someone else.
-  Review its current state." with **Refresh**; the select reverts to the current value.
+  Review its current state." with **Refresh** and "Current: *stored value*" beside the control, which keeps the
+  user's attempted value. **Refresh** reloads the Ticket (summary, `version`, permitted transitions) and keeps
+  that value as a draft apart from the reloaded state; it is dropped only when the reloaded Ticket already holds
+  it or no longer permits it.
 - **`INVALID_TRANSITION` / `OWNER_REQUIRED`:** the Lab 3 conflict and owner-required messages, unchanged.
 - **Status history card** (`StatusHistory`): oldest first (BR-14), each row "*Open* → *In Progress* ·
   Name · date" using `StatusBadge`s with text, never colour only. Empty: "No status changes yet."
