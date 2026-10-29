@@ -304,6 +304,7 @@ and a search for the forbidden-state links.
 | Send `version` on `PATCH …/status`, `/owner`, `/it-priority` | D-18 | `server/tests/lab-03/ticket-status.api.test.ts`, `ticket-owner.api.test.ts`, `ticket-it-priority.api.test.ts`, and any E2E helper that calls them |
 | Administrator may read the staff queue | D-13 | `server/tests/lab-03/staff-queue.api.test.ts`, `staff-assignable-users.api.test.ts` Administrator `403` cases become `200` |
 | `GET /api/tickets/:id` returns `version` (api-spec §3.1, D-18), so the Lab 2 whole-body `toEqual` gains `version: 1` | D-18 | `server/tests/lab-02/ticket-detail.api.test.ts:177` (API-19) |
+| My Tickets `status` filter accepts all eight statuses, so the Lab 2 rejection example `status: 'CLOSED'` becomes an invalid value (`'BOGUS'`) | api-spec §6.1, §7 | `server/tests/lab-02/validation.test.ts:282` (`parseTicketListQuery` UNIT-05) |
 
 Searched for every earlier test or helper that moves a Ticket into Resolved or Closed (`grep -rnE 'RESOLVED|CLOSED|Resolved|Closed'` over `server/tests`, `e2e/lab-02`, `e2e/lab-03`, `e2e/support`, `e2e/scripts`, `server/scripts`, `client/tests`): only the two files above do so through the API or UI. Client tests mock the API and are unaffected; the e2e support fixtures and `server/scripts` write status directly and bypass the gate.
 

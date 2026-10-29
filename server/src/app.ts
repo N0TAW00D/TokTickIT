@@ -5,6 +5,7 @@ import { relatedSystemsRouter } from './routes/relatedSystems.ts';
 import { actionsTakenRouter } from './routes/actionsTaken.ts';
 import { ticketsRouter } from './routes/tickets.ts';
 import { attachmentsRouter } from './routes/attachments.ts';
+import { dashboardRouter } from './routes/dashboard.ts';
 import { authRouter } from './routes/auth.ts';
 import { staffRouter } from './routes/staff.ts';
 import { usersRouter } from './routes/users.ts';
@@ -102,6 +103,7 @@ app.use('/api/tickets', ticketsRouter);
 app.use('/api/attachments', attachmentsRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/staff', staffRouter);
+app.use('/api/dashboard', dashboardRouter);
 app.use('/api/users', usersRouter);
 
 export default app;
