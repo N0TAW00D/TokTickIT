@@ -169,6 +169,8 @@ function mockFetch({
   patchStatus,
 }: MockOptions = {}) {
   const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    // Lab 4 reads these screens now make; empty so their cards stay quiet.
+    if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
     if (input === ASSIGNABLE_URL) return jsonResponse(200, assignableUsers);
     if (input === OWNER_URL && init?.method === "PATCH") {
       return (patchOwner ?? (() => jsonResponse(200, baseTicket())))(init);
@@ -413,6 +415,7 @@ describe("Error/failure state", () => {
     expect(screen.queryByText("TKT-2026-000021")).not.toBeInTheDocument();
 
     fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+      if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
       if (input === ASSIGNABLE_URL) return jsonResponse(200, []);
       if (input === TICKET_URL && init?.method === undefined) {
         return jsonResponse(200, baseTicket());

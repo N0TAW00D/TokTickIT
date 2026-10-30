@@ -53,6 +53,8 @@ interface MockOptions {
 
 function mockFetch({ ticket = baseTicket(), comments = [], postComment, resolve }: MockOptions = {}) {
   const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    // Lab 4 reads these screens now make; empty so their cards stay quiet.
+    if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
     if (input === COMMENTS_URL && (!init || init.method === undefined)) {
       return jsonResponse(200, comments);
     }
