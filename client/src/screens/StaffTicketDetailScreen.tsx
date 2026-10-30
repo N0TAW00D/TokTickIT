@@ -519,6 +519,11 @@ export function StaffTicketDetailScreen() {
   const historyGen = useRef(0);
   const actionsGen = useRef(0);
 
+  function invalidateReads() {
+    historyGen.current++;
+    actionsGen.current++;
+  }
+
   function loadHistory(ticketId: number) {
     const gen = ++historyGen.current;
     fetchStatusHistory(ticketId)
@@ -557,10 +562,7 @@ export function StaffTicketDetailScreen() {
     setActions("loading");
     loadHistory(parsedId);
     loadActions(parsedId);
-    return () => {
-      historyGen.current++;
-      actionsGen.current++;
-    };
+    return invalidateReads;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedId, validId, reloadToken]);
 

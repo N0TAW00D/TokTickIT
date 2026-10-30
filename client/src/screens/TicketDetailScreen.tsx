@@ -148,9 +148,8 @@ export function TicketDetailScreen() {
   // judgment call this mirrors).
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
 
-  // Read-only Actions Taken and Status history (ui-spec.md §5.3). Best-effort
-  // reads once the Ticket is known to be the Requester's own: a failure never
-  // breaks the rest of the screen.
+  // Read-only Actions Taken and Status history (ui-spec.md §5.3); best-effort,
+  // a failure never breaks the rest of the screen.
   const [actions, setActions] = useState<
     ActionTaken[] | "loading" | "error" | "unavailable"
   >("loading");
@@ -162,6 +161,11 @@ export function TicketDetailScreen() {
   // Bumped by every new read and on ticket change, so a late response is dropped.
   const actionsGen = useRef(0);
   const historyGen = useRef(0);
+
+  function invalidateReads() {
+    actionsGen.current++;
+    historyGen.current++;
+  }
 
   function loadActions(ticketId: number) {
     const gen = ++actionsGen.current;
@@ -192,10 +196,7 @@ export function TicketDetailScreen() {
     setHistory("loading");
     loadActions(loadedTicketId);
     loadHistory(loadedTicketId);
-    return () => {
-      actionsGen.current++;
-      historyGen.current++;
-    };
+    return invalidateReads;
   }, [loadedTicketId, reloadToken]);
 
   useEffect(() => {
