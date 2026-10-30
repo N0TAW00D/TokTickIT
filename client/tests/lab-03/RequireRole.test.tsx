@@ -133,28 +133,28 @@ describe("RequireRole — disallowed role (ui-spec.md §4.3 forbidden state)", (
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("links back to the caller's OWN landing page — a Requester forbidden from an Admin route links to My Tickets", async () => {
+  it("D-12: links to the Dashboard — a Requester forbidden from an Admin route is offered \"Go to Dashboard\" (href /dashboard)", async () => {
     renderGuard(makeUser("REQUESTER"), ["ADMINISTRATOR"], vi.fn());
     await screen.findByRole("heading", { name: "You don't have access to this page" });
 
-    const link = screen.getByRole("link", { name: /my tickets/i });
-    expect(link).toHaveAttribute("href", "/tickets");
+    const link = screen.getByRole("link", { name: "Go to Dashboard" });
+    expect(link).toHaveAttribute("href", "/dashboard");
   });
 
-  it("links to Ticket Queue for an IT Staff caller forbidden from an Admin route", async () => {
+  it("D-12: an IT Staff caller forbidden from an Admin route is offered \"Go to Dashboard\" (href /dashboard)", async () => {
     renderGuard(makeUser("IT_STAFF"), ["ADMINISTRATOR"], vi.fn());
     await screen.findByRole("heading", { name: "You don't have access to this page" });
 
-    const link = screen.getByRole("link", { name: /ticket queue/i });
-    expect(link).toHaveAttribute("href", "/staff/tickets");
+    const link = screen.getByRole("link", { name: "Go to Dashboard" });
+    expect(link).toHaveAttribute("href", "/dashboard");
   });
 
-  it("links to User Management for an Administrator caller forbidden from a Requester route", async () => {
+  it("D-12: an Administrator caller forbidden from a Requester route is offered \"Go to Dashboard\" (href /dashboard)", async () => {
     renderGuard(makeUser("ADMINISTRATOR"), ["REQUESTER"], vi.fn());
     await screen.findByRole("heading", { name: "You don't have access to this page" });
 
-    const link = screen.getByRole("link", { name: /user management/i });
-    expect(link).toHaveAttribute("href", "/admin/users");
+    const link = screen.getByRole("link", { name: "Go to Dashboard" });
+    expect(link).toHaveAttribute("href", "/dashboard");
   });
 });
 

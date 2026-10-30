@@ -61,37 +61,40 @@ afterEach(() => {
 });
 
 describe("C-07 role-specific navigation (ui-spec.md §4.2)", () => {
-  it("Requester sees exactly My Tickets and Create Ticket — no Ticket Queue, no User Management", async () => {
+  it("Requester sees exactly Dashboard, My Tickets and Create Ticket — no Ticket Queue, no User Management", async () => {
     renderShellForRole("REQUESTER");
     await screen.findByRole("heading", { name: "Screen content" });
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
     expect(within(nav).getByRole("link", { name: "My Tickets" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Create Ticket" })).toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Ticket Queue" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "User Management" })).not.toBeInTheDocument();
   });
 
-  it("IT Staff sees exactly Ticket Queue — no My Tickets, no Create Ticket, no User Management (FR-12)", async () => {
+  it("IT Staff sees exactly Dashboard and Ticket Queue — no My Tickets, no Create Ticket, no User Management (FR-12)", async () => {
     renderShellForRole("IT_STAFF");
     await screen.findByRole("heading", { name: "Screen content" });
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
     expect(within(nav).getByRole("link", { name: "Ticket Queue" })).toHaveAttribute("href", "/staff/tickets");
     expect(within(nav).queryByRole("link", { name: "My Tickets" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Create Ticket" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "User Management" })).not.toBeInTheDocument();
   });
 
-  it("Administrator sees exactly User Management — no My Tickets, no Create Ticket, no Ticket Queue (FR-12)", async () => {
+  it("Administrator sees exactly Dashboard, Ticket Queue and User Management — no My Tickets, no Create Ticket (FR-12, D-13)", async () => {
     renderShellForRole("ADMINISTRATOR");
     await screen.findByRole("heading", { name: "Screen content" });
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(within(nav).getByRole("link", { name: "Ticket Queue" })).toHaveAttribute("href", "/staff/tickets");
     expect(within(nav).getByRole("link", { name: "User Management" })).toHaveAttribute("href", "/admin/users");
     expect(within(nav).queryByRole("link", { name: "My Tickets" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Create Ticket" })).not.toBeInTheDocument();
-    expect(within(nav).queryByRole("link", { name: "Ticket Queue" })).not.toBeInTheDocument();
   });
 
   it("a destination a role may not reach is absent entirely, not disabled (ui-spec.md §4.2)", async () => {

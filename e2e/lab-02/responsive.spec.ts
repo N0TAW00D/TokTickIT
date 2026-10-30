@@ -119,7 +119,7 @@ test.beforeAll(async ({ browser }) => {
   const loginContext = await browser.newContext();
   const loginPage = await loginContext.newPage();
   await loginAs(loginPage, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(loginPage).toHaveURL(/\/tickets$/);
+  await expect(loginPage).toHaveURL(/\/dashboard$/);
   const storageState = await loginContext.storageState();
   await loginContext.close();
 
@@ -195,7 +195,7 @@ function screenPath(screen: ScreenName): string {
  */
 async function loginAsSeededRequester(page: Page): Promise<void> {
   await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(page).toHaveURL(/\/tickets$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 }
 
 /** Navigates to `screen` (already logged in) and waits for real, populated
@@ -228,6 +228,7 @@ async function goToPopulatedScreen(
     // here" rather than an exact row count, and confirm one of OUR fixtures
     // (by ticket number, sorted to the top by the default createdAt-desc
     // sort) is genuinely visible — never just "some row exists".
+    await page.goto("/tickets");
     const isTableLayout = viewportName !== "mobile";
     const rows = isTableLayout
       ? page.locator(".zen-my-tickets__table tbody tr")

@@ -37,8 +37,10 @@
 
 .zen-app-shell__nav {
   display: flex;
-  gap: var(--zen-space-group-gap);
+  gap: 0 var(--zen-space-group-gap);
   flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .zen-app-shell__nav-link {

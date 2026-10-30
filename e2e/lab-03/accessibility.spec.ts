@@ -154,7 +154,8 @@ test.describe("A-03 Requester My Tickets accessibility (AC-56)", () => {
   }, testInfo) => {
     const requester = await createPlainLoginFixtureUser("a11y-my-tickets");
     await loginAs(page, requester.email, LOCAL_DEV_PASSWORD);
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await assertNoSeriousViolations(page, testInfo);
   });
@@ -298,7 +299,7 @@ test.describe("A-09 Forbidden screen accessibility (AC-56)", () => {
   }, testInfo) => {
     const requester = await createPlainLoginFixtureUser("a11y-forbidden");
     await loginAs(page, requester.email, LOCAL_DEV_PASSWORD);
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
 
     await page.goto("/admin/users");
     await expect(

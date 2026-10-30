@@ -356,6 +356,9 @@ export function StaffTicketDetailScreen() {
   const validId = Number.isInteger(parsedId) && parsedId > 0;
 
   const { user } = useAuth();
+  // D-13 / ui-spec.md §5.1: an Administrator gets IT Priority only; owner,
+  // status and both composers are IT-Staff-only.
+  const isAdministrator = user?.role === "ADMINISTRATOR";
 
   const [state, setState] = useState<DetailState>({ phase: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
@@ -1244,6 +1247,8 @@ export function StaffTicketDetailScreen() {
                   )}
                 </div>
 
+                {!isAdministrator && (
+                  <>
                 {/* Status (ui-spec.md §10's editable table): a select
                     listing only the transitions STATUS_TRANSITIONS permits
                     from the current status. CANCELLED is terminal, so
@@ -1339,6 +1344,8 @@ export function StaffTicketDetailScreen() {
                     </span>
                   )}
                 </div>
+                  </>
+                )}
               </div>
             </section>
           </div>
@@ -1393,12 +1400,14 @@ export function StaffTicketDetailScreen() {
             variant="public"
             fetchEntries={() => fetchComments(state.ticket.id)}
             postEntry={(body) => postComment(state.ticket.id, body)}
+            readOnly={isAdministrator}
           />
 
           <MessageThread
             variant="internal"
             fetchEntries={() => fetchTicketNotes(state.ticket.id)}
             postEntry={(body) => postTicketNote(state.ticket.id, body)}
+            readOnly={isAdministrator}
           />
         </>
       )}

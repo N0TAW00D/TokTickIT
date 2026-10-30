@@ -79,6 +79,9 @@
   --zen-private-border: #c9bfa3;
   --zen-private-text: #6b5a2e;
 
+  /* ---- Dashboard needs-attention accent (lab-04 ui-spec.md §1) ---- */
+  --zen-metric-attention: var(--zen-warning);
+
   /* ---- Typography (ui-spec.md §3) ---- */
   --zen-font-family: system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;

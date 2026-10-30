@@ -73,6 +73,10 @@ export interface FetchStaffTicketsParams {
   itPriority?: ItPriority;
   categoryId?: number;
   owner?: OwnerFilterValue;
+  /** Dashboard drill-down filters (lab-04 api-spec.md §6.2). */
+  scope?: "open" | "recent";
+  myActions?: true;
+  followUp?: true;
   sort?: StaffSortField;
   direction?: StaffSortDirection;
   page?: number;
@@ -139,9 +143,9 @@ export class StaffQueueInvalidQueryError extends Error {
  * `GET /api/staff/tickets` (server/src/routes/staff.ts, api-spec.md §4.1):
  * the shared IT Staff queue across all Requesters, identified via the
  * session cookie (`credentials: "include"`) exactly like `fetchMyTickets`.
- * Restricted server-side to the `IT_STAFF` role — an Administrator or
- * Requester caller gets a `403` before any lookup, which surfaces here as
- * the generic `Error` path (the client-side `RequireRole` guard is what
+ * Restricted server-side to IT Staff and Administrator (lab-04 D-13) — a
+ * Requester gets a `403` before any lookup, which surfaces here as the
+ * generic `Error` path (the client-side `RequireRole` guard is what
  * actually prevents this screen from ever being reached by the wrong
  * role, so a `403` reaching this function would only mean a stale session
  * or a direct API call).
@@ -167,6 +171,9 @@ export async function fetchStaffTickets(
     query.set("categoryId", String(params.categoryId));
   }
   if (params.owner !== undefined) query.set("owner", String(params.owner));
+  if (params.scope !== undefined) query.set("scope", params.scope);
+  if (params.myActions) query.set("myActions", "true");
+  if (params.followUp) query.set("followUp", "true");
   if (params.sort !== undefined) query.set("sort", params.sort);
   if (params.direction !== undefined) query.set("direction", params.direction);
   if (params.page !== undefined) query.set("page", String(params.page));
