@@ -515,19 +515,32 @@ export function StaffTicketDetailScreen() {
     setDraft(null);
   }, [parsedId]);
 
+  // Bumped by every new read and on ticket change, so a late response is dropped.
+  const historyGen = useRef(0);
+  const actionsGen = useRef(0);
+
   function loadHistory(ticketId: number) {
+    const gen = ++historyGen.current;
     fetchStatusHistory(ticketId)
-      .then(setHistory)
-      .catch(() => setHistory("error"));
+      .then((rows) => {
+        if (gen === historyGen.current) setHistory(rows);
+      })
+      .catch(() => {
+        if (gen === historyGen.current) setHistory("error");
+      });
   }
 
   function loadActions(ticketId: number) {
     // Keeps the rows on screen while re-reading, so an open form never loses its list.
+    const gen = ++actionsGen.current;
     fetchActions(ticketId)
-      .then(setActions)
-      .catch((error: unknown) =>
-        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error"),
-      );
+      .then((rows) => {
+        if (gen === actionsGen.current) setActions(rows);
+      })
+      .catch((error: unknown) => {
+        if (gen !== actionsGen.current) return;
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error");
+      });
   }
 
   /** Re-reads the Ticket in place (no loading phase), e.g. after it was closed under an open form. */
@@ -544,6 +557,10 @@ export function StaffTicketDetailScreen() {
     setActions("loading");
     loadHistory(parsedId);
     loadActions(parsedId);
+    return () => {
+      historyGen.current++;
+      actionsGen.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedId, validId, reloadToken]);
 
