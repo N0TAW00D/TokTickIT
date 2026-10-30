@@ -179,13 +179,24 @@ export function UserManagementScreen() {
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  // The dashboard Users strip links here with `?role=` (lab-04 api-spec.md
-  // §5); an unknown value is ignored rather than sent to the API.
-  const [searchParams] = useSearchParams();
-  const [role, setRole] = useState(() => {
-    const fromUrl = searchParams.get("role");
-    return fromUrl === "REQUESTER" || fromUrl === "IT_STAFF" || fromUrl === "ADMINISTRATOR" ? fromUrl : "";
-  });
+  // The URL is the source of truth for `role` (ui-spec.md §2): the dashboard
+  // Users strip links here with `?role=` (lab-04 api-spec.md §5), and Back /
+  // Forward must restore it. An unknown value is ignored rather than sent
+  // to the API.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const roleParam = searchParams.get("role");
+  const role = roleParam === "REQUESTER" || roleParam === "IT_STAFF" || roleParam === "ADMINISTRATOR" ? roleParam : "";
+
+  /** Writes `role` to the query string (replace, like My Tickets and the queue, so Back returns to the screen with the last chosen filter); "" removes it. */
+  const setRole = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value) next.set("role", value);
+      else next.delete("role");
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   const [mode, setMode] = useState<DialogMode>({ kind: "none" });
 
