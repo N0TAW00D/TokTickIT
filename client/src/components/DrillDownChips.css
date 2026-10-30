@@ -27,16 +27,25 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  gap: 4px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
   background: transparent;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--zen-radius-badge);
   color: var(--zen-text);
-  font-size: 1.125rem;
+  font: inherit;
   line-height: 1;
   cursor: pointer;
+}
+
+/* Lab 2 ui-spec §buttons: visible text, 44px touch target below 768px. */
+@media (max-width: 767px) {
+  .zen-chip__remove {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .zen-chip__remove:hover:not(:disabled) {

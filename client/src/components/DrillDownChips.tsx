@@ -32,6 +32,7 @@ export function DrillDownChips({ chips, disabled = false }: DrillDownChipsProps)
             onClick={chip.onRemove}
           >
             <span aria-hidden="true">×</span>
+            <span className="zen-chip__remove-text">Remove</span>
           </button>
         </li>
       ))}
