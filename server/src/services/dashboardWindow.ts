@@ -1,6 +1,7 @@
-// Pure dashboard time rules (specification.md BR-22, BR-23, D-10; api-spec.md
-// §4–§5). No database, no clock reads: every function takes `now` or the
-// history rows as an argument so tests can pin them.
+// Pure dashboard time rules (specification.md BR-22; api-spec.md §4–§5). No
+// database, no clock reads: every function takes `now` as an argument so tests
+// can pin it. The BR-23 / D-10 resolution time is computed in the query
+// (ticketFilters.ts, requesterDashboard.ts), not here.
 
 export const BANGKOK_TIME_ZONE = 'Asia/Bangkok';
 
@@ -22,24 +23,4 @@ export function bangkokDayStart(now: Date): Date {
  */
 export function windowStart(now: Date): Date {
   return new Date(bangkokDayStart(now).getTime() - 6 * DAY_MS);
-}
-
-export interface StatusHistoryRow {
-  toStatus: string;
-  changedAt: Date;
-}
-
-/**
- * BR-23 / D-10: the resolution time is the `changedAt` of the latest status
- * change into RESOLVED or CLOSED, or `null` when there is none (including a
- * legacy Ticket with no history), in which case the Ticket is excluded from
- * Recently Resolved. `Ticket.updatedAt` is never consulted.
- */
-export function resolutionTime(history: readonly StatusHistoryRow[]): Date | null {
-  let latest: Date | null = null;
-  for (const row of history) {
-    if (row.toStatus !== 'RESOLVED' && row.toStatus !== 'CLOSED') continue;
-    if (latest === null || row.changedAt.getTime() > latest.getTime()) latest = row.changedAt;
-  }
-  return latest;
 }
