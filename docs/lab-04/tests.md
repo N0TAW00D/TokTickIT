@@ -59,6 +59,14 @@ npm run test:all                  # everything, from the repository root
 - **Viewports:** desktop 1440×900, tablet 820×1180, mobile 390×844, plus 320 px for overflow.
 - **No** skipped, disabled or `.only` tests at hand-in.
 
+### 1.4 Known deviation: test-first order in #96
+
+In PR #110 the staff Actions Taken form (`feat(client): actions taken card…`) and the Requester view
+(`feat(client): read-only Actions Taken and Status history…`) were committed before their tests, so the
+history shows no red phase for the rows in `ActionsTaken.test.tsx` and `RequesterActionsView.test.tsx`.
+Pushed history is left as is. Each review-round fix in that PR (C-34 to C-37, S-07 to S-09) was
+checked by reverting the fix and watching the named test fail.
+
 ## 2. Planned tests
 
 | Test ID | Type | Requirement / AC | What It Tests | Expected Result | Automated Test File | Final |
@@ -180,12 +188,19 @@ npm run test:all                  # everything, from the repository root
 | C-29 | UI component | AC-52 | Result required only for Completed | Selecting Completed with an empty Result shows the message below the field and keeps values; Planned/In progress save without a result; the `*` toggles with the Status select | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-30 | UI component | AC-38, AC-45 | Actions Taken not-found and forbidden callouts | A `404` on save shows "This action or ticket no longer exists." with the Ticket Queue link; a `403` shows the permission callout; entered values stay visible in both | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
 | C-33 | UI component | ui-spec §2 | User Management role filter follows the URL | `?role=X` from a dashboard link preselects it; selecting a role writes `?role=` (and "All roles" removes it); after navigating away, browser Back restores the chosen role in the select, the URL and the `GET /api/users` request | `client/tests/lab-04/ListDrillDown.test.tsx` | Planned |
+| C-34 | UI component | AC-37 | Form field pairs and focus order | Desktop form pairs Action date/time + Status, then Assignee + Follow-up (ui-spec §8); a server response marking several fields invalid focuses the first in DOM order (ui-spec §5.2) | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
+| C-35 | UI component | AC-38, AC-17 | Latest version shows the date | On `STALE_UPDATE` the latest-version panel lists the current Action date/time with the other current values | `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
+| C-36 | UI component | AC-38, AC-39 | Late reads after a ticket change | On Requester and staff Ticket Detail, an Actions Taken or Status history response for ticket A that lands after navigating to B is dropped; B's rows stay | `client/tests/lab-04/RequesterActionsView.test.tsx`, `client/tests/lab-04/ActionsTakenNavigation.test.tsx` | Planned |
+| C-37 | UI component | AC-24, AC-45 | Status history feedback roles | Loading is `role="status"`; failure is `role="alert"` with Retry, which recovers (ui-spec §7) | `client/tests/lab-04/RequesterActionsView.test.tsx` | Planned |
 | S-01 | UI style | AC-43, V-01 | Token discipline | No hard-coded hex in Lab 4 component CSS; new tokens exist in `theme.css` | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-02 | UI style | AC-43, V-08 | Action badge distinct | `ActionStatusBadge` renders its text label with a non-pill radius class; Ticket `StatusBadge` unchanged | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-03 | UI style | AC-36, V-04 | Needs-attention variant | The accent class is always accompanied by sub-label text | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-04 | UI style | AC-43 | Contrast of new tokens | Every `--zen-action-*` pair computes ≥ 4.5:1 | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-05 | UI style | AC-37, V-06 | Editable vs read-only | Form controls use the editable class; View mode and Performed by use the read-only class | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | S-06 | UI style | AC-37, AC-39, V-17 | Private vs shared content | Internal Notes thread carries the private surface class, border and "Private" badge; Actions Taken, status history and Public Comments carry none of them; Actions Taken header reads "Visible to the requester" | `client/tests/lab-04/ui-style.test.tsx` | Planned |
+| S-07 | UI style | AC-43, AC-45 | Error vs warning callouts | Form callouts for forbidden, not-found, validation and other errors use the error tokens; only the stale-update notice uses the amber warning variant | `client/tests/lab-04/ui-style.test.tsx`, `client/tests/lab-04/ActionsTaken.test.tsx` | Planned |
+| S-08 | UI style | AC-43 | Card surfaces | The Action form panel and the mobile Action cards carry surface background, border and card shadow tokens together | `client/tests/lab-04/ui-style.test.tsx` | Planned |
+| S-09 | UI style | AC-43 | Primary on top on mobile | Below 768 px the form's Save sits above Cancel (ui-spec §8) | `client/tests/lab-04/ui-style.test.tsx` | Planned |
 | R-01 | Responsive | AC-43, V-12 | Staff and Administrator dashboard | At 320, 768, 992, 1440 px (and 820×1180, 390×844): `scrollWidth <= clientWidth`; metrics 4/2/1-up as specified; no clipped card | `e2e/lab-04/responsive.spec.ts` | Planned |
 | R-02 | Responsive | AC-43, V-12 | Requester dashboard | Same width checks; two cards and lists reflow | `e2e/lab-04/responsive.spec.ts` | Planned |
 | R-03 | Responsive | AC-37, AC-43 | Staff Ticket Detail Actions Taken | Table ≥ 768 px, stacked cards < 768 px; no overflow; form usable; View/Edit targets ≥ 44 px on mobile | `e2e/lab-04/responsive.spec.ts` | Planned |
@@ -247,14 +262,14 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-14 | API-15, SEC-01, SEC-05, SEC-08 |
 | AC-15 | SEC-02, SEC-08, C-21, E2E-13 |
 | AC-16 | UNIT-10, API-13, API-33, E2E-06 |
-| AC-17 | API-14, WF-12, C-15, E2E-05 |
+| AC-17 | API-14, WF-12, C-15, C-35, E2E-05 |
 | AC-18 | UNIT-05, WF-01 |
 | AC-19 | UNIT-05, WF-02 |
 | AC-20 | UNIT-06, WF-03, C-24, E2E-07 |
 | AC-21 | UNIT-06, WF-04, WF-06, C-24, E2E-07 |
 | AC-22 | UNIT-06, WF-05, C-24, E2E-07 |
 | AC-23 | WF-07, E2E-08 |
-| AC-24 | API-16, WF-08, WF-09, C-26, E2E-09 |
+| AC-24 | API-16, WF-08, WF-09, C-26, C-37, E2E-09 |
 | AC-25 | UNIT-09, WF-10, WF-11, WF-12, WF-13, C-25, C-31, E2E-10 |
 | AC-26 | C-22, C-23, E2E-07 |
 | AC-27 | UNIT-08, API-17, API-19, E2E-12 |
@@ -267,15 +282,15 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-34 | UNIT-11, API-22, API-28, API-29, API-31, C-05, C-09, E2E-11, E2E-12 |
 | AC-35 | C-01, C-02, E2E-15 |
 | AC-36 | C-03, C-06, C-08, C-09, S-03, A11Y-06, E2E-16 |
-| AC-37 | C-10, C-11, S-05, S-06, R-03, E2E-01 |
-| AC-38 | C-14, C-15, C-16, C-30, C-31, C-32, E2E-05, E2E-06 |
-| AC-39 | C-27, S-06, R-04, A11Y-04, E2E-09 |
+| AC-37 | C-10, C-11, C-34, S-05, S-06, R-03, E2E-01 |
+| AC-38 | C-14, C-15, C-16, C-30, C-31, C-32, C-35, C-36, E2E-05, E2E-06 |
+| AC-39 | C-27, C-36, S-06, R-04, A11Y-04, E2E-09 |
 | AC-40 | MIG-01, MIG-02, MIG-03, MIG-04, MIG-05, MIG-09 |
 | AC-41 | MIG-06, MIG-06b, MIG-06c, MIG-06d, MIG-06e, MIG-07, MIG-08 |
 | AC-42 | E2E-18, REG-01, REG-02, REG-03, REG-04, REG-05, REG-06 |
-| AC-43 | S-01, S-02, S-04, R-01, R-02, R-03, R-04, R-05, E2E-19 |
+| AC-43 | S-01, S-02, S-04, S-07, S-08, S-09, R-01, R-02, R-03, R-04, R-05, E2E-19 |
 | AC-44 | A11Y-01, A11Y-02, A11Y-03, A11Y-04, A11Y-05, A11Y-06 |
-| AC-45 | SEC-06, SEC-07, C-28, C-30, E2E-16, E2E-17 |
+| AC-45 | SEC-06, SEC-07, C-28, C-30, C-37, S-07, E2E-16, E2E-17 |
 | AC-46 | PERF-01, PERF-02 |
 | AC-47 | API-30 |
 | AC-48 | WF-15, C-24, E2E-07 |
@@ -311,6 +326,7 @@ and a search for the forbidden-state links.
 | A failed (network/500) IT Priority or owner save keeps the attempted value instead of reverting (BR-36); `INVALID_OWNER` still reverts | BR-36 | `client/tests/lab-03/StaffTicketDetail.test.tsx` "a failed save (500) keeps the attempted value…" (IT Priority); the `INVALID_OWNER` test is unchanged |
 | Requester Ticket Detail also reads Actions Taken and Status history (C-27), so the Retry test's request count goes from 3 to 5 | ui-spec §5.3, D-04 | `client/tests/lab-02/RequesterTicketDetail.test.tsx` (failure state, Retry re-fetches) |
 | Timing only, no assertion removed or weakened: the screens now load more data (Actions Taken, history), so assertions that raced a later render become awaited (`findBy…`, `vi.waitFor`), and thread-entry lookups are pinned to the rendered entry (`{ selector: "p" }`) instead of also matching the composer textarea | Lab 4 load order; found as a flaky failure under CPU load | `client/tests/lab-03/StaffTicketDetail.test.tsx` (four post-confirm focus checks; two thread-entry checks), `client/tests/lab-03/TicketDetailComments.test.tsx` (one thread-entry check) |
+| The Lab 3 detail-screen mocks answer the Lab 4 `status-history` and `actions-taken` reads with `200 []` instead of falling through to `404`; the history card now shows a failed read as `role="alert"` (C-37), which an unscoped `findByRole("alert")` would otherwise match. No assertion changed | ui-spec §7 | `client/tests/lab-03/StaffTicketDetail.test.tsx`, `client/tests/lab-03/TicketDetailComments.test.tsx` (mock routers) |
 | `GET /api/tickets/:id` returns `version` (api-spec §3.1, D-18), so the Lab 2 whole-body `toEqual` gains `version: 1` | D-18 | `server/tests/lab-02/ticket-detail.api.test.ts:177` (API-19) |
 | My Tickets `status` filter accepts all eight statuses, so the Lab 2 rejection example `status: 'CLOSED'` becomes an invalid value (`'BOGUS'`) | api-spec §6.1, §7 | `server/tests/lab-02/validation.test.ts:282` (`parseTicketListQuery` UNIT-05) |
 
