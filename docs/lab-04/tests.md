@@ -116,6 +116,8 @@ checked by reverting the fix and watching the named test fail.
 | API-31 | API | AC-34, BR-32 | User-count drill-down | Each `userCounts` role `active + inactive` equals the length of `GET /api/users?role=<ROLE>` | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-32 | API | AC-52, BR-05 | Result optional until completion | POST PLANNED without result `201` (`result: null`); POST COMPLETED without result `400` on `result`; PATCH to COMPLETED with no result `400` and Action unchanged; with result in the request `200`; with a stored result and none resent `200` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-33 | API | AC-16, BR-35 | Idempotency key reuse with a different body | Same `clientRequestId`, changed description/status/assignee → `409 IDEMPOTENCY_CONFLICT`, no new row, stored Action unchanged; identical retry after the Action was edited still `200` with the edited row | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
+| API-34 | API | AC-27, BR-23 | Reopened Ticket is not Recently Resolved | Ticket resolved inside the window and now REOPENED: dashboard `recentlyResolved` is `total: 0, items: []` and `?scope=recently-resolved` has `totalItems` 0 | `server/tests/lab-04/requester-dashboard.api.test.ts` | Planned |
+| API-35 | API | AC-27, BR-23 | `resolvedAt` is the latest resolution | CLOSED Ticket with RESOLVED 72 h ago then CLOSED 24 h ago: `resolvedAt` is the CLOSED `changedAt`, not the earlier RESOLVED one | `server/tests/lab-04/requester-dashboard.api.test.ts` | Planned |
 | WF-01 | Workflow | AC-18, FR-09 | Every permitted transition succeeds | Each §5.1 pair given its preconditions → `200`, new status and incremented `version` | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-02 | Workflow | AC-19 | Forbidden transitions and owner rule | Every pair absent from §5.1 and every no-op `409 INVALID_TRANSITION`; `IN_PROGRESS` with no owner `409 OWNER_REQUIRED` from each source | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-03 | Workflow | AC-20, BR-17 | Gate: no completed Action | Resolved via direct PATCH with an Owner but no COMPLETED Action → `409 RESOLUTION_BLOCKED`, `reasons` includes `NO_COMPLETED_ACTION`; status unchanged; no history row | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
@@ -272,7 +274,7 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-24 | API-16, WF-08, WF-09, C-26, C-37, E2E-09 |
 | AC-25 | UNIT-09, WF-10, WF-11, WF-12, WF-13, C-25, C-31, E2E-10 |
 | AC-26 | C-22, C-23, E2E-07 |
-| AC-27 | UNIT-08, API-17, API-19, E2E-12 |
+| AC-27 | API-17, API-19, API-34, API-35, E2E-12 |
 | AC-28 | API-23, C-04, E2E-11 |
 | AC-29 | API-24, API-25, C-04, E2E-11 |
 | AC-30 | SEC-03, SEC-04 |

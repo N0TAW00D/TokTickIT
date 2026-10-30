@@ -8,7 +8,7 @@ import {
 } from './dashboardFixtures.js';
 
 // GET /api/dashboard/requester — docs/lab-04/api-spec.md §4 (BR-20..BR-24,
-// BR-30, BR-31). API-17..API-22. The clock is frozen at NOW and every
+// BR-30, BR-31). API-17..API-22, API-34, API-35. The clock is frozen at NOW and every
 // expected value is recomputed with independent SQL, never by the service.
 
 const testServer = useTestServer(app);
@@ -188,6 +188,25 @@ describe('GET /api/dashboard/requester', () => {
         res.body.items.map((i: { id: number }) => i.id), jennifer.id);
       expect(owners, `${query} lists only own tickets`).toBe(0);
     }
+  });
+
+  it('API-34: a Ticket resolved inside the window and then reopened is not Recently Resolved, on the dashboard or in its drill-down', async () => {
+    const reopened = await makeTicket({ requesterId: jennifer.id, status: 'REOPENED', updatedAt: hoursBefore(NOW, 1) });
+    await addHistory(reopened.id, 'RESOLVED', priya.id, hoursBefore(NOW, 48));
+    const dash = (await get(testServer.server, '/api/dashboard/requester', cookie)).body;
+    expect(dash.recentlyResolved.total).toBe(0);
+    expect(dash.recentlyResolved.items).toEqual([]);
+    const list = await get(testServer.server, '/api/tickets?scope=recently-resolved&pageSize=50', cookie);
+    expect(list.body.meta.totalItems).toBe(0);
+  });
+
+  it('API-35: resolvedAt is the latest change into Resolved or Closed, not the first', async () => {
+    const closed = await makeTicket({ requesterId: jennifer.id, status: 'CLOSED', updatedAt: hoursBefore(NOW, 24) });
+    await addHistory(closed.id, 'RESOLVED', priya.id, hoursBefore(NOW, 72));
+    await addHistory(closed.id, 'CLOSED', priya.id, hoursBefore(NOW, 24));
+    const dash = (await get(testServer.server, '/api/dashboard/requester', cookie)).body;
+    expect(dash.recentlyResolved.total).toBe(1);
+    expect(dash.recentlyResolved.items[0].resolvedAt).toBe(hoursBefore(NOW, 24).toISOString());
   });
 
   it('SEC-05 (dashboard part): a body is ignored; identity comes from the session', async () => {
