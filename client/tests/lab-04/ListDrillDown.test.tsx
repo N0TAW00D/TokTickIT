@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
 import { MyTicketsScreen } from "../../src/screens/MyTicketsScreen.tsx";
 import { UserManagementScreen } from "../../src/screens/UserManagementScreen.tsx";
@@ -304,5 +304,71 @@ describe("User Management reads ?role= from the URL (Users strip, api-spec.md §
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const first = new URL((fetchMock.mock.calls[0] as unknown as [string])[0]);
     expect(first.searchParams.get("role")).toBe(expected);
+  });
+});
+
+describe("User Management keeps the role filter in step with the URL (ui-spec.md §2)", () => {
+  function renderUsers(url: string) {
+    stubMatchMedia(true);
+    const fetchMock = vi.fn(() => jsonResponse(200, []));
+    vi.stubGlobal("fetch", fetchMock);
+    const user: AuthUser = { id: 1, name: "A", email: "a@e.edu", role: "ADMINISTRATOR", mustChangePassword: false };
+    function Nav() {
+      const navigate = useNavigate();
+      return (
+        <>
+          <button type="button" onClick={() => navigate("/dashboard")}>
+            go dashboard
+          </button>
+          <button type="button" onClick={() => navigate(-1)}>
+            history back
+          </button>
+        </>
+      );
+    }
+    render(
+      <AuthProvider>
+        <AuthBootstrap user={user}>
+          <MemoryRouter initialEntries={[url]}>
+            <LocationProbe />
+            <Nav />
+            <Routes>
+              <Route path="/admin/users" element={<UserManagementScreen />} />
+              <Route path="/dashboard" element={<p>dashboard page</p>} />
+            </Routes>
+          </MemoryRouter>
+        </AuthBootstrap>
+      </AuthProvider>,
+    );
+    return fetchMock;
+  }
+
+  function lastRole(fetchMock: ReturnType<typeof vi.fn>): string | null {
+    const calls = fetchMock.mock.calls as unknown as [string][];
+    return new URL(calls[calls.length - 1][0]).searchParams.get("role");
+  }
+
+  it("C-33: the chosen role is in the URL, so returning with Back restores it in the select and the request", async () => {
+    const fetchMock = renderUsers("/admin/users?role=IT_STAFF");
+    const select = (await screen.findByLabelText("Role")) as HTMLSelectElement;
+    expect(select.value).toBe("IT_STAFF");
+
+    fireEvent.change(select, { target: { value: "ADMINISTRATOR" } });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/admin/users?role=ADMINISTRATOR"));
+    await waitFor(() => expect(lastRole(fetchMock)).toBe("ADMINISTRATOR"));
+
+    fireEvent.click(screen.getByRole("button", { name: "go dashboard" }));
+    await screen.findByText("dashboard page");
+    expect(screen.getByTestId("location").textContent).toBe("/dashboard");
+
+    fireEvent.click(screen.getByRole("button", { name: "history back" }));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/admin/users?role=ADMINISTRATOR"));
+    await waitFor(() => expect((screen.getByLabelText("Role") as HTMLSelectElement).value).toBe("ADMINISTRATOR"));
+    await waitFor(() => expect(lastRole(fetchMock)).toBe("ADMINISTRATOR"));
+
+    // Choosing "all" removes the parameter.
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "" } });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/admin/users"));
+    await waitFor(() => expect(lastRole(fetchMock)).toBeNull());
   });
 });
