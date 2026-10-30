@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -159,18 +159,31 @@ export function TicketDetailScreen() {
   >("loading");
   const loadedTicketId = state.phase === "loaded" ? state.ticket.id : null;
 
+  // Bumped by every new read and on ticket change, so a late response is dropped.
+  const actionsGen = useRef(0);
+  const historyGen = useRef(0);
+
   function loadActions(ticketId: number) {
+    const gen = ++actionsGen.current;
     fetchActions(ticketId)
-      .then(setActions)
-      .catch((error: unknown) =>
-        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error"),
-      );
+      .then((rows) => {
+        if (gen === actionsGen.current) setActions(rows);
+      })
+      .catch((error: unknown) => {
+        if (gen !== actionsGen.current) return;
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error");
+      });
   }
 
   function loadHistory(ticketId: number) {
+    const gen = ++historyGen.current;
     fetchStatusHistory(ticketId)
-      .then(setHistory)
-      .catch(() => setHistory("error"));
+      .then((rows) => {
+        if (gen === historyGen.current) setHistory(rows);
+      })
+      .catch(() => {
+        if (gen === historyGen.current) setHistory("error");
+      });
   }
 
   useEffect(() => {
@@ -179,6 +192,10 @@ export function TicketDetailScreen() {
     setHistory("loading");
     loadActions(loadedTicketId);
     loadHistory(loadedTicketId);
+    return () => {
+      actionsGen.current++;
+      historyGen.current++;
+    };
   }, [loadedTicketId, reloadToken]);
 
   useEffect(() => {

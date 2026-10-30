@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, configure, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { TicketDetailScreen } from "../../src/screens/TicketDetailScreen.tsx";
 
 // Row C-27 of tests.md: Actions Taken and Status history on the Requester
@@ -213,5 +213,75 @@ describe("C-27 Requester Ticket Detail: Actions Taken and Status history (AC-39,
     const retry = await screen.findByRole("button", { name: "Retry" });
     fireEvent.click(retry);
     expect(await screen.findByText("Replaced the battery 1")).toBeInTheDocument();
+  });
+
+  it("shows loading as a status and a failed history read as an alert with Retry", async () => {
+    let calls = 0;
+    let release: (r: Response) => void = () => {};
+    mockFetch({
+      history: () =>
+        ++calls === 1
+          ? new Promise<Response>((resolve) => (release = resolve))
+          : res(200, HISTORY),
+    });
+    renderScreen();
+
+    const status = await screen.findByText("Loading status history…");
+    expect(status.closest('[role="status"]')).not.toBeNull();
+
+    release({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Status history could not be loaded.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    const card = screen.getByRole("heading", { name: "Status history" }).closest(
+      "section",
+    ) as HTMLElement;
+    expect(await within(card).findByText(/Jordan Lee/)).toBeInTheDocument();
+  });
+
+  it("drops a late Actions Taken and history response from the previous ticket", async () => {
+    const pending: Record<string, (r: Response) => void> = {};
+    const ok = (body: unknown) =>
+      ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as Response;
+    const histB = [{ ...HISTORY[0], id: 2, changedBy: { id: 4, name: "Bea Bravo" } }];
+    const fetchMock = vi.fn((input: string) => {
+      const m = /\/api\/tickets\/(\d+)(?:\/(.*))?$/.exec(input);
+      if (!m) return res(404, {});
+      const [, id, rest] = m;
+      if (!rest) {
+        return res(200, ticket({ id: Number(id), ticketNumber: `TKT-2026-00000${id}` }));
+      }
+      if (rest === "comments") return res(200, []);
+      if (id === "1") {
+        return new Promise<Response>((resolve) => (pending[rest] = resolve));
+      }
+      if (rest === "actions-taken") return res(200, [action(2, { description: "B action" })]);
+      return res(200, histB);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/tickets/1"]}>
+        <Link to="/tickets/2">go to B</Link>
+        <Routes>
+          <Route path="/tickets/:id" element={<TicketDetailScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("TKT-2026-000001");
+    await vi.waitFor(() => expect(Object.keys(pending)).toHaveLength(2));
+
+    fireEvent.click(screen.getByText("go to B"));
+    expect(await screen.findByText("B action")).toBeInTheDocument();
+    expect(await screen.findByText(/Bea Bravo/)).toBeInTheDocument();
+
+    pending["actions-taken"](ok([action(1, { description: "A action" })]));
+    pending["status-history"](ok([{ ...HISTORY[0], id: 1, changedBy: { id: 5, name: "Al Alpha" } }]));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(screen.getByText("B action")).toBeInTheDocument();
+    expect(screen.queryByText("A action")).toBeNull();
+    expect(screen.getByText(/Bea Bravo/)).toBeInTheDocument();
+    expect(screen.queryByText(/Al Alpha/)).toBeNull();
   });
 });
