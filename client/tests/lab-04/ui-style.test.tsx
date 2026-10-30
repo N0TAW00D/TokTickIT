@@ -388,3 +388,36 @@ describe("S-06 private vs shared content (AC-37, AC-39, V-17)", () => {
     expect(thread.replace(/\.thread--internal[^{]*\{[^}]*\}/g, "")).not.toMatch(/--zen-private/);
   });
 });
+
+describe("STY form and card surfaces, callouts, mobile order (ui-spec.md §8; Lab 2 style table)", () => {
+  const hasSurface = (body: string) => {
+    expect(body).toMatch(/background:\s*var\(--zen-surface\)/);
+    expect(body).toMatch(/border:\s*1px solid var\(--zen-border\)/);
+    expect(body).toMatch(/box-shadow:\s*var\(--zen-shadow-card\)/);
+  };
+
+  it("STY-005 the form panel and the mobile Action cards use surface, border and shadow tokens together", () => {
+    hasSurface(ruleBody(read("components/ActionTakenForm.css"), ".zen-action-form"));
+    hasSurface(ruleBody(read("components/ActionsTakenCard.css"), ".zen-actions__item"));
+  });
+
+  it("STY-004 form callouts use the error tokens (text and border); amber only on the stale warning variant", () => {
+    const css = read("components/ActionTakenForm.css");
+    const base = ruleBody(css, ".zen-action-form__callout");
+    expect(base).toMatch(/color:\s*var\(--zen-error\)/);
+    expect(base).toMatch(/background:\s*var\(--zen-error-bg\)/);
+    expect(base).toMatch(/border:\s*1px solid var\(--zen-error\)/);
+    expect(base).not.toMatch(/--zen-warning/);
+    const warning = ruleBody(css, ".zen-action-form__callout--warning");
+    expect(warning).toMatch(/color:\s*var\(--zen-warning\)/);
+    expect(warning).toMatch(/border-color:\s*var\(--zen-warning\)/);
+  });
+
+  it("on mobile the Save button stays above Cancel (no column-reverse)", () => {
+    const css = read("components/ActionTakenForm.css");
+    const media = /@media \(max-width: 767px\)\s*\{([\s\S]*?)\n\}/.exec(css);
+    expect(media).not.toBeNull();
+    expect(ruleBody(media![1], ".zen-action-form__buttons")).toMatch(/flex-direction:\s*column;/);
+    expect(css).not.toMatch(/column-reverse/);
+  });
+});

@@ -96,8 +96,10 @@
 }
 
 .zen-actions__item {
+  background: var(--zen-surface);
   border: 1px solid var(--zen-border);
-  border-radius: var(--zen-radius-control);
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
   padding: var(--zen-space-field-gap);
   display: grid;
   gap: 8px;

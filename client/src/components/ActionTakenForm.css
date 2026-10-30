@@ -2,6 +2,7 @@
   border: 1px solid var(--zen-border);
   border-radius: var(--zen-radius-card);
   background: var(--zen-surface);
+  box-shadow: var(--zen-shadow-card);
   padding: var(--zen-space-card-padding-mobile);
   margin-bottom: var(--zen-space-field-gap);
 }
@@ -44,11 +45,22 @@
 }
 
 .zen-action-form__callout {
-  color: var(--zen-warning);
-  background: var(--zen-warning-bg);
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border: 1px solid var(--zen-error);
   border-radius: var(--zen-radius-control);
   padding: 12px 16px;
   margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-action-form__callout--warning {
+  color: var(--zen-warning);
+  background: var(--zen-warning-bg);
+  border-color: var(--zen-warning);
+}
+
+.zen-action-form__wide {
+  grid-column: 1 / -1;
 }
 
 .zen-action-form__callout p {
