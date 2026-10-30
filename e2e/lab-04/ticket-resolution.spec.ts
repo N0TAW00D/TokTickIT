@@ -266,17 +266,19 @@ test("E2E-10 stale Ticket status between two staff sessions shows the callout an
   await statusSelect(second).selectOption("WAITING_FOR_REQUESTER");
   const stale = second.getByRole("alert").filter({ hasText: "This ticket was changed by someone else. Review its current state." });
   await expect(stale).toBeVisible();
-  // The select reverts and nothing was applied.
-  await expect(statusSelect(second)).toHaveValue("OPEN");
+  // BR-36: the select keeps the attempted value and nothing was applied.
+  await expect(statusSelect(second)).toHaveValue("WAITING_FOR_REQUESTER");
   await expect(summaryStatus(second)).toHaveText("Open");
 
   await stale.getByRole("button", { name: "Refresh" }).click();
   await expect(stale).toHaveCount(0);
   await expect(summaryStatus(second)).toHaveText("In Progress");
-  await expect(statusSelect(second)).toHaveValue("IN_PROGRESS");
+  // Refresh keeps the draft apart from the reloaded Ticket and never resubmits it.
+  await expect(statusSelect(second)).toHaveValue("WAITING_FOR_REQUESTER");
   await expect(historyRows(second)).toHaveCount(1);
 
-  // With the refreshed version the same change now goes through.
+  // With the refreshed version the same change now goes through once chosen again.
+  await statusSelect(second).selectOption("IN_PROGRESS");
   await statusSelect(second).selectOption("WAITING_FOR_REQUESTER");
   await expect(second.getByRole("status").filter({ hasText: "Status changed to Waiting for Requester." })).toBeVisible();
   await expect(summaryStatus(second)).toHaveText("Waiting for Requester");
