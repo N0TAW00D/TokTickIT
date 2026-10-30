@@ -187,6 +187,8 @@ describe('Actions Taken routes', () => {
 // Actions Taken routes above: SEC-04 (401 / password gate), SEC-06 (safe
 // failure) and SEC-07 (content type).
 describe('Every other Lab 4 route', () => {
+  const testServer = useTestServer(app);
+
   type User = Awaited<ReturnType<typeof createUser>>;
   let userIds: number[] = [];
   let requester: User;
