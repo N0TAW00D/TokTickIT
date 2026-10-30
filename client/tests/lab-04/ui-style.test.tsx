@@ -396,12 +396,12 @@ describe("STY form and card surfaces, callouts, mobile order (ui-spec.md §8; La
     expect(body).toMatch(/box-shadow:\s*var\(--zen-shadow-card\)/);
   };
 
-  it("STY-005 the form panel and the mobile Action cards use surface, border and shadow tokens together", () => {
+  it("S-08 the form panel and the mobile Action cards use surface, border and shadow tokens together", () => {
     hasSurface(ruleBody(read("components/ActionTakenForm.css"), ".zen-action-form"));
     hasSurface(ruleBody(read("components/ActionsTakenCard.css"), ".zen-actions__item"));
   });
 
-  it("STY-004 form callouts use the error tokens (text and border); amber only on the stale warning variant", () => {
+  it("S-07 form callouts use the error tokens (text and border); amber only on the stale warning variant", () => {
     const css = read("components/ActionTakenForm.css");
     const base = ruleBody(css, ".zen-action-form__callout");
     expect(base).toMatch(/color:\s*var\(--zen-error\)/);
@@ -413,7 +413,7 @@ describe("STY form and card surfaces, callouts, mobile order (ui-spec.md §8; La
     expect(warning).toMatch(/border-color:\s*var\(--zen-warning\)/);
   });
 
-  it("on mobile the Save button stays above Cancel (no column-reverse)", () => {
+  it("S-09 on mobile the Save button stays above Cancel (no column-reverse)", () => {
     const css = read("components/ActionTakenForm.css");
     const media = /@media \(max-width: 767px\)\s*\{([\s\S]*?)\n\}/.exec(css);
     expect(media).not.toBeNull();
