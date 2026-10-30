@@ -1,4 +1,5 @@
-import { Button } from "./Button";
+import { ErrorState } from "./ErrorState";
+import { LoadingState } from "./LoadingState";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateTime } from "../tickets/formatDateTime";
 import type { StatusChangeEntry } from "../tickets/workflowApi";
@@ -24,14 +25,12 @@ export function StatusHistoryCard({
   return (
     <section className={className} aria-labelledby="status-history-heading">
       <h2 id="status-history-heading">Status history</h2>
-      {history === "loading" && <p>Loading status history…</p>}
+      {history === "loading" && <LoadingState label="Loading status history…" />}
       {history === "error" && (
-        <p>
-          Status history could not be loaded.{" "}
-          <Button variant="secondary" onClick={onRetry}>
-            Retry
-          </Button>
-        </p>
+        <ErrorState
+          message="Status history could not be loaded."
+          onRetry={onRetry}
+        />
       )}
       {Array.isArray(history) && history.length === 0 && (
         <p>No status changes yet.</p>
