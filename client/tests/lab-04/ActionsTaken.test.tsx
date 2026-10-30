@@ -577,6 +577,29 @@ describe("C-11 Create form", () => {
   });
 });
 
+describe("C-11 Create form layout (ui-spec.md §8)", () => {
+  it("pairs Action date/time with Status, then Assignee with Follow-up, in DOM order; Performed by sits outside the pairs", async () => {
+    mockFetch();
+    const card = await openCreateForm();
+    const f = form(card);
+    const grid = f.querySelector(".zen-action-form__grid") as HTMLElement;
+    const ids = Array.from(grid.querySelectorAll("input, select, textarea")).map((el) => el.id);
+    expect(ids).toEqual([
+      "action-form-action-at",
+      "action-form-status",
+      "action-form-assignee",
+      "action-form-follow-up",
+    ]);
+    expect(grid.contains(f.querySelector(".zen-action-form__static"))).toBe(false);
+    const all = Array.from(f.querySelectorAll("input, select, textarea")).map((el) => el.id);
+    expect(all.slice(4)).toEqual([
+      "action-form-description",
+      "action-form-result",
+      "action-form-attachment-notes",
+    ]);
+  });
+});
+
 describe("C-12 Validation placement", () => {
   it("shows an empty description under the field, marks it invalid, focuses it and sends nothing", async () => {
     const fetchMock = mockFetch();
@@ -667,6 +690,29 @@ describe("C-12 Validation placement", () => {
     );
     expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("typed text");
     expect((within(f).getByLabelText(/^Attachment notes/) as HTMLTextAreaElement).value).toBe("see log");
+  });
+
+  it("focuses the first invalid control in DOM order when the server flags several fields", async () => {
+    mockFetch({
+      post: () =>
+        res(400, {
+          error: "VALIDATION_FAILED",
+          fields: [
+            { field: "result", message: "Result is bad." },
+            { field: "description", message: "Description is bad." },
+            { field: "assigneeId", message: "Assignee is bad." },
+            { field: "status", message: "Status is bad." },
+          ],
+        }),
+    });
+    const card = await openCreateForm();
+    const f = form(card);
+    typeInto(within(f).getByLabelText(/^Description/), "typed text");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    await waitFor(() =>
+      expect(errorUnder(within(f).getByLabelText(/^Result/))).toBe("Result is bad."),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(within(f).getByLabelText(/^Status/)));
   });
 });
 
@@ -879,6 +925,7 @@ describe("C-30 Not-found and forbidden callouts", () => {
     fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
     const alert = await within(f).findByRole("alert");
     expect(alert.textContent).toContain("This action or ticket no longer exists.");
+    expect(alert.className).not.toContain("zen-action-form__callout--warning");
     expect(within(alert).getByRole("link", { name: "Ticket Queue" }).getAttribute("href")).toBe("/staff/tickets");
     expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Orphan");
   });
@@ -891,6 +938,7 @@ describe("C-30 Not-found and forbidden callouts", () => {
     fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
     const alert = await within(f).findByRole("alert");
     expect(alert.textContent).toContain("You don't have permission to change Actions Taken.");
+    expect(alert.className).not.toContain("zen-action-form__callout--warning");
     expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Not allowed");
   });
 });
@@ -1130,6 +1178,7 @@ describe("C-15 Stale callout", () => {
       result: "Theirs",
       assignee: { id: 8, name: "Carlos Mendes" },
       lastUpdatedBy: { id: 8, name: "Carlos Mendes" },
+      actionAt: "2026-10-12T05:30:00.000Z",
       updatedAt: "2026-10-12T04:02:40.000Z",
       version: 2,
     });
@@ -1147,7 +1196,10 @@ describe("C-15 Stale callout", () => {
     const alert = await within(f).findByRole("alert");
     expect(alert.textContent).toContain("This action was changed by Carlos Mendes at 12 Oct, 11:02.");
     await waitFor(() => expect(document.activeElement).toBe(alert));
+    expect(alert.className).toContain("zen-action-form__callout--warning");
     const latest = within(f).getByLabelText("Latest version");
+    expect(within(latest).getByText("Action date/time")).toBeTruthy();
+    expect(within(latest).getByText("12 Oct, 12:30")).toBeTruthy();
     expect(within(latest).getByText("Theirs")).toBeTruthy();
     expect(within(latest).getByText("Carlos Mendes")).toBeTruthy();
     expect((within(f).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toBe("Mine");

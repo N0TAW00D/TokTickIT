@@ -71,11 +71,11 @@ type FieldErrors = Partial<Record<FieldName, string>>;
 /** DOM order, used to focus the first invalid control. */
 const FIELD_ORDER: FieldName[] = [
   "actionAt",
+  "status",
   "assignee",
+  "followUpNote",
   "description",
   "result",
-  "status",
-  "followUpNote",
   "attachmentNotes",
 ];
 
@@ -280,16 +280,8 @@ export interface ActionTakenFormProps {
   onTicketChanged: () => void;
 }
 
-/**
- * Create / edit form for one Action Taken (lab-04/ui-spec.md §5.1, §5.2).
- *
- * One `clientRequestId` is generated per create form and reused by every
- * submit of that form, including Retry after a network failure, so a repeated
- * POST cannot create a second Action (BR-35). Typed values survive every
- * failure (BR-36). An edit carries the `version` it was based on; on
- * `STALE_UPDATE` the user can adopt the current version while keeping their
- * own edits.
- */
+/** Create / edit form for one Action Taken (ui-spec.md §5.1, §5.2): one clientRequestId per form (BR-35),
+ * typed values survive failures (BR-36), edits carry `version`, STALE_UPDATE offers the latest. */
 export function ActionTakenForm({
   ticketId,
   ticketCreatedAt,
@@ -559,7 +551,7 @@ export function ActionTakenForm({
           ref={calloutRef}
           tabIndex={-1}
           role="alert"
-          className="zen-action-form__callout"
+          className="zen-action-form__callout zen-action-form__callout--warning"
         >
           <p>
             This action was changed by <strong>{stale.lastUpdatedBy?.name}</strong>{" "}
@@ -615,21 +607,6 @@ export function ActionTakenForm({
             />
           </FormField>
 
-          <div className="zen-field">
-            <span id="action-form-performed-by-label" className="zen-field__label">
-              Performed by
-            </span>
-            <div
-              className="zen-action-form__static"
-              aria-labelledby="action-form-performed-by-label"
-            >
-              {editing ? base?.performedBy?.name : performedByName}
-            </div>
-            <div className="zen-field__meta">
-              <span className="zen-field__helper">Recorded automatically.</span>
-            </div>
-          </div>
-
           <SelectField
             id={FIELD_ID.status}
             label="Status"
@@ -658,6 +635,57 @@ export function ActionTakenForm({
               clearError("assignee");
             }}
           />
+
+          <div className="zen-field zen-action-form__checkbox">
+            <label htmlFor="action-form-follow-up">
+              <input
+                id="action-form-follow-up"
+                type="checkbox"
+                checked={values.followUpRequired}
+                disabled={readOnly}
+                aria-expanded={values.followUpRequired}
+                aria-controls={noteId}
+                onChange={(event) => handleFollowUpToggle(event.target.checked)}
+              />{" "}
+              Follow-up required?
+            </label>
+          </div>
+
+          {values.followUpRequired && (
+            <div className="zen-action-form__wide">
+              <FormField
+                id={noteId}
+                label="Follow-up note"
+                required
+                error={errors.followUpNote}
+                counter={describe("followUpNote")}
+              >
+                <TextArea
+                  value={values.followUpNote}
+                  readOnly={readOnly}
+                  onChange={(event) => {
+                    setValue("followUpNote", event.target.value);
+                    clearError("followUpNote");
+                  }}
+                />
+              </FormField>
+            </div>
+          )}
+        </div>
+
+        <div className="zen-field">
+          <span id="action-form-performed-by-label" className="zen-field__label">
+            Performed by
+          </span>
+          <div
+            className="zen-action-form__static"
+            aria-labelledby="action-form-performed-by-label"
+          >
+            {editing ? base?.performedBy?.name : performedByName}
+          </div>
+          <div className="zen-field__meta">
+            <span className="zen-field__helper">Recorded automatically.</span>
+          </div>
         </div>
 
         <FormField
@@ -695,40 +723,6 @@ export function ActionTakenForm({
           />
         </FormField>
 
-        <div className="zen-field zen-action-form__checkbox">
-          <label htmlFor="action-form-follow-up">
-            <input
-              id="action-form-follow-up"
-              type="checkbox"
-              checked={values.followUpRequired}
-              disabled={readOnly}
-              aria-expanded={values.followUpRequired}
-              aria-controls={noteId}
-              onChange={(event) => handleFollowUpToggle(event.target.checked)}
-            />{" "}
-            Follow-up required?
-          </label>
-        </div>
-
-        {values.followUpRequired && (
-          <FormField
-            id={noteId}
-            label="Follow-up note"
-            required
-            error={errors.followUpNote}
-            counter={describe("followUpNote")}
-          >
-            <TextArea
-              value={values.followUpNote}
-              readOnly={readOnly}
-              onChange={(event) => {
-                setValue("followUpNote", event.target.value);
-                clearError("followUpNote");
-              }}
-            />
-          </FormField>
-        )}
-
         <FormField
           id={FIELD_ID.attachmentNotes}
           label="Attachment notes"
@@ -753,6 +747,8 @@ export function ActionTakenForm({
           >
             <h4>Latest version</h4>
             <dl>
+              <dt>Action date/time</dt>
+              <dd>{formatDateTime(stale.actionAt)}</dd>
               <dt>Description</dt>
               <dd>{stale.description}</dd>
               <dt>Result</dt>
