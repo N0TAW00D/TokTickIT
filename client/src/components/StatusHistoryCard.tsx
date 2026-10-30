@@ -12,11 +12,8 @@ export interface StatusHistoryCardProps {
   onRetry: () => void;
 }
 
-/**
- * Status history card (lab-04/ui-spec.md §5.3, §6): oldest first (BR-14),
- * each row "From → To · Name · date" with text badges. Read-only, so the
- * staff and Requester Ticket Details share it.
- */
+/** Status history card (ui-spec.md §5.3, §6): oldest first (BR-14), "From → To · Name · date".
+ * Read-only, shared by the staff and Requester Ticket Details. */
 export function StatusHistoryCard({
   history,
   className,

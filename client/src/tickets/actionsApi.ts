@@ -63,11 +63,8 @@ export type ActionWriteErrorKind =
   | "forbidden"
   | "failure";
 
-/**
- * Thrown by `createAction` / `updateAction` for every non-2xx response and for
- * a network failure (`kind: "failure"`). Carries the parsed `fields` for a 400
- * and the `current` Action for a `STALE_UPDATE`; never the raw server text.
- */
+/** Thrown by `createAction` / `updateAction` on any non-2xx or network failure; carries parsed
+ * `fields` (400) or the `current` Action (`STALE_UPDATE`), never raw server text. */
 export class ActionWriteError extends Error {
   readonly kind: ActionWriteErrorKind;
   readonly fields: ActionFieldError[];

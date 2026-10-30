@@ -78,11 +78,8 @@ export function formatDateTimeWithYear(iso: string): string {
   return `${day} ${month} ${year}, ${hour}:${minute}`;
 }
 
-/**
- * `YYYY-MM-DDTHH:mm` in Asia/Bangkok for a `datetime-local` input, so the
- * Actions Taken form reads and writes the same wall clock the rest of the
- * screen displays (`formatDateTime`).
- */
+/** `YYYY-MM-DDTHH:mm` in Asia/Bangkok for a `datetime-local` input, matching the
+ * wall clock `formatDateTime` displays. */
 export function toBangkokInputValue(date: Date | string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",

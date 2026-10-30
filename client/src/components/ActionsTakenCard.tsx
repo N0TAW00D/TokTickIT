@@ -22,10 +22,7 @@ export interface ActionsTakenCardProps {
   ticketStatus: string;
   /** Only the write form needs the dates, names and assignees below. */
   ticketCreatedAt?: string;
-  /**
-   * Requester view (ui-spec.md §5.3): the same list and View mode with no
-   * Add / Edit controls, no form and no "Visible to the requester" line.
-   */
+  /** Requester view (ui-spec.md §5.3): list and View only, no Add / Edit, form or shared line. */
   readOnly?: boolean;
   /** `"unavailable"`: the list answered 404, so there is nothing to show or add to. */
   actions: ActionTaken[] | "loading" | "error" | "unavailable";
@@ -108,13 +105,8 @@ function PerformedBy({ action }: { action: ActionTaken }) {
   );
 }
 
-/**
- * Actions Taken card on the IT Staff / Administrator Ticket Detail
- * (lab-04/ui-spec.md §5.1, §5.2): header, table (>= 768 px) or stacked cards,
- * inline View, and the Add / Edit form. The list lives in the screen so the
- * resolution checklist reads the same rows; this card asks the screen to
- * re-read it through `onReload`.
- */
+/** Actions Taken card (ui-spec.md §5.1, §5.2): table or stacked cards, View, Add / Edit form.
+ * The screen owns the list (the resolution checklist reads it); the card re-reads via `onReload`. */
 export function ActionsTakenCard({
   ticketId,
   ticketNumber,
