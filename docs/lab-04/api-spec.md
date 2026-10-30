@@ -290,7 +290,7 @@ Ticket `version`. `INVALID_OWNER` (owner route) is unchanged.
 | `metrics.openTickets` — "Open Tickets" | `count(Ticket where requesterId = me AND status NOT IN (RESOLVED, CLOSED, CANCELLED))` | `0` | `/tickets?scope=open` → `GET /api/tickets?scope=open` |
 | `metrics.waitingForMe` — "Waiting for Me" | `count(Ticket where requesterId = me AND status = WAITING_FOR_REQUESTER)` | `0` | `/tickets?status=WAITING_FOR_REQUESTER` |
 | `recentlyUpdated` — "Recently Updated" | `Ticket where requesterId = me AND updatedAt >= windowStart`, `total` = full count, `items` = first 5 by `updatedAt desc, id desc` | `total: 0, items: []` | `/tickets?scope=recent&sort=updatedAt&order=desc` |
-| `recentlyResolved` — "Recently Resolved" | `Ticket where requesterId = me AND status IN (RESOLVED, CLOSED) AND` latest `TicketStatusChange.toStatus IN (RESOLVED, CLOSED)` has `changedAt >= windowStart` (BR-23); `resolvedAt` = that `changedAt`; Tickets with no history are excluded | `total: 0, items: []` | `/tickets?scope=recently-resolved` |
+| `recentlyResolved` — "Recently Resolved" | `Ticket where requesterId = me AND status IN (RESOLVED, CLOSED) AND` latest `TicketStatusChange.toStatus IN (RESOLVED, CLOSED)` has `changedAt >= windowStart` (BR-23); `resolvedAt` = that `changedAt`; Tickets with no history are excluded; `total` = full count, `items` = first 5 by `updatedAt desc, id desc` (not by `resolvedAt`) | `total: 0, items: []` | `/tickets?scope=recently-resolved` |
 
 Each list item's own link is `/tickets/:id`. Items never carry `itPriority`, owner, or Internal data
 (L3-BR-04). `windowStart` is 00:00 Asia/Bangkok on the day six days before today, as a UTC instant
