@@ -169,6 +169,8 @@ function mockFetch({
   patchStatus,
 }: MockOptions = {}) {
   const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    // Lab 4 reads these screens now make; empty so their cards stay quiet.
+    if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
     if (input === ASSIGNABLE_URL) return jsonResponse(200, assignableUsers);
     if (input === OWNER_URL && init?.method === "PATCH") {
       return (patchOwner ?? (() => jsonResponse(200, baseTicket())))(init);
@@ -413,6 +415,7 @@ describe("Error/failure state", () => {
     expect(screen.queryByText("TKT-2026-000021")).not.toBeInTheDocument();
 
     fetchMock.mockImplementation((input: string, init?: RequestInit) => {
+      if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
       if (input === ASSIGNABLE_URL) return jsonResponse(200, []);
       if (input === TICKET_URL && init?.method === undefined) {
         return jsonResponse(200, baseTicket());
@@ -585,8 +588,9 @@ describe("Public Comments thread (variant=public)", () => {
     expect(
       await screen.findByRole("heading", { name: "Comments" }),
     ).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entry.
     expect(
-      screen.getByText("Checked cabling, looks fine."),
+      await screen.findByText("Checked cabling, looks fine."),
     ).toBeInTheDocument();
 
     const textarea = screen.getByLabelText(/add a comment/i);
@@ -596,7 +600,7 @@ describe("Public Comments thread (variant=public)", () => {
     fireEvent.click(screen.getByRole("button", { name: /post comment/i }));
 
     expect(
-      await screen.findByText("Following up with the vendor."),
+      await screen.findByText("Following up with the vendor.", { selector: "p" }),
     ).toBeInTheDocument();
 
     const postCall = fetchMock.mock.calls.find(
@@ -640,8 +644,9 @@ describe("Internal Notes thread (variant=internal)", () => {
     expect(
       screen.getByText("Private — not visible to the Requester"),
     ).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entry.
     expect(
-      screen.getByText("Escalated to networking vendor."),
+      await screen.findByText("Escalated to networking vendor."),
     ).toBeInTheDocument();
 
     // MessageThread prefixes each internal entry with a 🔒 glyph
@@ -663,7 +668,7 @@ describe("Internal Notes thread (variant=internal)", () => {
     fireEvent.click(screen.getByRole("button", { name: /save internal note/i }));
 
     expect(
-      await screen.findByText("Vendor confirmed a firmware fix is available."),
+      await screen.findByText("Vendor confirmed a firmware fix is available.", { selector: "p" }),
     ).toBeInTheDocument();
 
     const postCall = fetchMock.mock.calls.find(
@@ -1058,8 +1063,10 @@ describe("Status control — confirm-required destinations (Close/Reopen/Cancel)
     expect(select.value).toBe("CLOSED");
     // ui-spec.md §13: "confirm dialogs trap focus and restore it" — a
     // successful confirm closes the dialog and returns focus to the
-    // triggering Status select.
-    expect(document.activeElement).toBe(select);
+    // triggering Status select. Restore runs in an effect one commit after the
+    // dialog unmounts (select stays disabled until .finally clears statusSaving),
+    // so assert it eventually holds rather than synchronously.
+    await vi.waitFor(() => expect(document.activeElement).toBe(select));
   });
 
   it("cancelling the dialog does not save, closes it, and restores focus to the Status select", async () => {
@@ -1086,7 +1093,7 @@ describe("Status control — confirm-required destinations (Close/Reopen/Cancel)
     ).toBe(false);
     expect(select.value).toBe("RESOLVED");
     // ui-spec.md §13: dialogs restore focus to their trigger on close.
-    expect(document.activeElement).toBe(select);
+    await vi.waitFor(() => expect(document.activeElement).toBe(select));
   });
 
   it("pressing Escape cancels the dialog the same way and restores focus to the Status select", async () => {
@@ -1106,7 +1113,7 @@ describe("Status control — confirm-required destinations (Close/Reopen/Cancel)
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(select.value).toBe("RESOLVED");
-    expect(document.activeElement).toBe(select);
+    await vi.waitFor(() => expect(document.activeElement).toBe(select));
   });
 });
 
@@ -1131,7 +1138,7 @@ describe("Status control — 409 conflict banner (ui-spec.md §10)", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     // ui-spec.md §13: the 409 path also closes the dialog, so it restores
     // focus to the Status select same as Cancel/Esc/success.
-    expect(document.activeElement).toBe(select);
+    await vi.waitFor(() => expect(document.activeElement).toBe(select));
   });
 
   it("a 409 OWNER_REQUIRED (direct, non-confirm destination) also shows the conflict banner", async () => {

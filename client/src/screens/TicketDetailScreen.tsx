@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
@@ -8,6 +8,8 @@ import { EmptyState } from "../components/EmptyState";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { AttachmentSection } from "../components/AttachmentSection";
+import { ActionsTakenCard } from "../components/ActionsTakenCard";
+import { StatusHistoryCard } from "../components/StatusHistoryCard";
 import { MessageThread } from "../components/MessageThread";
 import { ConfirmResolvedDialog } from "../components/ConfirmResolvedDialog";
 import {
@@ -20,6 +22,12 @@ import {
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
+import {
+  ActionsNotFoundError,
+  fetchActions,
+  type ActionTaken,
+} from "../tickets/actionsApi";
+import { fetchStatusHistory, type StatusChangeEntry } from "../tickets/workflowApi";
 import { formatDateTime, formatDateTimeWithYear } from "../tickets/formatDateTime";
 import "./TicketDetailScreen.css";
 
@@ -139,6 +147,57 @@ export function TicketDetailScreen() {
   // comment posting (see routes/tickets.ts's own doc comment for the
   // judgment call this mirrors).
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+
+  // Read-only Actions Taken and Status history (ui-spec.md §5.3); best-effort,
+  // a failure never breaks the rest of the screen.
+  const [actions, setActions] = useState<
+    ActionTaken[] | "loading" | "error" | "unavailable"
+  >("loading");
+  const [history, setHistory] = useState<
+    StatusChangeEntry[] | "loading" | "error"
+  >("loading");
+  const loadedTicketId = state.phase === "loaded" ? state.ticket.id : null;
+
+  // Bumped by every new read and on ticket change, so a late response is dropped.
+  const actionsGen = useRef(0);
+  const historyGen = useRef(0);
+
+  function invalidateReads() {
+    actionsGen.current++;
+    historyGen.current++;
+  }
+
+  function loadActions(ticketId: number) {
+    const gen = ++actionsGen.current;
+    fetchActions(ticketId)
+      .then((rows) => {
+        if (gen === actionsGen.current) setActions(rows);
+      })
+      .catch((error: unknown) => {
+        if (gen !== actionsGen.current) return;
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error");
+      });
+  }
+
+  function loadHistory(ticketId: number) {
+    const gen = ++historyGen.current;
+    fetchStatusHistory(ticketId)
+      .then((rows) => {
+        if (gen === historyGen.current) setHistory(rows);
+      })
+      .catch(() => {
+        if (gen === historyGen.current) setHistory("error");
+      });
+  }
+
+  useEffect(() => {
+    if (loadedTicketId === null) return;
+    setActions("loading");
+    setHistory("loading");
+    loadActions(loadedTicketId);
+    loadHistory(loadedTicketId);
+    return invalidateReads;
+  }, [loadedTicketId, reloadToken]);
 
   useEffect(() => {
     if (!validId) {
@@ -387,6 +446,26 @@ export function TicketDetailScreen() {
               onAttachmentAdded={handleAttachmentAdded}
             />
           </section>
+
+          {/* ui-spec.md §5.3: Actions Taken and Status history, read-only,
+              between Attachments and Public Comments. */}
+          <ActionsTakenCard
+            readOnly
+            ticketId={state.ticket.id}
+            ticketNumber={state.ticket.ticketNumber}
+            ticketStatus={state.ticket.status}
+            actions={actions}
+            onReload={() => loadActions(state.ticket.id)}
+          />
+
+          <StatusHistoryCard
+            history={history}
+            className="zen-ticket-detail__card"
+            onRetry={() => {
+              setHistory("loading");
+              loadHistory(state.ticket.id);
+            }}
+          />
 
           {/* ui-spec.md §7/§8: Public Comments thread, below Attachments. */}
           <MessageThread

@@ -50,12 +50,10 @@ import {
   type TicketAttachment,
   type TicketDetailResponse,
 } from "../tickets/api";
-import {
-  fetchActionSummaries,
-  fetchStatusHistory,
-  type ActionSummary,
-  type StatusChangeEntry,
-} from "../tickets/workflowApi";
+import { fetchStatusHistory, type StatusChangeEntry } from "../tickets/workflowApi";
+import { StatusHistoryCard } from "../components/StatusHistoryCard";
+import { ActionsNotFoundError, fetchActions, type ActionTaken } from "../tickets/actionsApi";
+import { ActionsTakenCard } from "../components/ActionsTakenCard";
 import { saveBlob } from "../tickets/downloadFile";
 import {
   formatDateTime,
@@ -435,7 +433,9 @@ export function StaffTicketDetailScreen() {
   const [history, setHistory] = useState<
     StatusChangeEntry[] | "loading" | "error"
   >("loading");
-  const [actions, setActions] = useState<ActionSummary[] | null>(null);
+  const [actions, setActions] = useState<
+    ActionTaken[] | "loading" | "error" | "unavailable"
+  >("loading");
   // STALE_UPDATE on status, owner or IT Priority (one shared callout), and
   // RESOLUTION_BLOCKED from the status route.
   const [staleNotice, setStaleNotice] = useState(false);
@@ -515,24 +515,54 @@ export function StaffTicketDetailScreen() {
     setDraft(null);
   }, [parsedId]);
 
+  // Bumped by every new read and on ticket change, so a late response is dropped.
+  const historyGen = useRef(0);
+  const actionsGen = useRef(0);
+
+  function invalidateReads() {
+    historyGen.current++;
+    actionsGen.current++;
+  }
+
   function loadHistory(ticketId: number) {
+    const gen = ++historyGen.current;
     fetchStatusHistory(ticketId)
-      .then(setHistory)
-      .catch(() => setHistory("error"));
+      .then((rows) => {
+        if (gen === historyGen.current) setHistory(rows);
+      })
+      .catch(() => {
+        if (gen === historyGen.current) setHistory("error");
+      });
   }
 
   function loadActions(ticketId: number) {
-    fetchActionSummaries(ticketId)
-      .then(setActions)
-      .catch(() => setActions(null));
+    // Keeps the rows on screen while re-reading, so an open form never loses its list.
+    const gen = ++actionsGen.current;
+    fetchActions(ticketId)
+      .then((rows) => {
+        if (gen === actionsGen.current) setActions(rows);
+      })
+      .catch((error: unknown) => {
+        if (gen !== actionsGen.current) return;
+        setActions(error instanceof ActionsNotFoundError ? "unavailable" : "error");
+      });
+  }
+
+  /** Re-reads the Ticket in place (no loading phase), e.g. after it was closed under an open form. */
+  function refreshTicket() {
+    if (!validId) return;
+    fetchTicketDetail(parsedId)
+      .then((ticket) => setState({ phase: "loaded", ticket }))
+      .catch(() => {});
   }
 
   useEffect(() => {
     if (!validId) return;
     setHistory("loading");
-    setActions(null);
+    setActions("loading");
     loadHistory(parsedId);
     loadActions(parsedId);
+    return invalidateReads;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedId, validId, reloadToken]);
 
@@ -643,7 +673,7 @@ export function StaffTicketDetailScreen() {
    * while Resolved is a permitted next step, once the Actions are loaded.
    */
   const checklist = useMemo(() => {
-    if (!currentStatus || !actions) return null;
+    if (!currentStatus || !Array.isArray(actions)) return null;
     if (!STATUS_TRANSITIONS[currentStatus]?.includes("RESOLVED")) return null;
     const openCount = actions.filter(
       (a) => a.status === "PLANNED" || a.status === "IN_PROGRESS",
@@ -1350,49 +1380,29 @@ export function StaffTicketDetailScreen() {
             </section>
           </div>
 
-          {/* ui-spec.md §5.1: Status history card, after Actions Taken
-              (a separate card, Issue #96) and before Public Comments. */}
-          <section
+          {/* ui-spec.md §5.1: Actions Taken, then Status history, then
+              Public Comments and Internal Notes. */}
+          <ActionsTakenCard
+            ticketId={state.ticket.id}
+            ticketNumber={state.ticket.ticketNumber}
+            ticketStatus={state.ticket.status}
+            ticketCreatedAt={state.ticket.createdAt}
+            actions={actions}
+            assignableUsers={assignableUsers}
+            currentUserName={user?.name ?? ""}
+            onReload={() => loadActions(state.ticket.id)}
+            onTicketChanged={refreshTicket}
+          />
+
+
+          <StatusHistoryCard
+            history={history}
             className="zen-staff-detail__card"
-            aria-labelledby="staff-status-history-heading"
-          >
-            <h2 id="staff-status-history-heading">Status history</h2>
-            {history === "loading" && <p>Loading status history…</p>}
-            {history === "error" && (
-              <p>
-                Status history could not be loaded.{" "}
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setHistory("loading");
-                    loadHistory(state.ticket.id);
-                  }}
-                >
-                  Retry
-                </Button>
-              </p>
-            )}
-            {Array.isArray(history) && history.length === 0 && (
-              <p>No status changes yet.</p>
-            )}
-            {Array.isArray(history) && history.length > 0 && (
-              <ol className="zen-staff-detail__history">
-                {history.map((entry) => (
-                  <li key={entry.id}>
-                    {entry.fromStatus && (
-                      <>
-                        <StatusBadge value={entry.fromStatus} />{" "}
-                      </>
-                    )}
-                    <span aria-hidden="true">→</span>
-                    <span className="zen-staff-detail__sr-only"> to </span>{" "}
-                    <StatusBadge value={entry.toStatus} /> ·{" "}
-                    {entry.changedBy.name} · {formatDateTime(entry.changedAt)}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+            onRetry={() => {
+              setHistory("loading");
+              loadHistory(state.ticket.id);
+            }}
+          />
 
           {/* ui-spec.md §8/§10: Public Comments card, then Internal Notes
               card, in that order — "the internal card second." */}

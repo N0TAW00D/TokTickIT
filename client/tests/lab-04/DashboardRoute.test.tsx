@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, configure, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import App from "../../src/App.tsx";
 import {
@@ -13,6 +13,12 @@ import type { Role } from "../../src/auth/api.ts";
 
 // `/dashboard` is one route for every role (ui-spec.md §2); the session's role
 // picks the variant, and `/` lands there (D-12).
+
+// The whole App boots (session probe, then the dashboard read) before the first
+// assertion can pass; a cold first render under CPU contention outlasts 1 s.
+beforeAll(() => {
+  configure({ asyncUtilTimeout: 5000 });
+});
 
 afterEach(() => {
   cleanup();

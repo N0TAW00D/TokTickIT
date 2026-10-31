@@ -67,6 +67,16 @@
   --zen-status-cancelled-bg: #efeded;
   --zen-status-cancelled-text: #6b6b6b;
 
+  /* ---- Action Taken status badge (lab-04/ui-spec.md §1) ---- */
+  --zen-action-planned-bg: #eef1f5;
+  --zen-action-planned-text: #3a4656;
+  --zen-action-progress-bg: #fff4d6;
+  --zen-action-progress-text: #6b4a00;
+  --zen-action-done-bg: #e4f3ea;
+  --zen-action-done-text: #166534;
+  --zen-action-cancelled-bg: #efeded;
+  --zen-action-cancelled-text: #6b6b6b;
+
   /* ---- Internal Note surface (ui-spec.md §2, §8) ----
      Used by MessageThread's variant="internal" — issue #70 only wires up
      variant="public" (Public Comments), but the shared component and its

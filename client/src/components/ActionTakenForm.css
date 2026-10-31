@@ -1,0 +1,120 @@
+.zen-action-form {
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-card);
+  background: var(--zen-surface);
+  box-shadow: var(--zen-shadow-card);
+  padding: var(--zen-space-card-padding-mobile);
+  margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-action-form__title {
+  margin: 0 0 var(--zen-space-field-gap);
+  font-size: var(--zen-font-size-section-heading);
+}
+
+.zen-action-form__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0 var(--zen-space-group-gap);
+}
+
+@media (min-width: 992px) {
+  .zen-action-form__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.zen-action-form__static {
+  box-sizing: border-box;
+  min-height: var(--zen-control-height);
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--zen-readonly-bg);
+  color: var(--zen-readonly-text);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius-control);
+}
+
+.zen-action-form__checkbox label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--zen-control-height-touch);
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-action-form__callout {
+  color: var(--zen-error);
+  background: var(--zen-error-bg);
+  border: 1px solid var(--zen-error);
+  border-radius: var(--zen-radius-control);
+  padding: 12px 16px;
+  margin-bottom: var(--zen-space-field-gap);
+}
+
+.zen-action-form__callout--warning {
+  color: var(--zen-warning);
+  background: var(--zen-warning-bg);
+  border-color: var(--zen-warning);
+}
+
+.zen-action-form__wide {
+  grid-column: 1 / -1;
+}
+
+.zen-action-form__callout p {
+  margin: 0 0 8px;
+}
+
+.zen-action-form__with-latest {
+  display: grid;
+  gap: var(--zen-space-group-gap);
+}
+
+@media (min-width: 992px) {
+  .zen-action-form__with-latest {
+    grid-template-columns: 2fr 1fr;
+    align-items: start;
+  }
+}
+
+.zen-action-form__latest {
+  background: var(--zen-readonly-bg);
+  color: var(--zen-readonly-text);
+  border-radius: var(--zen-radius-control);
+  padding: 12px 16px;
+}
+
+.zen-action-form__latest h4 {
+  margin: 0 0 8px;
+}
+
+.zen-action-form__latest dt {
+  font-weight: var(--zen-font-weight-label);
+  font-size: var(--zen-font-size-helper);
+}
+
+.zen-action-form__latest dd {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.zen-action-form__buttons {
+  display: flex;
+  gap: var(--zen-space-unit);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 767px) {
+  .zen-action-form__buttons {
+    /* DOM order is Save then Cancel, so a plain column puts the primary on top (ui-spec.md §8). */
+    flex-direction: column;
+  }
+
+  .zen-action-form__buttons .zen-btn {
+    width: 100%;
+    min-height: var(--zen-control-height-touch);
+  }
+}
