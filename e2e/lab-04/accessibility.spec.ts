@@ -267,21 +267,23 @@ test.describe("A11Y-05 keyboard-only Actions flow (AC-44)", () => {
     await expect(form("Add action")).toBeVisible();
     await expect(page.locator("#action-form-action-at")).toBeFocused();
 
-    // Status (select, default Planned) -> Assignee -> Description. The date/time input has
-    // one tab stop per segment, so Tab to the Status select instead of counting presses.
+    // Status (select, default Planned) -> Assignee -> Follow-up (ui-spec field pairs). The
+    // date/time input has one tab stop per segment, so Tab to the Status select instead of
+    // counting presses.
     await tabTo(page, page.locator("#action-form-status"));
     await page.keyboard.press("Tab");
     await expect(page.locator("#action-form-assignee")).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(page.locator("#action-form-description")).toBeFocused();
-    await page.keyboard.type("Keyboard created action.");
+    await expect(page.locator("#action-form-follow-up")).toBeFocused();
 
     // Follow-up checkbox: Space reveals the note, which takes focus.
-    await tabTo(page, page.locator("#action-form-follow-up"));
     await page.keyboard.press("Space");
     await expect(page.locator("#action-form-follow-up-note")).toBeFocused();
     await expect(page.locator("#action-form-follow-up")).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.type("Check back next week.");
+
+    await tabTo(page, page.locator("#action-form-description"));
+    await page.keyboard.type("Keyboard created action.");
 
     await tabTo(page, page.locator("#action-form-save"));
     await page.keyboard.press("Enter");
