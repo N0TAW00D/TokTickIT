@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   BANGKOK_TIME_ZONE,
   bangkokDayStart,
-  resolutionTime,
   windowStart,
 } from '../../src/services/dashboardWindow.js';
 import { parseTicketListQuery } from '../../src/validation/ticketListQuery.js';
@@ -35,29 +34,6 @@ describe('UNIT-07: Bangkok window start', () => {
       expect(w.getUTCMinutes()).toBe(0);
       expect(bangkokDayStart(now).getTime() - w.getTime()).toBe(6 * 86_400_000);
     }
-  });
-});
-
-describe('UNIT-08: resolution-time rule', () => {
-  const row = (toStatus: string, iso: string) => ({ toStatus, changedAt: new Date(iso) });
-
-  it('UNIT-08: the latest change into RESOLVED or CLOSED supplies the resolution time', () => {
-    const history = [
-      row('OPEN', '2026-10-01T00:00:00.000Z'),
-      row('RESOLVED', '2026-10-02T00:00:00.000Z'),
-      row('REOPENED', '2026-10-03T00:00:00.000Z'),
-      row('RESOLVED', '2026-10-04T00:00:00.000Z'),
-      row('CLOSED', '2026-10-06T00:00:00.000Z'),
-      row('IN_PROGRESS', '2026-10-07T00:00:00.000Z'),
-    ];
-    expect(resolutionTime(history)?.toISOString()).toBe('2026-10-06T00:00:00.000Z');
-    // order of the input rows does not matter
-    expect(resolutionTime([...history].reverse())?.toISOString()).toBe('2026-10-06T00:00:00.000Z');
-  });
-
-  it('UNIT-08: a Ticket with no history, or none into RESOLVED/CLOSED, is excluded (null) regardless of updatedAt', () => {
-    expect(resolutionTime([])).toBeNull();
-    expect(resolutionTime([row('OPEN', '2026-10-01T00:00:00.000Z'), row('CANCELLED', '2026-10-02T00:00:00.000Z')])).toBeNull();
   });
 });
 

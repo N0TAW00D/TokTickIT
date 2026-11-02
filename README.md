@@ -100,7 +100,7 @@ That's it — `npm test` takes care of the rest automatically every run, includi
 checkout that has never run `npm run db:generate`: it (re)generates the Prisma Client, creates the
 `toktickit_test` database if it doesn't exist yet, applies all migrations, and seeds it, before
 any test runs (see `server/tests/setup/global-setup.ts`). Each test also truncates `Ticket`,
-`Attachment`, and `TicketCounter` beforehand for isolation, while the seeded reference data
+`Attachment`, `TicketCounter`, and `Session` beforehand (which also clears Actions Taken and status history) for isolation, while the seeded reference data
 (Categories, Related Systems, Requesters) is left in place.
 
 If you want to prepare the test database without running the tests (e.g. to inspect it), run:
@@ -265,6 +265,43 @@ assumes `npm run bootstrap` (section 0) — or the equivalent per-package `npm i
 `npx playwright install chromium` steps above — has already been run at least once, and that
 `server/.env.test` and `e2e/.env.e2e` have been copied from their `.example` files.
 
+### 6. Lab 4 test map
+
+`docs/lab-04/tests.md` §1.2 lists the run commands; in short:
+
+```bash
+npm run bootstrap                 # one-time install of server/, client/, e2e/ + Chromium
+cd server && npm run db:test:reset          # test database after a schema change (includes the Lab 4 migration)
+cd server && npm run db:test:lab3-fixture   # restore a Lab 3-shaped database for MIG-01..MIG-05 and MIG-09
+npm run test:server               # unit + API + workflow + authorization + migration + performance-smoke
+npm run test:client               # UI component + UI style
+npm run test:e2e                  # E2E + responsive + accessibility + screenshots
+npm run test:all                  # everything
+```
+
+Lab 4 server suites live in `server/tests/lab-04/`. Two are worth knowing about: `route-inventory.test.ts`
+fails whenever a route is added to (or removed from) the Express app without updating its declared list
+(API-30), and `performance-smoke.api.test.ts` seeds 1,000 Tickets / 3,000 Actions Taken itself, asserts each
+dashboard, the Actions list and the `myActions` queue answer in a median under 500 ms over 20 calls, and
+deletes that data afterwards. A single test file can be run with `cd server && npx vitest run tests/lab-04/<file>`.
+
+### 7. Demo walk-through (seeded accounts)
+
+Start the stack (`cd server && npm run dev`, `cd client && npm run dev`, open http://localhost:5173) after
+`db:migrate` and `db:seed`. All seeded accounts use the password above. Every role lands on **Dashboard**.
+
+- **Requester** — `jennifer.anderson@example.edu` (Jennifer Anderson). The Dashboard shows her open Tickets,
+  those waiting on her and recently resolved ones. Open a Ticket to read all of its Actions Taken (read-only)
+  and its status history; use *Create Ticket* to raise a new one. She cannot add Actions
+  or reach the staff Ticket Queue or User Management.
+- **IT Staff** — `priya.natarajan@example.edu` (Priya Natarajan). The Dashboard shows queue metrics, follow-ups and
+  her assigned work. Open a Ticket from the Ticket Queue, claim it, then add an Action Taken (describe it,
+  set its status and optional follow-up). Move the Ticket to Resolved once it has an owner and a Completed
+  Action; a stale form is refused with a conflict message rather than overwriting a colleague's change.
+- **Administrator** — `olivia.grant@example.edu` (Olivia Grant). Sees the staff Dashboard and Ticket Queue, can add
+  and edit Actions Taken, and manages accounts under *User Management*; the Administrator cannot change a
+  Ticket's status or owner or add Internal Notes.
+
 ## Project structure
 
 ```
@@ -273,6 +310,8 @@ server/              Express + TypeScript + Prisma backend
 e2e/                 Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
 docs/lab-02/         Lab 2 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
 docs/lab-03/         Lab 3 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
+docs/lab-04/         Lab 4 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
 artifacts/lab-02/    Committed Playwright screenshots for the submission PDF
 artifacts/lab-03/    Committed Playwright screenshots (authentication, staff-queue, staff-ticket-detail, user-management)
+artifacts/lab-04/    Playwright screenshots for the Lab 4 screens (dashboards, Actions Taken, workflow)
 ```

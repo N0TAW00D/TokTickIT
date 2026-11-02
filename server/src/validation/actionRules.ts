@@ -193,7 +193,7 @@ function parseInstant(raw: unknown): FieldResult<Date> {
 
 /**
  * `actionAt` bounds (BR-04): not before the Ticket's createdAt; not after
- * `now` unless the status is PLANNED. Applied to an already-parsed instant so
+ * `now` unless the status is PLANNED or CANCELLED. Applied to an already-parsed instant so
  * the merge path can re-check a stored value against a new status.
  */
 export function checkActionAtBounds(
@@ -204,8 +204,8 @@ export function checkActionAtBounds(
   if (actionAt.getTime() < ctx.ticketCreatedAt.getTime()) {
     return fail('actionAt', "actionAt cannot be before the Ticket's creation time.");
   }
-  if (status !== 'PLANNED' && actionAt.getTime() > ctx.now.getTime()) {
-    return fail('actionAt', 'actionAt cannot be in the future unless the Action is Planned.');
+  if (status !== 'PLANNED' && status !== 'CANCELLED' && actionAt.getTime() > ctx.now.getTime()) {
+    return fail('actionAt', 'actionAt cannot be in the future unless the Action is Planned or Cancelled.');
   }
   return { ok: true, value: actionAt };
 }

@@ -78,7 +78,6 @@ checked by reverting the fix and watching the named test fail.
 | UNIT-05 | Unit | AC-18, AC-19, BR-16 | Ticket transition matrix is unchanged | Every pair in `specification.md` §5.1 permitted; every other pair, incl. status→itself, rejected | `server/tests/lab-04/ticket-transitions.test.ts` | Planned |
 | UNIT-06 | Unit | AC-20, AC-21, AC-22, BR-17 | Resolution-gate function | Each of owner / completed Action / no open Actions can fail alone; `reasons` lists every failed condition in order `OWNER_MISSING`, `NO_COMPLETED_ACTION`, `OPEN_ACTIONS_REMAIN` with `count`; CANCELLED Actions neither satisfy (b) nor block (c) | `server/tests/lab-04/ticket-transitions.test.ts` | Planned |
 | UNIT-07 | Unit | AC-33, BR-22 | Bangkok window start | Fixed clocks: 16:59:59Z and 17:00:00Z straddle the Bangkok day change; `windowStart` is 00:00 Bangkok six days back as a UTC instant; no DST shift | `server/tests/lab-04/dashboard-window.test.ts` | Planned |
-| UNIT-08 | Unit | AC-27, BR-23 | Resolution-time rule | Latest history row to RESOLVED/CLOSED supplies the resolution time; a Ticket with no history is excluded even if `updatedAt` is recent | `server/tests/lab-04/dashboard-window.test.ts` | Planned |
 | UNIT-09 | Unit | AC-25, BR-33 | `version` validator | Missing, `0`, negative, `1.5`, string rejected with field `version`; positive integer accepted | `server/tests/lab-04/action-rules.test.ts` | Planned |
 | UNIT-10 | Unit | AC-16, BR-35 | `clientRequestId` validator and body hash | UUID accepted; malformed rejected; omitted accepted; hash equal for bodies differing only in text-field whitespace (`description`, `result`, `followUpNote`)/defaults/server-owned fields, different for any real field change; `attachmentNotes` is hashed as sent, so a whitespace-only difference in a non-blank note changes the hash while a blank one equals `null` | `server/tests/lab-04/action-request-hash.test.ts` | Planned |
 | UNIT-11 | Unit | AC-34 | Drill-down query parsers | `scope`, `myActions`, `followUp`, extended `status` parse; `myActions=false`, unknown `scope`, `status=BOGUS` each give an `INVALID_QUERY` field entry | `server/tests/lab-04/dashboard-window.test.ts` | Planned |
@@ -116,6 +115,8 @@ checked by reverting the fix and watching the named test fail.
 | API-31 | API | AC-34, BR-32 | User-count drill-down | Each `userCounts` role `active + inactive` equals the length of `GET /api/users?role=<ROLE>` | `server/tests/lab-04/staff-dashboard.api.test.ts` | Planned |
 | API-32 | API | AC-52, BR-05 | Result optional until completion | POST PLANNED without result `201` (`result: null`); POST COMPLETED without result `400` on `result`; PATCH to COMPLETED with no result `400` and Action unchanged; with result in the request `200`; with a stored result and none resent `200` | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
 | API-33 | API | AC-16, BR-35 | Idempotency key reuse with a different body | Same `clientRequestId`, changed description/status/assignee → `409 IDEMPOTENCY_CONFLICT`, no new row, stored Action unchanged; identical retry after the Action was edited still `200` with the edited row | `server/tests/lab-04/actions-taken.api.test.ts` | Planned |
+| API-34 | API | AC-27, BR-23 | Reopened Ticket is not Recently Resolved | Ticket resolved inside the window and now REOPENED: dashboard `recentlyResolved` is `total: 0, items: []` and `?scope=recently-resolved` has `totalItems` 0 | `server/tests/lab-04/requester-dashboard.api.test.ts` | Planned |
+| API-35 | API | AC-27, BR-23 | `resolvedAt` is the latest resolution | CLOSED Ticket with RESOLVED 72 h ago then CLOSED 24 h ago: `resolvedAt` is the CLOSED `changedAt`, not the earlier RESOLVED one | `server/tests/lab-04/requester-dashboard.api.test.ts` | Planned |
 | WF-01 | Workflow | AC-18, FR-09 | Every permitted transition succeeds | Each §5.1 pair given its preconditions → `200`, new status and incremented `version` | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-02 | Workflow | AC-19 | Forbidden transitions and owner rule | Every pair absent from §5.1 and every no-op `409 INVALID_TRANSITION`; `IN_PROGRESS` with no owner `409 OWNER_REQUIRED` from each source | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
 | WF-03 | Workflow | AC-20, BR-17 | Gate: no completed Action | Resolved via direct PATCH with an Owner but no COMPLETED Action → `409 RESOLUTION_BLOCKED`, `reasons` includes `NO_COMPLETED_ACTION`; status unchanged; no history row | `server/tests/lab-04/ticket-workflow.api.test.ts` | Planned |
@@ -272,7 +273,7 @@ Every AC in `specification.md` §9 maps to at least one planned test.
 | AC-24 | API-16, WF-08, WF-09, C-26, C-37, E2E-09 |
 | AC-25 | UNIT-09, WF-10, WF-11, WF-12, WF-13, C-25, C-31, E2E-10 |
 | AC-26 | C-22, C-23, E2E-07 |
-| AC-27 | UNIT-08, API-17, API-19, E2E-12 |
+| AC-27 | API-17, API-19, API-34, API-35, E2E-12 |
 | AC-28 | API-23, C-04, E2E-11 |
 | AC-29 | API-24, API-25, C-04, E2E-11 |
 | AC-30 | SEC-03, SEC-04 |

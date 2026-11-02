@@ -622,7 +622,7 @@ describe("C-12 Validation placement", () => {
     typeInto(within(f).getByLabelText(/^Status/), "IN_PROGRESS");
     fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
     const date = within(f).getByLabelText(/^Action date\/time/);
-    expect(errorUnder(date)).toBe("A future time is allowed only for a planned action.");
+    expect(errorUnder(date)).toBe("A future time is allowed only for a planned or cancelled action.");
     expect(date.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(date);
     expect(writes(fetchMock, "POST")).toHaveLength(0);
@@ -631,6 +631,22 @@ describe("C-12 Validation placement", () => {
     fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
     await waitFor(() => expect(writes(fetchMock, "POST")).toHaveLength(1));
     expect(sentBody(writes(fetchMock, "POST")[0]).actionAt).toBe("2099-01-01T03:00:00.000Z");
+  });
+
+  it("lets a future-dated planned action be cancelled without changing its time", async () => {
+    const fetchMock = mockFetch({
+      actions: () => res(200, [action(1, { status: "PLANNED", version: 2, actionAt: "2099-01-01T03:00:00.000Z" })]),
+      patch: (id) => res(200, action(id, { status: "CANCELLED", version: 3, actionAt: "2099-01-01T03:00:00.000Z" })),
+    });
+    const card = await openEditForm();
+    const f = editForm(card);
+    typeInto(within(f).getByLabelText(/^Status/), "CANCELLED");
+    fireEvent.click(within(f).getByRole("button", { name: "Save action" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(errorUnder(within(f).getByLabelText(/^Action date\/time/))).toBeFalsy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel action" }));
+    await waitFor(() => expect(writes(fetchMock, "PATCH")).toHaveLength(1));
+    expect(sentBody(writes(fetchMock, "PATCH")[0])).toEqual({ version: 2, status: "CANCELLED" });
   });
 
   it("rejects a time before the ticket was created", async () => {
