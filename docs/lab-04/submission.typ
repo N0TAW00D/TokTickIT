@@ -120,21 +120,32 @@ a7c9f92 2026-10-12  #101 docs/92-lab-04-spec
 ```
 
 *Project board (Kanban).* GitHub Project: #link("https://github.com/users/N0TAW00D/projects/3")[TokTickIT Individual Sprints]
-(columns Backlog → Specified → Started → PR Review → (Fixing) → Done). Final state: all 30 items are in Done, none in
-any other column. The nine Lab 4 items and their Issues (all closed):
+(columns Backlog → Specified → Started → PR Review → (Fixing) → Done). Final state, read from the board itself with
+`gh project item-list 3 --owner N0TAW00D --limit 100 --format json` on *2026-11-02 17:36 UTC* (after the release #pr(115)):
+the board holds *30 items, every one in Done* (Backlog 0, Specified 0, Started 0, PR Review 0, Fixing 0, Done 30), and every
+one of the 30 Issues is closed. The Lab 4 items are \#92–\#100 (\#92 closed when #pr(101) merged; \#93–\#100 closed by #pr(115)).
+Complete table view of the board (Board = the item's column; Issue = the GitHub Issue state):
 
-#tbl((auto, 1fr, auto, auto), aligns: (center + horizon, left, center + horizon, center + horizon),
-  [*Issue*], [*Title*], [*Board*], [*Issue state*],
-  [\#92], [Lab 4 specification and test plan], [Done], [Closed],
-  [\#93], [Actions Taken data model, migration and Lab 4 seed data], [Done], [Closed by #pr(115)],
-  [\#94], [Actions Taken API: create, update, authorization, stale updates], [Done], [Closed by #pr(115)],
-  [\#95], [Ticket workflow: transition matrix, resolution gate, conflicts], [Done], [Closed by #pr(115)],
-  [\#96], [Actions Taken UI on Ticket Detail], [Done], [Closed by #pr(115)],
-  [\#97], [Role dashboards API], [Done], [Closed by #pr(115)],
-  [\#98], [Role dashboards UI and navigation], [Done], [Closed by #pr(115)],
-  [\#99], [Final regression, accessibility and hardening], [Done], [Closed by #pr(115)],
-  [\#100], [E2E, responsive inspection, release integration], [Done], [Closed by #pr(115)],
+#set text(8pt)
+#tbl((auto, 1fr, auto, auto, auto, 1fr, auto, auto), aligns: (center + horizon, left, center + horizon, center + horizon, center + horizon, left, center + horizon, center + horizon),
+  [*\#*], [*Issue*], [*Board*], [*Issue state*], [*\#*], [*Issue*], [*Board*], [*Issue state*],
+  [\#1], [Set up the TokTickIT project foundation], [Done], [Closed], [\#69], [Role-based authorization & role-aware application shell], [Done], [Closed],
+  [\#2], [Implement the API health check], [Done], [Closed], [\#70], [Requester regression on authenticated identity, Public Comments & Problem Appears Resolved], [Done], [Closed],
+  [\#3], [Create and seed IT request categories], [Done], [Closed], [\#71], [IT Staff Ticket Queue — queue API & responsive UI], [Done], [Closed],
+  [\#4], [Display the IT request category list], [Done], [Closed], [\#72], [IT Staff Ticket Detail — ownership, IT Priority, status workflow & Internal Notes], [Done], [Closed],
+  [\#13], [Lab 2 sprint specification and test plan], [Done], [Closed], [\#73], [Administrator User Management — minimalist user administration], [Done], [Closed],
+  [\#14], [Database schema, seed data & automated-test database], [Done], [Closed], [\#74], [E2E, responsive & visual inspection, and release integration], [Done], [Closed],
+  [\#15], [Development Requester context, app shell & Zen Green foundation], [Done], [Closed], [\#92], [Lab 4 sprint specification and test plan], [Done], [Closed],
+  [\#16], [Create Ticket — reference data, creation API & form UI], [Done], [Closed], [\#93], [Actions Taken data model, migration & Lab 4 seed data], [Done], [Closed],
+  [\#17], [Attachment lifecycle — upload, download & soft removal], [Done], [Closed], [\#94], [Actions Taken API — create, update, authorization & stale-update handling], [Done], [Closed],
+  [\#18], [My Tickets — Requester-scoped list API & responsive UI], [Done], [Closed], [\#95], [Ticket workflow — final transition matrix, resolution gate & conflict handling], [Done], [Closed],
+  [\#19], [Requester Ticket Detail — owned-ticket API & read-only view], [Done], [Closed], [\#96], [Actions Taken UI on Ticket Detail — list, create & view/edit modes], [Done], [Closed],
+  [\#20], [Responsive & visual inspection, E2E flow & release integration], [Done], [Closed], [\#97], [Role dashboards API — Requester & IT Staff metrics with drill-down], [Done], [Closed],
+  [\#66], [Lab 3 sprint specification and test plan], [Done], [Closed], [\#98], [Role dashboards UI — metric cards, recent Tickets & dashboard navigation], [Done], [Closed],
+  [\#67], [User model, Lab 2 migration & Lab 3 seed data], [Done], [Closed], [\#99], [Final regression, accessibility & product hardening], [Done], [Closed],
+  [\#68], [Authentication foundation — hashing, login/logout/current-user & mandatory password change], [Done], [Closed], [\#100], [E2E, responsive & visual inspection, and release integration], [Done], [Closed],
 )
+#set text(10pt)
 
 *Reviewer record* (#doc("docs/lab-04/reviewer.md") §1–§4). Author `N0TAW00D` (Natthawat Primsirikunawut); reviewer
 `Palapluem` (Wisit Suwannao), who reviewed and merged every Lab 4 pull request; `THN4` was not a Lab 4 reviewer. "Rounds" counts
