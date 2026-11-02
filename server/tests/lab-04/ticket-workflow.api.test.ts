@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../../src/app.js';
 import { prisma } from '../../src/lib/prisma.js';
@@ -16,7 +16,12 @@ const testServer = useTestServer(app);
 
 type User = Awaited<ReturnType<typeof createUser>>;
 
-let userIds: number[] = [];
+// The four fixture users are created once per file: no test changes them, and hashing four
+// passwords for each of the 400 tests dominated the run time (bcrypt cost 12). Sessions are
+// truncated before every test (setup/reset-db.ts), so the logins stay per test, in parallel.
+// `extraUserIds` holds users a single test adds on top.
+let fixtureUserIds: number[] = [];
+let extraUserIds: number[] = [];
 let requester: User;
 let requester2: User;
 let staff: User;
@@ -28,26 +33,38 @@ let requester2Cookie: string;
 
 async function mk(role: 'REQUESTER' | 'IT_STAFF' | 'ADMINISTRATOR') {
   const u = await createUser(role);
-  userIds.push(u.id);
+  extraUserIds.push(u.id);
   return u;
 }
 
+beforeAll(async () => {
+  [requester, requester2, staff, admin] = await Promise.all([
+    createUser('REQUESTER'),
+    createUser('REQUESTER'),
+    createUser('IT_STAFF'),
+    createUser('ADMINISTRATOR'),
+  ]);
+  fixtureUserIds = [requester.id, requester2.id, staff.id, admin.id];
+});
+
 beforeEach(async () => {
-  requester = await mk('REQUESTER');
-  requester2 = await mk('REQUESTER');
-  staff = await mk('IT_STAFF');
-  admin = await mk('ADMINISTRATOR');
-  staffCookie = await loginCookie(testServer.server, staff.email);
-  adminCookie = await loginCookie(testServer.server, admin.email);
-  requesterCookie = await loginCookie(testServer.server, requester.email);
-  requester2Cookie = await loginCookie(testServer.server, requester2.email);
+  [staffCookie, adminCookie, requesterCookie, requester2Cookie] = await Promise.all([
+    loginCookie(testServer.server, staff.email),
+    loginCookie(testServer.server, admin.email),
+    loginCookie(testServer.server, requester.email),
+    loginCookie(testServer.server, requester2.email),
+  ]);
 });
 
 afterEach(async () => {
   setTransactionHook(null);
   await prisma.ticket.deleteMany({});
-  await deleteUsers(userIds);
-  userIds = [];
+  await deleteUsers(extraUserIds);
+  extraUserIds = [];
+});
+
+afterAll(async () => {
+  await deleteUsers(fixtureUserIds);
 });
 
 function patchStatus(ticketId: number | string, cookie: string | null, body: unknown) {

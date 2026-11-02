@@ -112,9 +112,9 @@
 
 .zen-dashboard__count-link {
   display: flex;
-  /* A long status badge ("Waiting for Requester") in a 4-up tablet column
-     wraps the count under it instead of overflowing the link. */
-  flex-wrap: wrap;
+  /* Badge and count always share one row; a long badge ("Waiting for Requester")
+     wraps its own text inside the badge instead of pushing the count down. */
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--zen-space-field-gap);
@@ -130,6 +130,7 @@
 
 .zen-dashboard__count-link .zen-badge {
   /* At 320 px a two-up column is narrower than "Waiting for Requester" on one line. */
+  min-width: 0;
   max-width: 100%;
   white-space: normal;
 }
@@ -139,6 +140,7 @@
 }
 
 .zen-dashboard__count-value {
+  flex: none;
   font-size: 1.25rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;

@@ -94,6 +94,10 @@ export interface Lab4FixtureTicket {
 
 export interface Lab4FixtureOptions {
   summary?: string;
+  /** Free-text description of the Ticket (default: the generic fixture text). */
+  description?: string;
+  /** Display name of the fixture Requester, for screenshots that must not read "E2E ... Fixture". */
+  requesterName?: string;
   status?: string;
   ownerEmail?: string | null;
   actions?: FixtureActionSpec[];
@@ -139,6 +143,13 @@ export async function createLab4FixtureTicket(
         await emailToId(options.ownerEmail === undefined ? IT_STAFF_EMAIL : options.ownerEmail),
       ],
     );
+
+    if (options.description) {
+      await client.query('UPDATE "Ticket" SET description = $2 WHERE id = $1', [base.id, options.description]);
+    }
+    if (options.requesterName) {
+      await client.query('UPDATE "User" SET name = $2 WHERE id = $1', [base.requester.id, options.requesterName]);
+    }
 
     const actionIds: number[] = [];
     for (const [index, a] of (options.actions ?? []).entries()) {
@@ -191,7 +202,7 @@ export async function cleanupLab4Fixtures(): Promise<void> {
          OR "requesterId" IN (SELECT id FROM "User" WHERE email LIKE 'e2e-plain-login-l4-%@toktickit.local' OR email LIKE 'l4-regression-%@example.test')`,
     );
     await client.query(
-      `DELETE FROM "User" WHERE email LIKE 'e2e-plain-login-l4-%@toktickit.local' OR email LIKE 'l4-regression-%@example.test'`,
+      `DELETE FROM "User" WHERE email LIKE 'e2e-plain-login-l4-%@toktickit.local' OR email LIKE 'l4-regression-%@example.test' OR email LIKE 'l4-flow-%@example.test'`,
     );
   });
 }
@@ -283,4 +294,46 @@ export async function assertNoSeriousViolations(page: Page, testInfo: TestInfo):
     })
     .join("\n\n");
   expect(failing.length, `axe-core found ${failing.length} serious/critical violation(s):\n\n${detail}`).toBe(0);
+}
+
+/** Independent read-only SQL for expected values; never the service code under test. */
+export async function dbRows<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  return withClient(async (client) => (await client.query<T>(sql, params)).rows);
+}
+
+/** One number from independent SQL. */
+export async function dbCount(sql: string, params: unknown[] = []): Promise<number> {
+  const rows = await dbRows<{ n: string | number }>(sql, params);
+  return Number(rows[0].n);
+}
+
+/**
+ * An active IT Staff user (password = the seeded one, copied from Priya) whose email
+ * matches the cleanup pattern, so it never outlives the spec.
+ */
+export async function createFlowStaffUser(localPart: string, name: string): Promise<FixtureUser> {
+  return withClient(async (client) => {
+    const email = `l4-flow-${localPart}@example.test`;
+    await client.query('DELETE FROM "User" WHERE email = $1', [email]);
+    const hash = await client.query<{ passwordHash: string }>(
+      'SELECT "passwordHash" FROM "User" WHERE lower(email) = lower($1)',
+      [IT_STAFF_EMAIL],
+    );
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO "User" (name, email, "passwordHash", role, "isActive", "mustChangePassword", "updatedAt")
+       VALUES ($1, $2, $3, 'IT_STAFF'::"Role", true, false, NOW()) RETURNING id`,
+      [name, email, hash.rows[0].passwordHash],
+    );
+    return { id: inserted.rows[0].id, email, name };
+  });
+}
+
+/** Flips a user's active flag directly (a deactivation that happens while someone else has a form open). */
+export async function setUserActive(userId: number, isActive: boolean): Promise<void> {
+  await withClient((client) => client.query('UPDATE "User" SET "isActive" = $2, "updatedAt" = NOW() WHERE id = $1', [userId, isActive]));
+}
+
+/** Current Actions of a Ticket as stored (count, for exactly-once assertions). */
+export async function countActionsOf(ticketId: number): Promise<number> {
+  return dbCount('SELECT count(*) AS n FROM "ActionTaken" WHERE "ticketId" = $1', [ticketId]);
 }
