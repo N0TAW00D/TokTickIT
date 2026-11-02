@@ -4,21 +4,21 @@ Part 1 deliverable (Lab 4 handout §14, Part 1). Every Lab 4 change reaches `lab
 peer-reviewed pull request, and `lab4-staging` reaches `main` through one release pull request.
 There are no direct commits to `main` or `lab4-staging`.
 
-Complete through #113, the last pull request into `lab4-staging`. The release pull request
-(`lab4-staging` → `main`) is added to §2 when it is opened. This record was compiled from the GitHub
+Complete through the release pull request #115 (`lab4-staging` → `main`), approved and merged into
+`main`. #114 was the last pull request into `lab4-staging`. This record was compiled from the GitHub
 review, comment and merge data of each pull request (`gh pr view`, `gh api repos/N0TAW00D/TokTickIT/pulls/N/…`).
 
 ## 1. Reviewer identity
 
 | Role | GitHub | Notes |
 |---|---|---|
-| Author | `N0TAW00D` | Authored every Lab 4 pull request (#101–#113). Real name: Natthawat Primsirikunawut. |
+| Author | `N0TAW00D` | Authored every Lab 4 pull request (#101–#115). Real name: Natthawat Primsirikunawut. |
 | Reviewer | `Palapluem` | Reviewed and merged every Lab 4 pull request. Real name: Wisit Suwannao. |
 | Third collaborator | `THN4` | Real name: Thanatip Nitinantakul. Not a reviewer on Lab 4, matching Labs 2 and 3. |
 
 ## 2. Pull requests and outcomes
 
-All pull requests target `lab4-staging`. "Rounds" counts review cycles: each `CHANGES_REQUESTED`
+All pull requests target `lab4-staging` except the release pull request #115, which targets `main`. "Rounds" counts review cycles: each `CHANGES_REQUESTED`
 review (or a `COMMENTED` review that raised a finding to fix) plus the final `APPROVED` review. An
 approval on the first pass is 1. Two `COMMENTED` reviews on #109 carried only inline comments and
 are counted with the `CHANGES_REQUESTED` review submitted with them.
@@ -38,6 +38,8 @@ are counted with the `CHANGES_REQUESTED` review submitted with them.
 | [#111](https://github.com/N0TAW00D/TokTickIT/pull/111) | #99 | `feat/99-hardening` → `lab4-staging` | Palapluem | No blocking findings at `6d879aa`; noted the full e2e run was not repeated after the A11Y-05 test change | — | Approved 2026-11-02, merged `f4ec16d`. 1 round |
 | [#112](https://github.com/N0TAW00D/TokTickIT/pull/112) | #100 | `feat/100-integration` → `lab4-staging` | Palapluem | Commented, then changes requested: the full server suite timed out in both reported runs (1172/1175, 1174/1175), including a 10 s `beforeEach` hook in WF-11; asked for one clean run or a fix to the slow setup | Cause found: `ticket-workflow.api.test.ts` hashed four bcrypt users in `beforeEach` for each of its 401 tests (627 s alone). `d8aed9d` creates the four users once in `beforeAll`; no timeout was changed. Full server suite 1175/1175 in 512 s; results posted | Approved 2026-11-02 at `d8aed9d`, merged `55dcf3c`. 3 rounds |
 | [#113](https://github.com/N0TAW00D/TokTickIT/pull/113) | #100 | `docs/100-final-results` → `lab4-staging` | Palapluem | None: results traceable to the runs at `55dcf3c` | — | Approved 2026-11-02, merged `4ccb5a2`. 1 round |
+| [#114](https://github.com/N0TAW00D/TokTickIT/pull/114) | #100 | `docs/100-submission` → `lab4-staging` | Palapluem | None blocking: the log and the AI-use record distinguish the #103 review/merge exception, document the #112 re-run and #113 evidence, and disclose the limits of the available session logs | — | Approved 2026-11-02, merged `7027e74`. 1 round |
+| [#115](https://github.com/N0TAW00D/TokTickIT/pull/115) | #93–#100 | `lab4-staging` → `main` (release) | Palapluem | None: reviewed against #101–#114; 163 commits ahead of `main` with no `main`-only commits; test results recorded from the release code at `55dcf3c`, with only the documentation-only #113 and #114 since | — | Approved 2026-11-02, merged `d8f2de5`. 1 round |
 
 ## 3. Representative findings and resolutions
 
