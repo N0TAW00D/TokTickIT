@@ -167,11 +167,9 @@ function idsOf(items: unknown): number[] {
 describe('GET /api/staff/tickets', () => {
   // -------------------------------------------------------------------
   // Auth — api-spec.md §4.1: "IT Staff only. Requester and Administrator
-  // -> 403 FORBIDDEN before any lookup (§1.4)." Unlike some other Lab 3
-  // endpoints (e.g. IT Priority, api-spec.md §5's owner PATCH), this route
-  // mounts requireRole('IT_STAFF') alone (src/routes/staff.ts) — an
-  // Administrator gets the same before-any-lookup 403 a Requester does,
-  // never a 200.
+  // -> 403 FORBIDDEN before any lookup (§1.4)." Lab 4 D-13 (docs/lab-04/
+  // api-spec.md §6.2, tests.md §4.2) widens this to Administrator (read), so
+  // only the Requester keeps the before-any-lookup 403.
   // -------------------------------------------------------------------
   describe('auth', () => {
     it('401 UNAUTHENTICATED with no session cookie', async () => {
@@ -197,15 +195,14 @@ describe('GET /api/staff/tickets', () => {
       expect(res.body).not.toHaveProperty('items');
     });
 
-    it('403 FORBIDDEN for an Administrator too — this queue is IT-Staff-exclusive, not "IT Staff or Administrator"', async () => {
+    it('200 for an Administrator (Lab 4 D-13: read access to the staff queue)', async () => {
       await seedTicket();
       const cookie = await loginAndGetCookie(adminEmail);
 
       const res = await listStaffTickets(cookie);
 
-      expect(res.status).toBe(403);
-      expect(res.body.error).toBe('FORBIDDEN');
-      expect(res.body).not.toHaveProperty('items');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.items)).toBe(true);
     });
 
     it('200 for IT Staff with no query params', async () => {

@@ -530,7 +530,7 @@ test.describe("Part 6 — Create Ticket (create mode)", () => {
  */
 async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
   await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(page).toHaveURL(/\/tickets$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 }
 
 /**
@@ -874,6 +874,7 @@ test.describe("Part 7 — My Tickets", () => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
 
+    await page.goto("/tickets");
     const rows = page.locator(".zen-my-tickets__table tbody tr");
     await expect(rows.first()).toBeVisible();
     await expect(
@@ -885,6 +886,7 @@ test.describe("Part 7 — My Tickets", () => {
     });
 
     await switchRequesterTo(page, requesterB);
+    await page.goto("/tickets");
     await expect(rows.first()).toBeVisible();
     for (const ticketNumber of requesterBTicketNumbers) {
       await expect(
@@ -908,6 +910,7 @@ test.describe("Part 7 — My Tickets", () => {
   test("search in use, with a matching result", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();
@@ -930,6 +933,7 @@ test.describe("Part 7 — My Tickets", () => {
   test("filters applied: category, priority, and status", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();
@@ -971,6 +975,7 @@ test.describe("Part 7 — My Tickets", () => {
   test("sorting applied: a non-default sort visibly active", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
 
     const firstNumberCell = page
       .locator(".zen-my-tickets__table tbody tr")
@@ -1017,6 +1022,7 @@ test.describe("Part 7 — My Tickets", () => {
   }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
 
     const summary = page.locator(".zen-pagination__summary");
     await expect(summary).toBeVisible();
@@ -1047,6 +1053,7 @@ test.describe("Part 7 — My Tickets", () => {
   test("empty state: a Requester who owns zero tickets", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterEmpty);
+    await page.goto("/tickets");
 
     await expect(
       page.getByRole("heading", { name: "You haven't created any tickets yet." }),
@@ -1066,6 +1073,7 @@ test.describe("Part 7 — My Tickets", () => {
   }) => {
     await page.setViewportSize(DESKTOP);
     await loginAsFixture(page, requesterA);
+    await page.goto("/tickets");
     await expect(
       page.locator(".zen-my-tickets__table tbody tr").first(),
     ).toBeVisible();

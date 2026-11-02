@@ -53,6 +53,8 @@ interface MockOptions {
 
 function mockFetch({ ticket = baseTicket(), comments = [], postComment, resolve }: MockOptions = {}) {
   const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    // Lab 4 reads these screens now make; empty so their cards stay quiet.
+    if (/\/(status-history|actions-taken)$/.test(input)) return jsonResponse(200, []);
     if (input === COMMENTS_URL && (!init || init.method === undefined)) {
       return jsonResponse(200, comments);
     }
@@ -138,6 +140,8 @@ describe("Public Comments thread (ui-spec.md §8, variant=public)", () => {
 
     const heading = await screen.findByRole("heading", { name: "Comments" });
     expect(heading).toBeInTheDocument();
+    // The heading renders while the thread is still loading; wait for the entries.
+    await screen.findByText("I restarted the laptop and it still fails.");
     expect(screen.queryByText(/private/i)).not.toBeInTheDocument();
 
     expect(screen.getByText("I restarted the laptop and it still fails.")).toBeInTheDocument();
@@ -183,7 +187,7 @@ describe("Public Comments thread (ui-spec.md §8, variant=public)", () => {
     fireEvent.change(textarea, { target: { value: "Still broken after the restart." } });
     fireEvent.click(screen.getByRole("button", { name: /post comment/i }));
 
-    expect(await screen.findByText("Still broken after the restart.")).toBeInTheDocument();
+    expect(await screen.findByText("Still broken after the restart.", { selector: "p" })).toBeInTheDocument();
     expect(screen.queryByText(/no comments yet/i)).not.toBeInTheDocument();
     expect(textarea).toHaveValue("");
 

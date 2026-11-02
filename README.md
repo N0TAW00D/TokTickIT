@@ -53,7 +53,8 @@ npm run db:seed      # loads reference data, Users and example Tickets (idempote
 `db:migrate` and `db:seed` both target the database in `server/.env` (the dev database,
 `localdb` by default). Re-running `db:seed` never creates duplicate rows — it upserts every
 row by its natural key (email for Users, ticketNumber for Tickets — see
-`server/prisma/seed.ts`).
+`server/prisma/seed.ts`). A seeded Ticket that has gained application activity (a status
+change, Action, attachment, comment, note or requester-resolved indication) is left as it is.
 
 #### Seeded accounts (local development only)
 
@@ -99,7 +100,7 @@ That's it — `npm test` takes care of the rest automatically every run, includi
 checkout that has never run `npm run db:generate`: it (re)generates the Prisma Client, creates the
 `toktickit_test` database if it doesn't exist yet, applies all migrations, and seeds it, before
 any test runs (see `server/tests/setup/global-setup.ts`). Each test also truncates `Ticket`,
-`Attachment`, and `TicketCounter` beforehand for isolation, while the seeded reference data
+`Attachment`, `TicketCounter`, and `Session` beforehand (which also clears Actions Taken and status history) for isolation, while the seeded reference data
 (Categories, Related Systems, Requesters) is left in place.
 
 If you want to prepare the test database without running the tests (e.g. to inspect it), run:
@@ -129,6 +130,49 @@ This always drops and recreates a dedicated `toktickit_test_lab2fixture` databas
 `server/.env.test`, so the same safety checks apply), applies only the two Lab 2 migrations, and
 hand-seeds it with representative Lab 2-era rows — never the Lab 3 migration, which is exactly
 what the test then applies and asserts against.
+
+#### Lab 3-shaped fixture database and Lab 4 migration recovery
+
+`server/tests/lab-04/migration.test.ts` applies the Lab 4 migration (`*_lab_04_actions_taken`) to a
+database holding *only* Lab 3-shaped data, so it can prove no Lab 3 row changes. It provisions that
+database itself, and the same step is available on its own:
+
+```bash
+npm run db:test:lab3-fixture
+```
+
+This drops and recreates `toktickit_test_lab3fixture` (derived from `server/.env.test`, same safety
+checks), applies every migration except the Lab 4 one and seeds Lab 3-shaped rows. `npm run
+db:test:reset` provisions `toktickit_test` through the normal `prisma migrate deploy`, so it includes
+the Lab 4 migration.
+
+##### Lab 4 migration recovery
+
+Prisma has no down-migrations, so there are two ways back to the Lab 3 schema:
+
+1. **Restore a dump (preferred).** Take a dump before deploying, and restore it into a fresh database
+   if you need to go back. This discards everything written since the dump.
+
+   ```bash
+   pg_dump -Fc -U postgres -d toktickit -f toktickit-before-lab-04.dump   # before migrate deploy
+   # to recover: create an empty database, then
+   pg_restore --no-owner -U postgres -d toktickit_restored toktickit-before-lab-04.dump
+   ```
+
+   Without host Postgres tools, run the same commands through the container, e.g.
+   `docker exec local-postgres pg_dump -Fc -U postgres -d toktickit > toktickit-before-lab-04.dump`.
+
+2. **Run the recovery script.** `server/prisma/recovery/lab-04-down.sql` drops `TicketStatusChange`,
+   `ActionTaken`, the `Ticket.version` column and the `ActionStatus` enum, then deletes the migration's
+   `_prisma_migrations` row so it can be applied again. It discards all Lab 4 data by design and leaves
+   Lab 3 data untouched.
+
+   ```bash
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/prisma/recovery/lab-04-down.sql
+   # or: docker exec -i local-postgres psql -U postgres -d toktickit -v ON_ERROR_STOP=1 < server/prisma/recovery/lab-04-down.sql
+   ```
+
+Both paths are exercised by tests: the script by MIG-04, dump/restore by MIG-09.
 
 ### 3. Client
 
@@ -221,6 +265,43 @@ assumes `npm run bootstrap` (section 0) — or the equivalent per-package `npm i
 `npx playwright install chromium` steps above — has already been run at least once, and that
 `server/.env.test` and `e2e/.env.e2e` have been copied from their `.example` files.
 
+### 6. Lab 4 test map
+
+`docs/lab-04/tests.md` §1.2 lists the run commands; in short:
+
+```bash
+npm run bootstrap                 # one-time install of server/, client/, e2e/ + Chromium
+cd server && npm run db:test:reset          # test database after a schema change (includes the Lab 4 migration)
+cd server && npm run db:test:lab3-fixture   # restore a Lab 3-shaped database for MIG-01..MIG-05 and MIG-09
+npm run test:server               # unit + API + workflow + authorization + migration + performance-smoke
+npm run test:client               # UI component + UI style
+npm run test:e2e                  # E2E + responsive + accessibility + screenshots
+npm run test:all                  # everything
+```
+
+Lab 4 server suites live in `server/tests/lab-04/`. Two are worth knowing about: `route-inventory.test.ts`
+fails whenever a route is added to (or removed from) the Express app without updating its declared list
+(API-30), and `performance-smoke.api.test.ts` seeds 1,000 Tickets / 3,000 Actions Taken itself, asserts each
+dashboard, the Actions list and the `myActions` queue answer in a median under 500 ms over 20 calls, and
+deletes that data afterwards. A single test file can be run with `cd server && npx vitest run tests/lab-04/<file>`.
+
+### 7. Demo walk-through (seeded accounts)
+
+Start the stack (`cd server && npm run dev`, `cd client && npm run dev`, open http://localhost:5173) after
+`db:migrate` and `db:seed`. All seeded accounts use the password above. Every role lands on **Dashboard**.
+
+- **Requester** — `jennifer.anderson@example.edu` (Jennifer Anderson). The Dashboard shows her open Tickets,
+  those waiting on her and recently resolved ones. Open a Ticket to read all of its Actions Taken (read-only)
+  and its status history; use *Create Ticket* to raise a new one. She cannot add Actions
+  or reach the staff Ticket Queue or User Management.
+- **IT Staff** — `priya.natarajan@example.edu` (Priya Natarajan). The Dashboard shows queue metrics, follow-ups and
+  her assigned work. Open a Ticket from the Ticket Queue, claim it, then add an Action Taken (describe it,
+  set its status and optional follow-up). Move the Ticket to Resolved once it has an owner and a Completed
+  Action; a stale form is refused with a conflict message rather than overwriting a colleague's change.
+- **Administrator** — `olivia.grant@example.edu` (Olivia Grant). Sees the staff Dashboard and Ticket Queue, can add
+  and edit Actions Taken, and manages accounts under *User Management*; the Administrator cannot change a
+  Ticket's status or owner or add Internal Notes.
+
 ## Project structure
 
 ```
@@ -229,6 +310,8 @@ server/              Express + TypeScript + Prisma backend
 e2e/                 Playwright end-to-end + responsive tests (own package.json, own toktickit_e2e database)
 docs/lab-02/         Lab 2 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
 docs/lab-03/         Lab 3 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
+docs/lab-04/         Lab 4 frozen contract: specification.md, api-spec.md, ui-spec.md, tests.md, plus reviewer.md and ai-use.md
 artifacts/lab-02/    Committed Playwright screenshots for the submission PDF
 artifacts/lab-03/    Committed Playwright screenshots (authentication, staff-queue, staff-ticket-detail, user-management)
+artifacts/lab-04/    Playwright screenshots for the Lab 4 screens (dashboards, Actions Taken, workflow)
 ```

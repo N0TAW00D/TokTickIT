@@ -497,7 +497,7 @@ test.describe("E2E-12 forbidden admin access (AC-55)", () => {
   }) => {
     const requester = await createPlainLoginFixtureUser("forbidden-admin-access");
     await loginAs(page, requester.email, LOCAL_DEV_PASSWORD);
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
 
     // Deliberate direct navigation to the Administrator-only route, same
     // `page.goto` convention as E2E-09's own header comment documents (a
@@ -523,8 +523,8 @@ test.describe("E2E-12 forbidden admin access (AC-55)", () => {
     // The forbidden state's own action links back to the caller's OWN
     // landing page (ui-spec.md §4.3) — proof this is the real, functioning
     // guard, not a static error page.
-    const backLink = page.getByRole("link", { name: "Go to My Tickets" });
+    const backLink = page.getByRole("link", { name: "Go to Dashboard" });
     await expect(backLink).toBeVisible();
-    await expect(backLink).toHaveAttribute("href", "/tickets");
+    await expect(backLink).toHaveAttribute("href", "/dashboard");
   });
 });

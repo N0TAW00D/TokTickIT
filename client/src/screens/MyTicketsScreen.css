@@ -92,6 +92,13 @@
      and the search field beside them — aligned to `flex-end` — is stranded
      against the bottom of a half-empty bar. Asking for their combined
      natural width instead leaves the search field the remainder. */
+  /* Gated to >= 1080px (as StaffTicketQueueScreen.css does): the Status
+     filter now lists all eight statuses, so the unwrapped row no longer fits
+     a tablet's controls panel. Below 1080px the selects keep their own
+     max-content width (no clipping) and wrap onto a second line instead. */
+}
+
+@media (min-width: 1080px) {
   .zen-my-tickets__filters {
     min-width: max-content;
   }

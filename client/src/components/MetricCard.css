@@ -1,0 +1,57 @@
+/* Dashboard metric card — lab-04 ui-spec.md §3.2. */
+
+.zen-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--zen-space-unit);
+  box-sizing: border-box;
+  min-height: var(--zen-control-height-touch);
+  min-width: 0;
+  padding: var(--zen-space-field-gap);
+  background: var(--zen-surface);
+  border: 1px solid var(--zen-border);
+  border-left-width: 4px;
+  border-radius: var(--zen-radius-card);
+  box-shadow: var(--zen-shadow-card);
+  color: var(--zen-text);
+  font-family: var(--zen-font-family);
+  text-decoration: none;
+}
+
+/* Hover raises the border colour only — no layout shift. */
+.zen-metric-card:hover {
+  border-color: var(--zen-border-strong);
+}
+
+.zen-metric-card--attention {
+  border-left-color: var(--zen-metric-attention);
+}
+
+.zen-metric-card__label {
+  font-size: var(--zen-font-size-label);
+  font-weight: var(--zen-font-weight-label);
+}
+
+.zen-metric-card__value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: var(--zen-line-height-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-metric-card__sublabel {
+  font-size: var(--zen-font-size-helper);
+  color: var(--zen-text-muted);
+}
+
+.zen-metric-card--attention .zen-metric-card__sublabel {
+  color: var(--zen-warning);
+  font-weight: 600;
+}
+
+.zen-metric-card__affordance {
+  margin-top: auto;
+  font-size: var(--zen-font-size-helper);
+  font-weight: 600;
+  color: var(--zen-primary);
+}

@@ -77,6 +77,8 @@ export interface MessageThreadProps {
   fetchEntries: () => Promise<MessageThreadEntry[]>;
   /** Posts one new entry with the given already-trimmed body; resolves with the created entry. */
   postEntry: (body: string) => Promise<MessageThreadEntry>;
+  /** When true the composer is not rendered and the thread is read-only (Administrator on Staff Ticket Detail, D-13). */
+  readOnly?: boolean;
 }
 
 /**
@@ -93,7 +95,7 @@ export interface MessageThreadProps {
  * `fetchEntries` returns, oldest first), and content always renders as
  * plain text — this file has no `dangerouslySetInnerHTML` (BR-18).
  */
-export function MessageThread({ variant, fetchEntries, postEntry }: MessageThreadProps) {
+export function MessageThread({ variant, fetchEntries, postEntry, readOnly = false }: MessageThreadProps) {
   const config = VARIANT_CONFIG[variant];
   const [state, setState] = useState<ThreadState>({ phase: "loading" });
   const [value, setValue] = useState("");
@@ -189,6 +191,7 @@ export function MessageThread({ variant, fetchEntries, postEntry }: MessageThrea
         </ul>
       )}
 
+      {!readOnly && (
       <form onSubmit={handleSubmit} noValidate className="zen-message-thread__composer">
         <FormField
           id={`message-thread-${variant}-body`}
@@ -216,6 +219,7 @@ export function MessageThread({ variant, fetchEntries, postEntry }: MessageThrea
           </Button>
         </div>
       </form>
+      )}
     </section>
   );
 }

@@ -3,5 +3,5 @@ import app from './app.ts';
 const port = 3000;
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`TokTickIT API listening on port ${port}`);
 });

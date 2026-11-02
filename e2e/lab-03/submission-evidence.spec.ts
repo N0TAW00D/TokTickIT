@@ -140,7 +140,8 @@ test.describe("Part 5 — Login (EV-01)", () => {
     expect(loginResponse.status()).toBe(200);
 
     // --- valid login landing: name + role visible in the shell -----------
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     const userBadge = page.locator(".zen-user-badge__trigger");
     await expect(userBadge).toContainText(fixtureUser.name);
@@ -229,7 +230,8 @@ test.describe("Part 5 — Login (EV-01)", () => {
     await expect(
       page.getByRole("status").filter({ hasText: "Password changed." }),
     ).toBeVisible();
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/tickets");
     await expect(page.getByRole("heading", { name: "My Tickets" })).toBeVisible();
     await expect(page.locator(".zen-user-badge__trigger")).toContainText(fixtureUser.name);
     await page.screenshot({
@@ -295,8 +297,12 @@ test.describe("Part 6 — IT Staff Ticket Queue (EV-02)", () => {
         `Fixture ticket ${ASSIGNED_FIXTURE_TICKET_NUMBER} was not found via GET /api/staff/tickets.`,
       );
     }
+    // Lab 4 (D-18): guarded writes carry the Ticket's current `version`.
+    const assignedTicket: { version: number } = await (
+      await staffApi.get(`/api/tickets/${assignedTicketId}`)
+    ).json();
     const patchResponse = await staffApi.patch(`/api/tickets/${assignedTicketId}/owner`, {
-      data: { ownerId: me.id },
+      data: { ownerId: me.id, version: assignedTicket.version },
     });
     expect(patchResponse.status()).toBe(200);
     await staffApi.dispose();
@@ -666,6 +672,22 @@ test.describe("Part 7 — IT Staff Ticket Detail (EV-03)", () => {
     });
     await page.unroute("**/api/tickets/*/comments");
     await page.locator("#message-thread-public-body").fill("");
+
+    // Lab 4 (BR-17, D-06, D-27): Resolved needs an Owner (set above) and one
+    // COMPLETED Action. Seeded through the real API, as this staff session.
+    const actionApi = await playwrightRequest.newContext({
+      baseURL: SERVER_URL,
+      storageState: await page.context().storageState(),
+    });
+    const seededAction = await actionApi.post(`/api/tickets/${ticket.id}/actions-taken`, {
+      data: {
+        description: "Replaced the network cable.",
+        result: "Link restored.",
+        status: "COMPLETED",
+      },
+    });
+    expect(seededAction.status()).toBe(201);
+    await actionApi.dispose();
 
     // --- permitted status change (OPEN -> RESOLVED, no confirmation needed) --
     await expect(statusSelect).toHaveValue("OPEN");
@@ -1196,7 +1218,7 @@ test.describe("Part 8 — User Management (EV-04)", () => {
     const requester = await createPlainLoginFixtureUser("ev-non-admin-forbidden");
     await page.setViewportSize(DESKTOP);
     await loginAs(page, requester.email, LOCAL_DEV_PASSWORD);
-    await expect(page).toHaveURL(/\/tickets$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
 
     await page.goto("/admin/users");
     await expect(

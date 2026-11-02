@@ -131,12 +131,21 @@ async function seedTicket(overrides: SeedTicketOverrides = {}) {
   });
 }
 
-function patchOwner(ticketId: number | string, body: unknown, cookie?: string) {
+// Lab 4 D-18: `version` is required on this route. These Lab 3 cases are not
+// about concurrency, so the helper sends the ticket's current version unless
+// the body already carries one.
+async function patchOwner(ticketId: number | string, body: unknown, cookie?: string) {
+  let payload = body;
+  if (typeof body === 'object' && body !== null && !Array.isArray(body) && !('version' in body)) {
+    const current =
+      typeof ticketId === 'number' ? await prisma.ticket.findUnique({ where: { id: ticketId } }) : null;
+    payload = { ...body, version: current?.version ?? 1 };
+  }
   const req = request(testServer.server)
     .patch(`/api/tickets/${ticketId}/owner`)
     .set('Content-Type', 'application/json');
   const withCookie = cookie === undefined ? req : req.set('Cookie', cookie);
-  return withCookie.send(body as object);
+  return withCookie.send(payload as object);
 }
 
 describe('PATCH /api/tickets/:id/owner (api-spec.md §5.1)', () => {

@@ -93,7 +93,7 @@ async function clickSubmitTicket(page: Page): Promise<void> {
  */
 async function loginAsFixture(page: Page, fixtureUser: FixtureUser): Promise<void> {
   await loginAs(page, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(page).toHaveURL(/\/tickets$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
 }
 
 /**
@@ -113,7 +113,7 @@ async function loginApiContext(
   const loginContext = await browser.newContext();
   const loginPage = await loginContext.newPage();
   await loginAs(loginPage, fixtureUser.email, LOCAL_DEV_PASSWORD);
-  await expect(loginPage).toHaveURL(/\/tickets$/);
+  await expect(loginPage).toHaveURL(/\/dashboard$/);
   const storageState = await loginContext.storageState();
   await loginContext.close();
 
@@ -234,6 +234,7 @@ test.describe("E2E-03 cross-requester isolation (AC-03, AC-09, AC-37)", () => {
     // reachable when `GET /api/tickets` for them returns zero rows — drop
     // the server's caller-scoping and this list renders A's ticket instead
     // and the empty-state assertion fails.
+    await page.goto("/tickets");
     await expect(
       page.getByRole("heading", {
         name: "You haven't created any tickets yet.",
@@ -448,8 +449,9 @@ test.describe("E2E-05 empty vs no-results (AC-29, AC-30)", () => {
     await loginAsFixture(page, fixtureUser);
 
     // --- AC-29: empty state -------------------------------------------------
-    // Landed on /tickets already (loginAs asserts the URL). The empty state
+    // Login lands on /dashboard (D-12), so go to /tickets. The empty state
     // is on screen BEFORE anything is trusted about it.
+    await page.goto("/tickets");
     const emptyHeading = page.getByRole("heading", {
       name: "You haven't created any tickets yet.",
     });

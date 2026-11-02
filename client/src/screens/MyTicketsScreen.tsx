@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../components/Button";
 import { SelectField, type SelectOption } from "../components/SelectField";
@@ -9,6 +9,7 @@ import { ErrorState } from "../components/ErrorState";
 import { EmptyState } from "../components/EmptyState";
 import { NoResultsState } from "../components/NoResultsState";
 import { Pagination, type PageSizeValue } from "../components/Pagination";
+import { DrillDownChips, type DrillDownChip } from "../components/DrillDownChips";
 import { PriorityBadge } from "../components/PriorityBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -23,6 +24,14 @@ import {
   type TicketSortField,
 } from "../tickets/api";
 import { formatDateTime } from "../tickets/formatDateTime";
+import {
+  SCOPE_LABEL,
+  TICKET_STATUS_VALUES,
+  parseRequesterQuery,
+  serializeRequesterQuery,
+  type RequesterScope,
+} from "../lists/drillDown";
+import { getStatusLabel } from "../components/StatusBadge";
 import "./MyTicketsScreen.css";
 
 /** Table (`≥ 768px`) / card (`< 768px`) breakpoint (ui-spec.md §9, §11). */
@@ -68,9 +77,12 @@ const PRIORITY_OPTIONS: SelectOption[] = [
   { value: "HIGH", label: "High" },
 ];
 
-// Status is a single-value enum in Lab 2 (specification.md A-05); the "All"
-// placeholder plus this one option is the whole list until Lab 3 adds more.
-const STATUS_OPTIONS: SelectOption[] = [{ value: "NEW", label: "New" }];
+// All eight statuses (lab-04 api-spec.md §6.1): a dashboard card can link
+// here with any of them, so the filter has to be able to show and change it.
+const STATUS_OPTIONS: SelectOption[] = TICKET_STATUS_VALUES.map((value) => ({
+  value,
+  label: getStatusLabel(value),
+}));
 
 interface SortSelectOption extends SelectOption {
   sort: TicketSortField;
@@ -389,13 +401,22 @@ export function MyTicketsScreen() {
 
   const [categories, setCategories] = useState<ReferenceOption[]>([]);
 
+  // Drill-down parameters come from the URL (lab-04 ui-spec.md §2): read
+  // once into the initial state so the first request already carries them,
+  // then kept in step both ways (see the two effects below).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialQuery] = useState(() => parseRequesterQuery(searchParams));
+
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [priority, setPriority] = useState("");
-  const [status, setStatus] = useState("");
-  const [sort, setSort] = useState<TicketSortField>(DEFAULT_SORT);
-  const [order, setOrder] = useState<SortOrder>(DEFAULT_ORDER);
+  const [status, setStatus] = useState<string>(initialQuery.status);
+  const [scope, setScope] = useState<RequesterScope | "">(initialQuery.scope);
+  const [sort, setSort] = useState<TicketSortField>(initialQuery.sort || DEFAULT_SORT);
+  const [order, setOrder] = useState<SortOrder>(
+    initialQuery.order || (initialQuery.sort ? HEADER_DEFAULT_ORDER[initialQuery.sort] : DEFAULT_ORDER),
+  );
   const [page, setPage] = useState(DEFAULT_PAGE);
   const [pageSize, setPageSize] = useState<PageSizeValue>(DEFAULT_PAGE_SIZE);
 
@@ -406,6 +427,7 @@ export function MyTicketsScreen() {
     categoryId === "" &&
     priority === "" &&
     status === "" &&
+    scope === "" &&
     sort === DEFAULT_SORT &&
     order === DEFAULT_ORDER;
 
@@ -420,7 +442,8 @@ export function MyTicketsScreen() {
     debouncedSearch.trim() !== "" ||
     categoryId !== "" ||
     priority !== "" ||
-    status !== "";
+    status !== "" ||
+    scope !== "";
 
   // Reference data for the Category filter (ui-spec.md §9, `GET
   // /api/categories`) — not Requester-scoped, loaded once. A failure here
@@ -471,6 +494,7 @@ export function MyTicketsScreen() {
       categoryId: categoryId ? Number(categoryId) : undefined,
       priority: priority ? (priority as RequestedPriority) : undefined,
       status: status || undefined,
+      scope: scope || undefined,
       sort,
       order,
       page,
@@ -486,11 +510,40 @@ export function MyTicketsScreen() {
             "Could not load your tickets. Please check your connection and try again.",
         });
       });
-  }, [debouncedSearch, categoryId, priority, status, sort, order, page, pageSize]);
+  }, [debouncedSearch, categoryId, priority, status, scope, sort, order, page, pageSize]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // URL -> state: a navigation to a different drill-down on this same screen
+  // (a dashboard link, browser Back) re-applies it. `appliedKeyRef` holds the
+  // last query string this screen wrote or read, so its own URL writes below
+  // are not mistaken for outside navigation.
+  const urlKey = searchParams.toString();
+  const appliedKeyRef = useRef(urlKey);
+  useEffect(() => {
+    if (urlKey === appliedKeyRef.current) return;
+    appliedKeyRef.current = urlKey;
+    const next = parseRequesterQuery(new URLSearchParams(urlKey));
+    setScope(next.scope);
+    setStatus(next.status);
+    setSort(next.sort || DEFAULT_SORT);
+    setOrder(next.order || (next.sort ? HEADER_DEFAULT_ORDER[next.sort] : DEFAULT_ORDER));
+    setPage(DEFAULT_PAGE);
+  }, [urlKey]);
+
+  // state -> URL (replace, so filtering never piles up history entries):
+  // reload and Back restore what the user sees.
+  useEffect(() => {
+    const next = serializeRequesterQuery(
+      { scope, status },
+      { value: sort, order, isDefault: sort === DEFAULT_SORT && order === DEFAULT_ORDER },
+    );
+    if (next === appliedKeyRef.current) return;
+    appliedKeyRef.current = next;
+    setSearchParams(new URLSearchParams(next), { replace: true });
+  }, [scope, status, sort, order, setSearchParams]);
 
   // Every handler below that changes search/filters/sort/page-size also
   // resets to page 1 in the same call — not via a separate "watch for
@@ -548,10 +601,20 @@ export function MyTicketsScreen() {
     setCategoryId("");
     setPriority("");
     setStatus("");
+    setScope("");
     setSort(DEFAULT_SORT);
     setOrder(DEFAULT_ORDER);
     setPage(DEFAULT_PAGE);
   }
+
+  function handleRemoveScope() {
+    setScope("");
+    setPage(DEFAULT_PAGE);
+  }
+
+  const drillDownChips: DrillDownChip[] = scope
+    ? [{ key: "scope", label: SCOPE_LABEL[scope], onRemove: handleRemoveScope }]
+    : [];
 
   const categoryOptions = useMemo<SelectOption[]>(
     () =>
@@ -602,6 +665,8 @@ export function MyTicketsScreen() {
           </Button>
         </div>
       </div>
+
+      <DrillDownChips chips={drillDownChips} disabled={isLoading} />
 
       {!hideControls && (
         <div className="zen-my-tickets__controls">

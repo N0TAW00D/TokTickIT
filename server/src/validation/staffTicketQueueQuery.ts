@@ -41,6 +41,11 @@ export const STAFF_QUEUE_STATUSES = [
 ] as const;
 export type StaffQueueStatus = (typeof STAFF_QUEUE_STATUSES)[number];
 
+// Lab 4 api-spec.md §6.2 drill-down `scope` (BR-21, BR-22). The staff list has
+// no `recently-resolved` scope.
+export const STAFF_SCOPES = ['open', 'recent'] as const;
+export type StaffScope = (typeof STAFF_SCOPES)[number];
+
 const DEFAULT_SORT: StaffSortField = 'itPriority';
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -58,6 +63,9 @@ export interface StaffTicketQueueQuery {
   itPriority?: Priority;
   categoryId?: number;
   owner?: OwnerFilter;
+  scope?: StaffScope;
+  myActions?: true;
+  followUp?: true;
   sort: StaffSortField;
   direction: SortDirection;
   page: number;
@@ -151,6 +159,17 @@ function parseOwner(raw: unknown): ParamResult<OwnerFilter> {
   return { ok: true, value: { kind: 'id', id: num } };
 }
 
+/**
+ * `myActions` / `followUp` (api-spec.md §6.2): only the literal `true` is
+ * accepted; `false`, blank, or anything else is `INVALID_QUERY`.
+ */
+function parseTrueOnly(field: string, raw: unknown): ParamResult<true> {
+  const value = singleTrimmedValue(raw);
+  if (value === undefined) return { ok: true, value: undefined };
+  if (value !== 'true') return { ok: false, error: { field, message: `${field} must be true when present.` } };
+  return { ok: true, value: true };
+}
+
 function parsePage(raw: unknown): ParamResult<number> {
   const value = singleTrimmedValue(raw);
   if (value === undefined) return { ok: true, value: undefined };
@@ -196,6 +215,9 @@ export function parseStaffTicketQueueQuery(query: Record<string, unknown>): Staf
   const itPriorityResult = parseEnumParam('itPriority', query.itPriority, PRIORITIES, 'itPriority must be one of LOW, MEDIUM, HIGH.');
   const categoryIdResult = parseCategoryId(query.categoryId);
   const ownerResult = parseOwner(query.owner);
+  const scopeResult = parseEnumParam('scope', query.scope, STAFF_SCOPES, 'scope must be one of open, recent.');
+  const myActionsResult = parseTrueOnly('myActions', query.myActions);
+  const followUpResult = parseTrueOnly('followUp', query.followUp);
   const sortResult = parseEnumParam(
     'sort',
     query.sort,
@@ -212,6 +234,9 @@ export function parseStaffTicketQueueQuery(query: Record<string, unknown>): Staf
   if (!itPriorityResult.ok) errors.push(itPriorityResult.error);
   if (!categoryIdResult.ok) errors.push(categoryIdResult.error);
   if (!ownerResult.ok) errors.push(ownerResult.error);
+  if (!scopeResult.ok) errors.push(scopeResult.error);
+  if (!myActionsResult.ok) errors.push(myActionsResult.error);
+  if (!followUpResult.ok) errors.push(followUpResult.error);
   if (!sortResult.ok) errors.push(sortResult.error);
   if (!directionResult.ok) errors.push(directionResult.error);
   if (!pageResult.ok) errors.push(pageResult.error);
@@ -227,6 +252,9 @@ export function parseStaffTicketQueueQuery(query: Record<string, unknown>): Staf
   const itPriority = (itPriorityResult as Extract<typeof itPriorityResult, { ok: true }>).value;
   const categoryId = (categoryIdResult as Extract<typeof categoryIdResult, { ok: true }>).value;
   const owner = (ownerResult as Extract<typeof ownerResult, { ok: true }>).value;
+  const scope = (scopeResult as Extract<typeof scopeResult, { ok: true }>).value;
+  const myActions = (myActionsResult as Extract<typeof myActionsResult, { ok: true }>).value;
+  const followUp = (followUpResult as Extract<typeof followUpResult, { ok: true }>).value;
   const sort = (sortResult as Extract<typeof sortResult, { ok: true }>).value ?? DEFAULT_SORT;
   const explicitDirection = (directionResult as Extract<typeof directionResult, { ok: true }>).value;
   const direction = explicitDirection ?? (sort === 'itPriority' ? 'desc' : 'asc');
@@ -235,6 +263,6 @@ export function parseStaffTicketQueueQuery(query: Record<string, unknown>): Staf
 
   return {
     ok: true,
-    value: { search, status, itPriority, categoryId, owner, sort, direction, page, pageSize },
+    value: { search, status, itPriority, categoryId, owner, scope, myActions, followUp, sort, direction, page, pageSize },
   };
 }
