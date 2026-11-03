@@ -331,9 +331,10 @@ carries its commits, and returns through its merge commit; the top commit is the
 the board holds *30 items, every one in Done* (Backlog 0, Specified 0, Started 0, PR Review 0, Fixing 0, Done 30), and every
 one of the 30 Issues is closed. The Lab 4 items are \#92–\#100 (\#92 closed when #pr(101) merged; \#93–\#100 closed by #pr(115)).
 Screenshot of the board (Board layout, captured 2026-11-03 20:55 +0700): the column headers show Backlog 0, Specified 0,
-Started 0, PR Review 0, Fixing 0 and *Done 30*. The Done column scrolls, so the figure shows the column headers and the first cards; all 30 are listed in the table below.
+Started 0, PR Review 0, Fixing 0 and *Done 30*. The Done column scrolls, so the figure is the whole screenshot, with the first cards of Done visible; all 30 are listed in the table below.
 
-#crop("part-1-kanban-board.png", 3022, 1646, [Final GitHub Project board: Backlog 0, Specified 0, Started 0, PR Review 0, Fixing 0, Done 30.], x0: 0, x1: 2200, y0: 0, y1: 800)
+#crop("part-1-kanban-board.png", 3022, 1646, [Final GitHub Project board: Backlog 0, Specified 0, Started 0, PR Review 0, Fixing 0, Done 30.], x0: 0, x1: 3022)
+#crop("part-1-kanban-board.png", 3022, 1646, [Same board, column headers enlarged: PR Review 0, Fixing 0, Done 30 (left columns: Backlog, Specified and Started are 0 in the figure above).], x0: 1090, x1: 2200, y0: 150, y1: 260)
 
 Complete table view of the board (Board = the item's column; Issue = the GitHub Issue state):
 
