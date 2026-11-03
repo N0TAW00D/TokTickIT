@@ -119,6 +119,212 @@ ef80e88 2026-10-13  #103 feat/93-actions-taken-model
 a7c9f92 2026-10-12  #101 docs/92-lab-04-spec
 ```
 
+*Commit graph.* `git log --graph --format='%h %s' 99158e6..main` (subjects cut at 52 characters): every Lab 4 feature or fix branch leaves `lab4-staging`'s line,
+carries its commits, and returns through its merge commit; the top commit is the release merge #pr(115) into `main`.
+
+#block(breakable: true)[#text(size: 6.3pt)[
+```
+* d8f2de5 Merge #115 lab4-staging
+*   7027e74 Merge #114 docs/100-submission
+|\
+| * a4185e2 docs(lab-04): write the review log and t
+|/
+*   4ccb5a2 Merge #113 docs/100-final-results
+|\
+| * 306801a docs(lab-04): record the final test resu
+|/
+*   55dcf3c Merge #112 feat/100-integration
+|\
+| * d8aed9d test(workflow): create the fixture users
+| * 82f593e test(e2e): expect the stale status draft
+| * 9b0d439 test(e2e): capture Lab 4 screenshots fro
+| * bbe0dbb fix(client): keep status count badge and
+| * 1fd81a6 test(e2e): capture Lab 4 screenshots at
+| * 778eac4 test(e2e): cover Actions Taken, resoluti
+| * 5bba67b fix(client): keep Actions table row butt
+|/
+*   f4ec16d Merge #111 feat/99-hardening
+|\
+| * 6d879aa test(e2e): follow the ui-spec field orde
+| * c8f356a fix(test): give the other-routes authori
+| * 7101601 docs(lab-04): state the order of recentl
+| * b9089ad docs(lab-04): drop UNIT-08 now that the
+| * df5cd66 refactor(server): remove unused resoluti
+| * b4ba372 test(lab-04): cover reopened and latest-
+| * 09ba42e fix(client): allow a future time when ca
+| * b8c937a fix(actions): allow cancelling a future-
+| * 0325011 docs(lab-04): let a scheduled Planned ac
+| * f723fab test(e2e): add E2E-17 console/links/plac
+| * b1ddbee test(e2e): add E2E-16 safe failure in th
+| * bdf1016 test(e2e): remove the hardening fixtures
+| * f551683 test(e2e): add Lab 4 accessibility rows
+| * d8b1e45 fix(client): make the link in the resolu
+| * 903abf2 test(e2e): add Lab 4 responsive rows R-0
+| * d67a9df fix(client): keep dashboard status count
+| * ce7716e docs: say the Requester sees every Actio
+| * 1db4c20 docs: add Lab 4 test map and per-role de
+| * d6b5a36 test(api): cover history, workflow, dash
+| * 1a7974b test(api): add dashboard and Actions lis
+| * d7af321 test(api): add route inventory guarding
+|/
+*   78b6ba7 Merge #110 feat/96-actions-taken-ui
+|\
+| * f34578f test(client): name the review-round styl
+| * 2e7e71a docs(lab-04): add the #110 review-round
+| * b9e3dce fix(client): use error tokens for form e
+| * aa18d3e fix(client): follow ui-spec field pairs,
+| * 7b14eec fix(client): put Save action above Cance
+| * a0c11b7 refactor(client): trim branch comment bl
+| * dea6901 refactor(client): share one invalidateRe
+| * 0220177 test(client): stub the Lab 4 reads in th
+| * ba9d0c6 fix(client): announce Status history loa
+| * 5550534 fix(client): ignore late Actions Taken a
+| * d564c30 fix(client): ignore late Actions Taken a
+| * 12cfe1e docs(lab-04): record the Requester detai
+| * 279572d fix(client): wait for the appended entry
+| * f8032e7 fix(client): wait for effect-driven focu
+| * 01e6ba7 fix(client): wait for thread entries aft
+| * c6f40ee test(client): cover Action badge, token
+| * cff0469 test(client): count the Actions Taken an
+| * 9058c24 feat(client): read-only Actions Taken an
+| * b8befa1 fix(client): await deferred focus restor
+| * b37ecfb test(client): cover actions taken edit,
+| * ef4010e test(client): cover actions taken create
+| * ed5619a feat(client): actions taken card with li
+|/
+*   12f921e Merge #109 feat/98-dashboard-ui
+|\
+| * 9ce063c docs(lab-04): add R-06 for the drill-dow
+| * 997dcdb test(e2e): measure drill-down chip remov
+| * 5d7698c test(client): cover the drill-down chip
+| * d7d3b6f fix(client): show a visible Remove label
+| * 922d6a0 docs(lab-04): add the C-33 role filter h
+| * 080e815 test(client): C-33 the chosen role survi
+| * 801d4d3 fix(client): keep the User Management ro
+| * a6a5e60 docs(lab-04): record the final list of D
+| * 7bb80fe test(e2e): open My Tickets after the rem
+| * 5876734 test(e2e): open My Tickets after switchi
+| * ca22ab6 docs(lab-04): add the requester-switch s
+| * 77772d7 fix(client): let My Tickets filters wrap
+| * 5395f6c test(e2e): open My Tickets explicitly af
+| * 87cb7ad docs(lab-04): list the post-login naviga
+| * f789aa4 fix(client): let the header nav wrap so
+| * 20ffdd9 test(e2e): move post-login landing and f
+| * 63745f9 feat(client): hide owner, status and com
+| * c844538 feat(client): read dashboard drill-down
+| * c22ff2d test(client): cover dashboard token disc
+| * 6be6e37 feat(client): add Requester dashboard an
+| * 77c76aa feat(client): add IT Staff dashboard scr
+| * 79eb0cd feat(client): make Dashboard the first n
+|/
+*   bfce69f Merge #108 feat/95-ticket-workflow
+|\
+| * b7ac442 fix(client): keep unsaved workflow input
+| *   144f07c Merge lab4-staging > feat/95-ticket-wo
+| |\
+| * | 993492a test(workflow): cover every role, curr
+| * | d8c89d3 test(client): assert the attempted val
+| * | 5895723 fix(client): keep the attempted status
+| * | ae0b111 test(lab-03): send version and seed a
+| * | 5c97308 test(client): cover ticket workflow ro
+| * | 5b3233a feat(client): version-guarded ticket w
+| * | 29f5a11 feat(workflow): guard owner and IT Pri
+| * | e5fe487 test(lab-03): send version on owner an
+| * | aed1eb9 test(lab-02): expect version in the ti
+| * | f9c7fcd docs(lab-04): keep the Lab 3 404 for a
+| * | 5864439 test(seed): send version on the status
+| * | 9f47297 feat(workflow): guard status changes w
+| * | 6ab804f test(lab-03): send version on status P
+| * | e06b62d feat(workflow): add pure ticket transi
+* | |   4759377 Merge #107 fix/94-review-followups
+|\ \ \
+| |_|/
+|/| |
+| * | d22dccf docs(lab-04): spell out that attachmen
+| * | e2f6b09 docs(lab-04): state that attachmentNot
+| * | e4a7038 test(actions): pin the attachmentNotes
+| * | 531ef8f refactor(actions): drop the offset ran
+| * | ec17ca6 docs(lab-04): record the empty-JSON-bo
+| |/
+* |   732a058 Merge #106 feat/97-dashboard-api
+|\ \
+| |/
+|/|
+| *   ebd0cd5 Merge lab4-staging > feat/97-dashboard
+| |\
+| |/
+|/|
+* |   d0a797c Merge #105 feat/94-actions-taken-api
+|\ \
+| * | 7e733eb test(actions): cover malformed-JSON or
+| * | a70fbb7 fix(actions): reject impossible calend
+| * | d7fc3c9 fix(actions): parse the JSON body afte
+| * | 7afe760 test(actions): pin BR-34 precedence, s
+| * | 6538512 test(actions): cover UUID v4 and the s
+| * | 03c5af4 fix(actions): validate body shape befo
+| * | 623b902 test(actions): cover Actions Taken aut
+| * | 1d78f14 feat(actions): add Actions Taken list,
+| * | 11de4d3 feat(actions): add pure Action Taken v
+|/ /
+| * a0c36c2 feat(dashboard): add GET /api/dashboard/
+| * 8192b4c feat(dashboard): add GET /api/dashboard/
+| * 6f2c144 feat(tickets): apply dashboard drill-dow
+| * a350a21 docs(lab-04): list the widened My Ticket
+| * 9eea7f4 feat(validation): parse dashboard drill-
+| * e8b18f8 feat(dashboard): add Bangkok window and
+|/
+*   d748eb6 Merge #104 fix/93-seed-review
+|\
+| * 4bf6668 docs(lab-04): trace MIG-06b-06e and BR-1
+| * 176fdf9 docs: say re-seeding skips Tickets that
+| * 6d5db3b fix(db): treat requester-resolved and du
+| * ee2731f fix(db): repair status history left by t
+| * 8eb7f64 fix(db): keep attachments, comments and
+| * a48e18d fix(db): hash a valid original create bo
+| * 3d16267 fix(db): keep application activity on re
+| * c6bb81d feat(actions): add canonical create-body
+|/
+*   ef80e88 Merge #103 feat/93-actions-taken-model
+|\
+| * 2a5225e test(lab-04): cover the Lab 4 seed with
+| * 4ac2c07 feat(db): extend seed with Actions Taken
+| * cf59f31 docs: document Lab 4 migration recovery
+| * ed20785 test(lab-04): cover Lab 4 migration with
+| * 06ed4ce test(db): add db:test:lab3-fixture datab
+| * c9559d6 feat(db): add Lab 4 down-migration recov
+| * 9db5b4e feat(db): add Actions Taken, status hist
+* |   89c2a7b Merge #102 docs/92-spec-numeric-order
+|\ \
+| |/
+|/|
+| * f7fab70 docs(lab-04): list business rules and ac
+|/
+* a7c9f92 Merge #101 docs/92-lab-04-spec
+* 065c01c docs(lab-04): order contract tables numeri
+* 9c7ecea docs(lab-04): add an Evidence column to th
+* aa99ac2 docs(lab-04): reject a reused clientReques
+* cf0d122 docs(lab-04): state the lock, read, compar
+* 0f4b3ef docs(lab-04): require Result only to compl
+* b5720be docs(lab-04): list every earlier test the
+* 64a8e43 docs(lab-04): test 415-before-401 and the
+* 34da0da docs(lab-04): put the 415 content-type che
+* aeda4bf docs(lab-04): add dump/restore, forbidden-
+* 117e77e docs(lab-04): dashboard forbidden state, u
+* f31ca21 docs(lab-04): align API check order, actio
+* 5098ad3 docs(lab-04): fix check order, actionAt se
+* fe7ea7b docs(lab-04): list every Lab 2/3 assertion
+* 024d02f docs(lab-04): gate closing on open Actions
+* cb4badd docs(lab-04): serialize status changes and
+* 7f43477 docs(lab-04): cross-reference fixes after
+* b89805d docs(lab-04): list every changed Lab 3 con
+* 8c9a894 docs(lab-04): write the Sprint 4 test plan
+* 1fe9b1f docs(lab-04): write the Sprint 4 UI specif
+* 8594f2a docs(lab-04): write the Sprint 4 API contr
+* 678320c docs(lab-04): write the Sprint 4 specifica
+* 71af372 docs(lab-04): scaffold the Sprint 4 contra
+```
+]]
+
 *Project board (Kanban).* GitHub Project: #link("https://github.com/users/N0TAW00D/projects/3")[TokTickIT Individual Sprints]
 (columns Backlog → Specified → Started → PR Review → (Fixing) → Done). Final state, read from the board itself with
 `gh project item-list 3 --owner N0TAW00D --limit 100 --format json` on *2026-11-02 17:36 UTC* (after the release #pr(115)):
