@@ -207,7 +207,7 @@ checked by reverting the fix and watching the named test fail.
 | R-03 | Responsive | AC-37, AC-43 | Staff Ticket Detail Actions Taken | Table ≥ 768 px, stacked cards < 768 px; no overflow; form usable; View/Edit targets ≥ 44 px on mobile | `e2e/lab-04/responsive.spec.ts` | Pass |
 | R-04 | Responsive | AC-43, AC-39 | Requester Ticket Detail | Read-only Actions and history reflow, no overflow | `e2e/lab-04/responsive.spec.ts` | Pass |
 | R-05 | Responsive | AC-43, V-14 | Dialogs and callouts | Cancel-action and Close dialogs become full-screen sheets on mobile; stale/blocked callouts do not overlap controls | `e2e/lab-04/responsive.spec.ts` | Pass |
-| R-06 | Responsive | AC-43, V-12 | Drill-down chip remove buttons | At 390 px, every chip remove button on the Staff Ticket Queue shows the visible text "Remove" and measures at least 44×44 px; its accessible name still reads "Remove filter: <label>" (client: `client/tests/lab-04/DrillDownChips.test.tsx`) | `e2e/lab-04/drilldown-chips.spec.ts` | Implemented |
+| R-06 | Responsive | AC-43, V-12 | Drill-down chip remove buttons | At 390 px, every chip remove button on the Staff Ticket Queue shows the visible text "Remove" and measures at least 44×44 px; its accessible name still reads "Remove filter: <label>" (client: `client/tests/lab-04/DrillDownChips.test.tsx`) | `e2e/lab-04/drilldown-chips.spec.ts` | Pass |
 | A11Y-01 | Accessibility | AC-44 | axe: Staff dashboard | No serious/critical violations (IT Staff and Administrator variants) | `e2e/lab-04/accessibility.spec.ts` | Pass |
 | A11Y-02 | Accessibility | AC-44 | axe: Requester dashboard | No serious/critical violations | `e2e/lab-04/accessibility.spec.ts` | Pass |
 | A11Y-03 | Accessibility | AC-44 | axe: Staff Ticket Detail | Actions list, create form, validation, stale callout and status history have no serious/critical violations | `e2e/lab-04/accessibility.spec.ts` | Pass |
@@ -340,16 +340,19 @@ is a regression to fix in code, not a test to edit.
 
 ## 5. Final test output
 
-Run on `lab4-staging` at `55dcf3c`, the head the release PR carries to `main` (`main` has no Lab 4
-code until that PR merges, so the run cannot be made there first). Each suite ran once, in this
+Run on `lab4-staging` at `55dcf3c`, whose code the release PR #115 carried to `main` unchanged (`main`
+had no Lab 4 code before that PR, so the run could not be made there first; #113 and #114 only
+changed documents). Each suite ran once, in this
 order, on one machine: server, client, then e2e with one worker. The Final column of §2 comes from
-the per-test JSON of these same runs: a row is `Pass` when every test whose name carries its ID
-passed. The eleven rows that no test name carries an ID for are matched as follows. REG-01..06 use every
-test in the files listed in the row; REG-07 uses the health test in `app.test.ts`; C-34..C-37 use the
-named tests in `ActionsTaken.test.tsx`, `ActionsTakenNavigation.test.tsx` and
-`RequesterActionsView.test.tsx` (C-34 "pairs Action date/time with Status" and "first invalid
-control in DOM order"; C-35 "names the editor and time"; C-36 "drops A's late" and "drops a late";
-C-37 "shows loading as a status").
+the per-test JSON of these same runs: a row is `Pass` when every Lab 4 test (a test under a `lab-04`
+path) whose name carries its ID passed. That covers 157 of the 169 rows. The other twelve rows have no
+Lab 4 test name that carries their ID and are matched as follows. REG-01..06 use every test in the files
+listed in the row; REG-07 uses the health test in `app.test.ts`; API-16 uses the two WF-09 tests in
+`ticket-workflow.api.test.ts` that read the history in `changedAt`, `id` order and return `[]` for a
+Ticket that never changed; C-34..C-37 use the named tests in `ActionsTaken.test.tsx`,
+`ActionsTakenNavigation.test.tsx` and `RequesterActionsView.test.tsx` (C-34 "pairs Action date/time with
+Status" and "first invalid control in DOM order"; C-35 "names the editor and time"; C-36 "drops A's late"
+and "drops a late"; C-37 "shows loading as a status").
 
 | Suite | Command | Result |
 |---|---|---|
